@@ -1,22 +1,36 @@
 <idea-plugin>
     <id>com.mendrix.dfm-support</id>
-    <name>Delphi Form (DFM) Support</name>
-    <version>1.0.5</version>
+    <name>Delphi DFM and Pascal Support</name>
+    <version>1.1.0</version>
     <vendor>MendriX</vendor>
 
     <description><![CDATA[
-    Provides syntax highlighting and code folding support for Delphi Form (DFM) files.
-    
-    Features:
-    - Syntax highlighting for keywords (object, inherited, inline, end, item)
-    - String and number literal highlighting
-    - Comment highlighting (// and {...} and (*...*)）
-    - Property and identifier highlighting
-    - Code folding for object...end blocks
-    - Code folding for collection item blocks
+    Provides syntax highlighting and code folding support for Delphi Form (DFM) and Object Pascal files.
+
+    <b>DFM Support (.dfm):</b>
+    - Syntax highlighting for keywords, properties, object names, class names
+    - String, number, and boolean literal highlighting
+    - Comment highlighting (// and {...} and (*...*))
+    - Code folding for object...end and item...end blocks
+    - Customizable colors via Settings
+
+    <b>Object Pascal Support (.pas, .dpr, .dpk):</b>
+    - Full syntax highlighting for Delphi/Object Pascal
+    - All Pascal keywords and operators highlighted
+    - Compiler directive highlighting ({$...})
+    - Code folding for begin..end, class, record, try..except/finally, case, repeat..until
+    - Code folding for interface/implementation sections
+    - Customizable colors via Settings
     ]]></description>
 
     <change-notes><![CDATA[
+    Version 1.1.0:
+    - Added Object Pascal language support (.pas, .dpr, .dpk)
+    - Full Pascal syntax highlighting with 80+ keywords
+    - Pascal code folding for all block types
+    - Compiler directive highlighting
+    - Pascal Color Settings Page
+
     Version 1.0.5:
     - Added property name highlighting (left side of = assignments)
     - Added boolean highlighting (True/False)
@@ -33,16 +47,12 @@
     Version 1.0.2:
     - Fixed lexer adapter causing "discontinuous token sequence" errors
     - Fixed folding builder creating out-of-range fold regions
-    - Added case-insensitive keyword matching for folding
-    - Improved nested block folding with stack-based approach
 
     Version 1.0.1:
     - Bug fixes
 
     Version 1.0.0:
-    - Initial release
-    - Basic syntax highlighting
-    - Code folding support
+    - Initial release with DFM support
     ]]></change-notes>
 
     <!-- IntelliJ Platform compatibility -->
@@ -52,24 +62,46 @@
     <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <!-- File Type -->
+        <!-- ==================== DFM Support ==================== -->
+
+        <!-- DFM File Type -->
         <fileType name="Delphi Form" implementationClass="com.mendrix.dfm.DfmFileType"
                   fieldName="INSTANCE" language="DFM" extensions="dfm"/>
-        
-        <!-- Language -->
-        <lang.parserDefinition language="DFM" 
+
+        <!-- DFM Parser Definition -->
+        <lang.parserDefinition language="DFM"
                                implementationClass="com.mendrix.dfm.DfmParserDefinition"/>
-        
-        <!-- Syntax Highlighter -->
+
+        <!-- DFM Syntax Highlighter -->
         <lang.syntaxHighlighterFactory language="DFM"
                                        implementationClass="com.mendrix.dfm.DfmSyntaxHighlighterFactory"/>
-        
-        <!-- Code Folding -->
+
+        <!-- DFM Code Folding -->
         <lang.foldingBuilder language="DFM"
                             implementationClass="com.mendrix.dfm.DfmFoldingBuilder"/>
 
-        <!-- Color Settings Page -->
+        <!-- DFM Color Settings Page -->
         <colorSettingsPage implementationClass="com.mendrix.dfm.DfmColorSettingsPage"/>
+
+        <!-- ==================== Pascal Support ==================== -->
+
+        <!-- Pascal File Type -->
+        <fileType name="Object Pascal" implementationClass="com.mendrix.pascal.PascalFileType"
+                  fieldName="INSTANCE" language="ObjectPascal" extensions="pas;dpr;dpk"/>
+
+        <!-- Pascal Parser Definition -->
+        <lang.parserDefinition language="ObjectPascal"
+                               implementationClass="com.mendrix.pascal.PascalParserDefinition"/>
+
+        <!-- Pascal Syntax Highlighter -->
+        <lang.syntaxHighlighterFactory language="ObjectPascal"
+                                       implementationClass="com.mendrix.pascal.PascalSyntaxHighlighterFactory"/>
+
+        <!-- Pascal Code Folding -->
+        <lang.foldingBuilder language="ObjectPascal"
+                            implementationClass="com.mendrix.pascal.PascalFoldingBuilder"/>
+
+        <!-- Pascal Color Settings Page -->
+        <colorSettingsPage implementationClass="com.mendrix.pascal.PascalColorSettingsPage"/>
     </extensions>
 </idea-plugin>
-

@@ -1,0 +1,75 @@
+<idea-plugin>
+    <id>com.mendrix.dfm-support</id>
+    <name>Delphi Form (DFM) Support</name>
+    <version>1.0.5</version>
+    <vendor>MendriX</vendor>
+
+    <description><![CDATA[
+    Provides syntax highlighting and code folding support for Delphi Form (DFM) files.
+    
+    Features:
+    - Syntax highlighting for keywords (object, inherited, inline, end, item)
+    - String and number literal highlighting
+    - Comment highlighting (// and {...} and (*...*)）
+    - Property and identifier highlighting
+    - Code folding for object...end blocks
+    - Code folding for collection item blocks
+    ]]></description>
+
+    <change-notes><![CDATA[
+    Version 1.0.5:
+    - Added property name highlighting (left side of = assignments)
+    - Added boolean highlighting (True/False)
+    - Object references after = now highlighted as object names
+
+    Version 1.0.4:
+    - Added distinct highlighting for object names and class/type names
+    - Added code folding for item...end blocks
+
+    Version 1.0.3:
+    - Added Color Settings Page for customizing syntax highlighting colors
+    - Rewrote lexer for improved stability
+
+    Version 1.0.2:
+    - Fixed lexer adapter causing "discontinuous token sequence" errors
+    - Fixed folding builder creating out-of-range fold regions
+    - Added case-insensitive keyword matching for folding
+    - Improved nested block folding with stack-based approach
+
+    Version 1.0.1:
+    - Bug fixes
+
+    Version 1.0.0:
+    - Initial release
+    - Basic syntax highlighting
+    - Code folding support
+    ]]></change-notes>
+
+    <!-- IntelliJ Platform compatibility -->
+    <idea-version since-build="243.0"/>
+
+    <!-- Plugin dependencies -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- File Type -->
+        <fileType name="Delphi Form" implementationClass="com.mendrix.dfm.DfmFileType"
+                  fieldName="INSTANCE" language="DFM" extensions="dfm"/>
+        
+        <!-- Language -->
+        <lang.parserDefinition language="DFM" 
+                               implementationClass="com.mendrix.dfm.DfmParserDefinition"/>
+        
+        <!-- Syntax Highlighter -->
+        <lang.syntaxHighlighterFactory language="DFM"
+                                       implementationClass="com.mendrix.dfm.DfmSyntaxHighlighterFactory"/>
+        
+        <!-- Code Folding -->
+        <lang.foldingBuilder language="DFM"
+                            implementationClass="com.mendrix.dfm.DfmFoldingBuilder"/>
+
+        <!-- Color Settings Page -->
+        <colorSettingsPage implementationClass="com.mendrix.dfm.DfmColorSettingsPage"/>
+    </extensions>
+</idea-plugin>
+

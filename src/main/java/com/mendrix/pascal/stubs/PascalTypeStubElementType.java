@@ -31,6 +31,7 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
     @Override
     @NotNull
     public PascalTypeStub createStub(@NotNull PascalTypeDefinition psi, StubElement<?> parentStub) {
+        LOG.info("[PascalStub] Creating stub for: " + psi.getName() + " (" + psi.getTypeKind() + ")");
         return new PascalTypeStubImpl(parentStub, psi.getName(), psi.getTypeKind());
     }
 
@@ -59,6 +60,7 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
     public void indexStub(@NotNull PascalTypeStub stub, @NotNull IndexSink sink) {
         String name = stub.getName();
         if (name != null) {
+            LOG.info("[PascalStub] Indexing type: " + name + " (" + stub.getTypeKind() + ")");
             sink.occurrence(PascalTypeIndex.KEY, name.toLowerCase());
         }
     }

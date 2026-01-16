@@ -2,12 +2,10 @@ package com.mendrix.pascal.psi.impl;
 
 import com.intellij.extapi.psi.StubBasedPsiElementBase;
 import com.intellij.lang.ASTNode;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.stubs.IStubElementType;
 import com.intellij.util.IncorrectOperationException;
 import com.mendrix.pascal.PascalTokenTypes;
-import com.mendrix.pascal.psi.PascalElementTypes;
 import com.mendrix.pascal.psi.PascalTypeDefinition;
 import com.mendrix.pascal.psi.TypeKind;
 import com.mendrix.pascal.stubs.PascalTypeStub;
@@ -19,7 +17,6 @@ import org.jetbrains.annotations.Nullable;
  * Represents type definitions like: TMyClass = class, TMyRecord = record, IMyInterface = interface
  */
 public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalTypeStub> implements PascalTypeDefinition {
-    private static final Logger LOG = Logger.getInstance(PascalTypeDefinitionImpl.class);
 
     public PascalTypeDefinitionImpl(@NotNull ASTNode node) {
         super(node);

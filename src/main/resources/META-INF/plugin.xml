@@ -118,5 +118,11 @@
         <!-- Pascal Semantic Annotator for type coloring -->
         <annotator language="ObjectPascal"
                    implementationClass="com.mendrix.pascal.annotator.PascalSemanticAnnotator"/>
+
+        <!-- DPR Project Service for monorepo support -->
+        <projectService serviceImplementation="com.mendrix.pascal.dpr.DprProjectService"/>
+
+        <!-- DPR Library Roots Provider - indexes files referenced by .dpr files -->
+        <additionalLibraryRootsProvider implementation="com.mendrix.pascal.dpr.DprLibraryRootsProvider"/>
     </extensions>
 </idea-plugin>

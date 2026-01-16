@@ -3,7 +3,6 @@ package com.mendrix.pascal.annotator;
 import com.intellij.lang.annotation.AnnotationHolder;
 import com.intellij.lang.annotation.Annotator;
 import com.intellij.lang.annotation.HighlightSeverity;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.lang.ASTNode;
 import com.intellij.psi.PsiElement;
@@ -21,7 +20,6 @@ import java.util.Collection;
  * Colors type definitions (class, record, interface) with different colors.
  */
 public class PascalSemanticAnnotator implements Annotator {
-    private static final Logger LOG = Logger.getInstance(PascalSemanticAnnotator.class);
 
     @Override
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
@@ -86,11 +84,6 @@ public class PascalSemanticAnnotator implements Annotator {
 
         // Look up this identifier in the type index
         Collection<PascalTypeDefinition> types = PascalTypeIndex.findTypes(text, element.getProject());
-
-        // Debug: log misses for type-like names
-        if (types.isEmpty()) {
-            LOG.info("[PascalDebug] NOT FOUND in index: '" + text + "'");
-        }
 
         if (!types.isEmpty()) {
             PascalTypeDefinition typeDef = types.iterator().next();

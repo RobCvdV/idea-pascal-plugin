@@ -50,6 +50,16 @@ public class PascalSyntaxHighlighter extends SyntaxHighlighterBase {
     public static final TextAttributesKey DOT =
             createTextAttributesKey("PASCAL_DOT", DefaultLanguageHighlighterColors.DOT);
 
+    // Type definition colors for semantic highlighting
+    public static final TextAttributesKey TYPE_CLASS =
+            createTextAttributesKey("PASCAL_TYPE_CLASS", DefaultLanguageHighlighterColors.CLASS_NAME);
+
+    public static final TextAttributesKey TYPE_RECORD =
+            createTextAttributesKey("PASCAL_TYPE_RECORD", DefaultLanguageHighlighterColors.CLASS_NAME);
+
+    public static final TextAttributesKey TYPE_INTERFACE =
+            createTextAttributesKey("PASCAL_TYPE_INTERFACE", DefaultLanguageHighlighterColors.INTERFACE_NAME);
+
     private static final TextAttributesKey[] KEYWORD_KEYS = new TextAttributesKey[]{KEYWORD};
     private static final TextAttributesKey[] STRING_KEYS = new TextAttributesKey[]{STRING};
     private static final TextAttributesKey[] NUMBER_KEYS = new TextAttributesKey[]{NUMBER};

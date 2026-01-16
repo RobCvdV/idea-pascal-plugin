@@ -8,15 +8,21 @@ import com.intellij.openapi.project.Project;
 import com.intellij.psi.FileViewProvider;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.stubs.PsiFileStub;
 import com.intellij.psi.tree.IFileElementType;
+import com.intellij.psi.tree.IStubFileElementType;
 import com.intellij.psi.tree.TokenSet;
+import com.mendrix.pascal.parser.PascalStructuredParser;
+import com.mendrix.pascal.psi.PascalElementTypes;
+import com.mendrix.pascal.psi.impl.PascalTypeDefinitionImpl;
 import org.jetbrains.annotations.NotNull;
 
 /**
  * Parser definition for Pascal language
  */
 public class PascalParserDefinition implements ParserDefinition {
-    public static final IFileElementType FILE = new IFileElementType(PascalLanguage.INSTANCE);
+    public static final IStubFileElementType<PsiFileStub<PascalFile>> FILE =
+            new IStubFileElementType<>("PASCAL_FILE", PascalLanguage.INSTANCE);
 
     private static final TokenSet WHITE_SPACES = TokenSet.create(PascalTokenTypes.WHITE_SPACE);
     private static final TokenSet COMMENTS = TokenSet.create(
@@ -38,7 +44,7 @@ public class PascalParserDefinition implements ParserDefinition {
     @NotNull
     @Override
     public PsiParser createParser(Project project) {
-        return new PascalParser();
+        return new PascalStructuredParser();
     }
 
     @NotNull
@@ -68,6 +74,9 @@ public class PascalParserDefinition implements ParserDefinition {
     @NotNull
     @Override
     public PsiElement createElement(ASTNode node) {
+        if (node.getElementType() == PascalElementTypes.TYPE_DEFINITION) {
+            return new PascalTypeDefinitionImpl(node);
+        }
         return new PascalPsiElement(node);
     }
 

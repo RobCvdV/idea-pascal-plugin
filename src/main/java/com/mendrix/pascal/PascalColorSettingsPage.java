@@ -30,6 +30,10 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
             new AttributesDescriptor("Semicolon", PascalSyntaxHighlighter.SEMICOLON),
             new AttributesDescriptor("Comma", PascalSyntaxHighlighter.COMMA),
             new AttributesDescriptor("Dot", PascalSyntaxHighlighter.DOT),
+            // Semantic type colors
+            new AttributesDescriptor("Type//Class type", PascalSyntaxHighlighter.TYPE_CLASS),
+            new AttributesDescriptor("Type//Record type", PascalSyntaxHighlighter.TYPE_RECORD),
+            new AttributesDescriptor("Type//Interface type", PascalSyntaxHighlighter.TYPE_INTERFACE),
     };
 
     @Nullable

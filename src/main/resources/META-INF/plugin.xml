@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.mendrix.dfm-support</id>
     <name>Delphi DFM and Pascal Support</name>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
     <vendor>MendriX</vendor>
 
     <description><![CDATA[
@@ -24,6 +24,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    Version 1.2.0:
+    - Added semantic highlighting for Pascal type definitions
+    - Classes, records, and interfaces get distinct colors
+    - Added stub indexing for type definitions (POC)
+
     Version 1.1.0:
     - Added Object Pascal language support (.pas, .dpr, .dpk)
     - Full Pascal syntax highlighting with 80+ keywords
@@ -103,5 +108,15 @@
 
         <!-- Pascal Color Settings Page -->
         <colorSettingsPage implementationClass="com.mendrix.pascal.PascalColorSettingsPage"/>
+
+        <!-- Pascal Stub Index for type definitions -->
+        <stubIndex implementation="com.mendrix.pascal.stubs.PascalTypeIndex"/>
+
+        <!-- Pascal Stub Element Types Holder -->
+        <stubElementTypeHolder class="com.mendrix.pascal.psi.PascalElementTypes"/>
+
+        <!-- Pascal Semantic Annotator for type coloring -->
+        <annotator language="ObjectPascal"
+                   implementationClass="com.mendrix.pascal.annotator.PascalSemanticAnnotator"/>
     </extensions>
 </idea-plugin>

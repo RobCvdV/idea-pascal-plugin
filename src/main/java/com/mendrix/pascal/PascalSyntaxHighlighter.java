@@ -60,6 +60,15 @@ public class PascalSyntaxHighlighter extends SyntaxHighlighterBase {
     public static final TextAttributesKey TYPE_INTERFACE =
             createTextAttributesKey("PASCAL_TYPE_INTERFACE", DefaultLanguageHighlighterColors.INTERFACE_NAME);
 
+    public static final TextAttributesKey TYPE_PARAMETER =
+            createTextAttributesKey("PASCAL_TYPE_PARAMETER", DefaultLanguageHighlighterColors.PARAMETER);
+
+    public static final TextAttributesKey TYPE_PROCEDURAL =
+            createTextAttributesKey("PASCAL_TYPE_PROCEDURAL", DefaultLanguageHighlighterColors.FUNCTION_DECLARATION);
+
+    public static final TextAttributesKey TYPE_SIMPLE =
+            createTextAttributesKey("PASCAL_TYPE_SIMPLE", DefaultLanguageHighlighterColors.PREDEFINED_SYMBOL);
+
     private static final TextAttributesKey[] KEYWORD_KEYS = new TextAttributesKey[]{KEYWORD};
     private static final TextAttributesKey[] STRING_KEYS = new TextAttributesKey[]{STRING};
     private static final TextAttributesKey[] NUMBER_KEYS = new TextAttributesKey[]{NUMBER};

@@ -13,4 +13,9 @@ public interface PascalElementTypes {
      */
     IStubElementType<PascalTypeStub, PascalTypeDefinition> TYPE_DEFINITION =
             new PascalTypeStubElementType();
+
+    /**
+     * Element type for generic parameters.
+     */
+    com.intellij.psi.tree.IElementType GENERIC_PARAMETER = new com.mendrix.pascal.PascalTokenType("GENERIC_PARAMETER");
 }

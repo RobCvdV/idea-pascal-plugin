@@ -6,6 +6,8 @@ import com.mendrix.pascal.stubs.PascalTypeStub;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
+
 /**
  * PSI element interface for Pascal type definitions.
  * Represents: TMyClass = class, TMyRecord = record, IMyInterface = interface
@@ -17,4 +19,10 @@ public interface PascalTypeDefinition extends PsiNameIdentifierOwner, StubBasedP
 
     @NotNull
     TypeKind getTypeKind();
+
+    /**
+     * Get the list of generic type parameter names.
+     */
+    @NotNull
+    List<String> getTypeParameters();
 }

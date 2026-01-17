@@ -11,6 +11,8 @@ import com.mendrix.pascal.psi.impl.PascalTypeDefinitionImpl;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Stub element type for Pascal type definitions.
@@ -32,7 +34,7 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
     @NotNull
     public PascalTypeStub createStub(@NotNull PascalTypeDefinition psi, StubElement<?> parentStub) {
         LOG.info("[PascalStub] Creating stub for: " + psi.getName() + " (" + psi.getTypeKind() + ")");
-        return new PascalTypeStubImpl(parentStub, psi.getName(), psi.getTypeKind());
+        return new PascalTypeStubImpl(parentStub, psi.getName(), psi.getTypeKind(), psi.getTypeParameters());
     }
 
     @Override
@@ -45,6 +47,11 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
     public void serialize(@NotNull PascalTypeStub stub, @NotNull StubOutputStream dataStream) throws IOException {
         dataStream.writeName(stub.getName());
         dataStream.writeInt(stub.getTypeKind().ordinal());
+        List<String> typeParameters = stub.getTypeParameters();
+        dataStream.writeInt(typeParameters.size());
+        for (String param : typeParameters) {
+            dataStream.writeName(param);
+        }
     }
 
     @Override
@@ -53,7 +60,12 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
         String name = dataStream.readNameString();
         int kindOrdinal = dataStream.readInt();
         TypeKind kind = TypeKind.values()[kindOrdinal];
-        return new PascalTypeStubImpl(parentStub, name, kind);
+        int paramCount = dataStream.readInt();
+        List<String> typeParameters = new ArrayList<>(paramCount);
+        for (int i = 0; i < paramCount; i++) {
+            typeParameters.add(dataStream.readNameString());
+        }
+        return new PascalTypeStubImpl(parentStub, name, kind, typeParameters);
     }
 
     @Override

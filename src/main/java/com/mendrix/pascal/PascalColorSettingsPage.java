@@ -34,6 +34,9 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
             new AttributesDescriptor("Type//Class type", PascalSyntaxHighlighter.TYPE_CLASS),
             new AttributesDescriptor("Type//Record type", PascalSyntaxHighlighter.TYPE_RECORD),
             new AttributesDescriptor("Type//Interface type", PascalSyntaxHighlighter.TYPE_INTERFACE),
+            new AttributesDescriptor("Type//Generic parameter", PascalSyntaxHighlighter.TYPE_PARAMETER),
+            new AttributesDescriptor("Type//Procedural type", PascalSyntaxHighlighter.TYPE_PROCEDURAL),
+            new AttributesDescriptor("Type//Simple type", PascalSyntaxHighlighter.TYPE_SIMPLE),
     };
 
     @Nullable
@@ -61,18 +64,21 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
                "  Classes, SysUtils;\n" +
                "\n" +
                "type\n" +
-               "  { Sample class definition }\n" +
-               "  TSampleClass = class(TObject)\n" +
+               "  { Procedural type }\n" +
+               "  TCallback = reference to procedure(Item: TObject);\n" +
+               "\n" +
+               "  { Sample class definition with generic parameter }\n" +
+               "  TSampleClass<T> = class(TObject)\n" +
                "  private\n" +
                "    FName: string;\n" +
-               "    FValue: Integer;\n" +
+               "    FValue: T;\n" +
                "  public\n" +
                "    constructor Create(const AName: string);\n" +
                "    destructor Destroy; override;\n" +
                "    procedure DoSomething(Count: Integer); virtual;\n" +
                "    function Calculate(X, Y: Double): Double;\n" +
                "    property Name: string read FName write FName;\n" +
-               "    property Value: Integer read FValue default 0;\n" +
+               "    property Value: T read FValue write FValue;\n" +
                "  end;\n" +
                "\n" +
                "const\n" +
@@ -99,7 +105,9 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
                "var\n" +
                "  I: Integer;\n" +
                "  S: string;\n" +
+               "  B: Boolean;\n" +
                "begin\n" +
+               "  B := True;\n" +
                "  for I := 0 to Count - 1 do\n" +
                "  begin\n" +
                "    if I mod 2 = 0 then\n" +

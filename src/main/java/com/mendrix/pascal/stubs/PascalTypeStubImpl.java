@@ -8,17 +8,21 @@ import com.mendrix.pascal.psi.TypeKind;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
+
 /**
  * Implementation of PascalTypeStub.
  */
 public class PascalTypeStubImpl extends StubBase<PascalTypeDefinition> implements PascalTypeStub {
     private final String name;
     private final TypeKind typeKind;
+    private final List<String> typeParameters;
 
-    public PascalTypeStubImpl(StubElement<?> parent, @Nullable String name, @NotNull TypeKind typeKind) {
+    public PascalTypeStubImpl(StubElement<?> parent, @Nullable String name, @NotNull TypeKind typeKind, @NotNull List<String> typeParameters) {
         super(parent, PascalElementTypes.TYPE_DEFINITION);
         this.name = name;
         this.typeKind = typeKind;
+        this.typeParameters = typeParameters;
     }
 
     @Override
@@ -31,5 +35,11 @@ public class PascalTypeStubImpl extends StubBase<PascalTypeDefinition> implement
     @NotNull
     public TypeKind getTypeKind() {
         return typeKind;
+    }
+
+    @Override
+    @NotNull
+    public List<String> getTypeParameters() {
+        return typeParameters;
     }
 }

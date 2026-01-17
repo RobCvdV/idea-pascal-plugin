@@ -7,5 +7,6 @@ public enum TypeKind {
     CLASS,
     RECORD,
     INTERFACE,
+    PROCEDURAL,
     UNKNOWN
 }

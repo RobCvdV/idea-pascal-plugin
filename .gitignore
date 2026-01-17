@@ -22,3 +22,8 @@ lib/
 # Build output
 *.zip
 
+# JetBrains local platform (per-developer config)
+.intellijPlatform/
+
+# Transient output logs
+.output.txt

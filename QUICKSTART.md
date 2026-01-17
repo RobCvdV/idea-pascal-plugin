@@ -15,7 +15,7 @@ This will:
 - Download JFlex (lexer generator)
 - Generate the lexer from the JFlex specification
 - Compile the plugin
-- Create a distributable ZIP file at `build/distributions/dfm-plugin-1.0.0.zip`
+- Create a distributable ZIP file at `build/distributions/pascal-plugin-0.0.1.zip`
 
 ### Step 2: Install the Plugin
 
@@ -24,7 +24,7 @@ This will:
 3. Navigate to **Plugins**
 4. Click the gear icon ⚙️ in the top toolbar
 5. Select **Install Plugin from Disk...**
-6. Browse to: `build/distributions/dfm-plugin-1.0.0.zip`
+6. Browse to: `build/distributions/pascal-plugin-0.0.1.zip`
 7. Click **OK**
 8. Restart IntelliJ IDEA when prompted
 

@@ -1,18 +1,11 @@
 <idea-plugin>
-    <id>com.mendrix.dfm-support</id>
-    <name>Delphi DFM and Pascal Support</name>
+    <id>nl.akiar.pascal-support</id>
+    <name>Delphi Pascal Support</name>
     <version>1.2.0</version>
-    <vendor>MendriX</vendor>
+    <vendor>Akiar</vendor>
 
     <description><![CDATA[
-    Provides syntax highlighting and code folding support for Delphi Form (DFM) and Object Pascal files.
-
-    <b>DFM Support (.dfm):</b>
-    - Syntax highlighting for keywords, properties, object names, class names
-    - String, number, and boolean literal highlighting
-    - Comment highlighting (// and {...} and (*...*))
-    - Code folding for object...end and item...end blocks
-    - Customizable colors via Settings
+    Provides syntax highlighting and code folding support for Delphi/Object Pascal and Delphi Form (DFM) files.
 
     <b>Object Pascal Support (.pas, .dpr, .dpk):</b>
     - Full syntax highlighting for Delphi/Object Pascal
@@ -20,6 +13,13 @@
     - Compiler directive highlighting ({$...})
     - Code folding for begin..end, class, record, try..except/finally, case, repeat..until
     - Code folding for interface/implementation sections
+    - Customizable colors via Settings
+
+    <b>DFM Support (.dfm):</b>
+    - Syntax highlighting for keywords, properties, object names, class names
+    - String, number, and boolean literal highlighting
+    - Comment highlighting (// and {...} and (*...*))
+    - Code folding for object...end and item...end blocks
     - Customizable colors via Settings
     ]]></description>
 
@@ -70,69 +70,69 @@
         <!-- ==================== DFM Support ==================== -->
 
         <!-- DFM File Type -->
-        <fileType name="Delphi Form" implementationClass="com.mendrix.dfm.DfmFileType"
+        <fileType name="Delphi Form" implementationClass="nl.akiar.pascal.dfm.DfmFileType"
                   fieldName="INSTANCE" language="DFM" extensions="dfm"/>
 
         <!-- DFM Parser Definition -->
         <lang.parserDefinition language="DFM"
-                               implementationClass="com.mendrix.dfm.DfmParserDefinition"/>
+                               implementationClass="nl.akiar.pascal.dfm.DfmParserDefinition"/>
 
         <!-- DFM Syntax Highlighter -->
         <lang.syntaxHighlighterFactory language="DFM"
-                                       implementationClass="com.mendrix.dfm.DfmSyntaxHighlighterFactory"/>
+                                       implementationClass="nl.akiar.pascal.dfm.DfmSyntaxHighlighterFactory"/>
 
         <!-- DFM Code Folding -->
         <lang.foldingBuilder language="DFM"
-                            implementationClass="com.mendrix.dfm.DfmFoldingBuilder"/>
+                            implementationClass="nl.akiar.pascal.dfm.DfmFoldingBuilder"/>
 
         <!-- DFM Color Settings Page -->
-        <colorSettingsPage implementationClass="com.mendrix.dfm.DfmColorSettingsPage"/>
+        <colorSettingsPage implementationClass="nl.akiar.pascal.dfm.DfmColorSettingsPage"/>
 
         <!-- ==================== Pascal Support ==================== -->
 
         <!-- Pascal File Type -->
-        <fileType name="Object Pascal" implementationClass="com.mendrix.pascal.PascalFileType"
+        <fileType name="Object Pascal" implementationClass="nl.akiar.pascal.PascalFileType"
                   fieldName="INSTANCE" language="ObjectPascal" extensions="pas;dpr;dpk"/>
 
         <!-- Pascal Parser Definition -->
         <lang.parserDefinition language="ObjectPascal"
-                               implementationClass="com.mendrix.pascal.PascalParserDefinition"/>
+                               implementationClass="nl.akiar.pascal.PascalParserDefinition"/>
 
         <!-- Pascal Syntax Highlighter -->
         <lang.syntaxHighlighterFactory language="ObjectPascal"
-                                       implementationClass="com.mendrix.pascal.PascalSyntaxHighlighterFactory"/>
+                                       implementationClass="nl.akiar.pascal.PascalSyntaxHighlighterFactory"/>
 
         <!-- Pascal Code Folding -->
         <lang.foldingBuilder language="ObjectPascal"
-                            implementationClass="com.mendrix.pascal.PascalFoldingBuilder"/>
+                            implementationClass="nl.akiar.pascal.PascalFoldingBuilder"/>
 
         <!-- Pascal Color Settings Page -->
-        <colorSettingsPage implementationClass="com.mendrix.pascal.PascalColorSettingsPage"/>
+        <colorSettingsPage implementationClass="nl.akiar.pascal.PascalColorSettingsPage"/>
 
         <!-- Pascal Stub Index for type definitions -->
-        <stubIndex implementation="com.mendrix.pascal.stubs.PascalTypeIndex"/>
+        <stubIndex implementation="nl.akiar.pascal.stubs.PascalTypeIndex"/>
 
         <!-- Pascal Stub Element Types Holder -->
-        <stubElementTypeHolder class="com.mendrix.pascal.psi.PascalElementTypes"/>
+        <stubElementTypeHolder class="nl.akiar.pascal.psi.PascalElementTypes"/>
 
         <!-- Pascal Semantic Annotator for type coloring -->
         <annotator language="ObjectPascal"
-                   implementationClass="com.mendrix.pascal.annotator.PascalSemanticAnnotator"/>
+                   implementationClass="nl.akiar.pascal.annotator.PascalSemanticAnnotator"/>
 
         <!-- DPR Project Service for monorepo support -->
-        <projectService serviceImplementation="com.mendrix.pascal.dpr.DprProjectService"/>
+        <projectService serviceImplementation="nl.akiar.pascal.dpr.DprProjectService"/>
 
         <!-- DPR Library Roots Provider - indexes files referenced by .dpr files -->
-        <additionalLibraryRootsProvider implementation="com.mendrix.pascal.dpr.DprLibraryRootsProvider"/>
+        <additionalLibraryRootsProvider implementation="nl.akiar.pascal.dpr.DprLibraryRootsProvider"/>
 
         <!-- Pascal Source Paths Settings Service -->
-        <projectService serviceImplementation="com.mendrix.pascal.settings.PascalSourcePathsSettings"/>
+        <projectService serviceImplementation="nl.akiar.pascal.settings.PascalSourcePathsSettings"/>
 
         <!-- Pascal Source Paths Settings Page -->
         <projectConfigurable
             id="pascal.sourcePaths"
             parentId="language"
             displayName="Pascal Source Paths"
-            instance="com.mendrix.pascal.settings.PascalSourcePathsConfigurable"/>
+            instance="nl.akiar.pascal.settings.PascalSourcePathsConfigurable"/>
     </extensions>
 </idea-plugin>

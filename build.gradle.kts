@@ -3,7 +3,7 @@ plugins {
     id("org.jetbrains.intellij.platform") version "2.10.5"
 }
 
-group = "com.mendrix"
+group = "nl.akiar"
 version = "1.2.0"
 
 repositories {

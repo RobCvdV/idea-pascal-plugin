@@ -1,131 +1,85 @@
-# Delphi Form (DFM) Plugin for IntelliJ IDEA
+# Delphi Pascal Support Plugin for IntelliJ IDEA
 
-A simple IntelliJ IDEA plugin that provides syntax highlighting and code folding support for Delphi Form (DFM) files.
+A comprehensive IntelliJ IDEA plugin that provides syntax highlighting and code folding support for Delphi Pascal and Delphi Form (DFM) files.
 
 ## Features
 
+### Object Pascal Support (.pas, .dpr, .dpk)
+- **Full Syntax Highlighting**: All Pascal keywords, operators, and compiler directives.
+- **Semantic Highlighting**: Distinct colors for classes, records, and interfaces.
+- **Code Folding**: Support for `begin..end`, `class`, `record`, `try..except/finally`, `case`, `repeat..until`, and interface/implementation sections.
+- **Stub Indexing**: Basic support for type definitions.
+
+### Delphi Form Support (.dfm)
 - **Syntax Highlighting**
   - Keywords: `object`, `inherited`, `inline`, `end`, `item`
-  - Strings (single-quoted)
-  - Numbers (decimal and hexadecimal)
-  - Comments (line comments `//` and block comments `{...}` and `(*...*)`)
+  - Strings, numbers, booleans, and comments
   - Identifiers and property names
-  - Operators and punctuation
-
 - **Code Folding**
-  - Fold `object...end` blocks
-  - Fold `inherited...end` blocks
-  - Fold `inline...end` blocks
-  - Fold collection `<item>...end` blocks
+  - Fold `object...end`, `inherited...end`, `inline...end`, and `item...end` blocks
 
 ## Building the Plugin
 
 ### Prerequisites
-
 - Java 17 or higher
 - Gradle (uses wrapper, no separate installation needed)
-- Internet connection (to download dependencies)
 
 ### Build Instructions
-
 1. Navigate to the plugin directory:
    ```bash
-   cd .idea/dfm-plugin
+   cd idea-pascal-plugin
    ```
 
-2. Run the build script:
-   ```bash
-   ./build.sh
-   ```
-
-   This script will:
-   - Download JFlex if not present
-   - Generate the lexer from the JFlex specification
-   - Build the plugin using Gradle
-   - Create a distributable ZIP file
-
-3. The plugin will be built to: `build/distributions/dfm-plugin-1.0.2.zip`
-
-### Manual Build (without build.sh)
-
-If you prefer to build manually:
-
-1. Download JFlex:
-   ```bash
-   mkdir -p lib
-   curl -L "https://github.com/jflex-de/jflex/releases/download/v1.9.1/jflex-full-1.9.1.jar" -o lib/jflex-full-1.9.1.jar
-   ```
-
-2. Generate the lexer:
-   ```bash
-   mkdir -p src/main/gen/com/mendrix/dfm
-   java -jar lib/jflex-full-1.9.1.jar -d src/main/gen/com/mendrix/dfm src/main/java/com/mendrix/dfm/Dfm.flex
-   ```
-
-3. Build with Gradle:
+2. Run the build command:
    ```bash
    ./gradlew buildPlugin
    ```
 
-## Installing the Plugin
+3. The plugin will be built to: `build/distributions/pascal-plugin-1.2.0.zip`
 
+## Installing the Plugin
 1. Open IntelliJ IDEA (or any JetBrains IDE)
 2. Go to **Settings** (or **Preferences** on macOS) → **Plugins**
 3. Click the gear icon ⚙️ → **Install Plugin from Disk...**
-4. Navigate to and select: `build/distributions/dfm-plugin-1.0.2.zip`
+4. Navigate to and select: `build/distributions/pascal-plugin-1.2.0.zip`
 5. Click **OK** and restart IntelliJ IDEA
-
-## Using the Plugin
-
-Once installed, the plugin will automatically:
-- Recognize `.dfm` files
-- Apply syntax highlighting
-- Enable code folding in DFM files
-
-### Code Folding
-
-Click the minus/plus icons in the gutter next to `object`, `inherited`, or `inline` declarations to fold/unfold code blocks.
 
 ## Development
 
 ### Project Structure
+```
+nl-akiar-pascal-plugin/
+|-- build.gradle.kts          # Gradle build configuration
+|-- settings.gradle.kts       # Gradle settings
+`-- src/main/
+    |-- java/nl/akiar/pascal/
+    |   |-- PascalLanguage.java           # Pascal Language definition
+    |   |-- dfm/                          # DFM support components
+    |   |   |-- DfmLanguage.java
+    |   |   |-- DfmFileType.java
+    |   |   `-- ...
+    |   |-- annotator/                    # Semantic highlighting
+    |   |-- dpr/                          # DPR/Project support
+    |   `-- psi/                          # Pascal PSI
+    `-- resources/
+        |-- META-INF/
+        |   `-- plugin.xml                # Plugin manifest
+        `-- icons/
+            |-- pascal.svg                # Pascal icon
+            `-- dfm.svg                   # DFM icon
+```
 
-```
-dfm-plugin/
-├── build.gradle.kts          # Gradle build configuration
-├── settings.gradle.kts       # Gradle settings
-├── build.sh                  # Build script
-└── src/main/
-    ├── java/com/mendrix/dfm/
-    │   ├── DfmLanguage.java              # Language definition
-    │   ├── DfmFileType.java              # File type registration
-    │   ├── DfmFileTypeFactory.java       # File type factory
-    │   ├── Dfm.flex                      # JFlex lexer specification
-    │   ├── DfmTokenType.java             # Token type class
-    │   ├── DfmTokenTypes.java            # Token type constants
-    │   ├── DfmLexerAdapter.java          # Lexer adapter
-    │   ├── DfmSyntaxHighlighter.java     # Syntax highlighter
-    │   ├── DfmSyntaxHighlighterFactory.java
-    │   ├── DfmParserDefinition.java      # Parser definition
-    │   ├── DfmParser.java                # Simple parser
-    │   ├── DfmFile.java                  # PSI file
-    │   ├── DfmPsiElement.java            # PSI element
-    │   └── DfmFoldingBuilder.java        # Code folding
-    └── resources/
-        ├── META-INF/
-        │   └── plugin.xml                # Plugin manifest
-        └── icons/
-            └── dfm.svg                   # File type icon
-```
+## License
+This plugin is created for internal use at Akiar.
 
 ### Modifying the Plugin
 
-- **Add new keywords**: Edit `Dfm.flex` and `DfmTokenTypes.java`
-- **Change syntax colors**: Modify `DfmSyntaxHighlighter.java`
-- **Improve folding**: Edit `DfmFoldingBuilder.java`
+- **Add new keywords**: Edit relevant `.java` or lexer files.
+- **Change syntax colors**: Modify `PascalSyntaxHighlighter.java` or `DfmSyntaxHighlighter.java`
+- **Improve folding**: Edit `PascalFoldingBuilder.java` or `DfmFoldingBuilder.java`
 - **Update plugin info**: Edit `src/main/resources/META-INF/plugin.xml`
 
-After making changes, rebuild with `./build.sh` or `./gradlew buildPlugin`.
+After making changes, rebuild with `./gradlew buildPlugin`.
 
 ## Troubleshooting
 
@@ -150,7 +104,7 @@ Run the build script which downloads JFlex automatically:
 
 ## License
 
-This plugin is created for internal use at MendriX.
+This plugin is created for internal use at Akiar.
 
 ## Version History
 

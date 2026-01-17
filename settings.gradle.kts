@@ -1,2 +1,2 @@
-rootProject.name = "dfm-plugin"
+rootProject.name = "pascal-plugin"
 

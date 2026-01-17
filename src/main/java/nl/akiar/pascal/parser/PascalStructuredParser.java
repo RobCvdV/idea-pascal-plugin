@@ -20,14 +20,14 @@ public class PascalStructuredParser implements PsiParser {
     @NotNull
     @Override
     public ASTNode parse(@NotNull IElementType root, @NotNull PsiBuilder builder) {
-        LOG.info("[PascalParser] Starting parse of root: " + root);
+        // LOG.info("[PascalParser] Starting parse of root: " + root);
         PsiBuilder.Marker rootMarker = builder.mark();
 
         while (!builder.eof()) {
             IElementType tokenType = builder.getTokenType();
 
             if (tokenType == PascalTokenTypes.KW_TYPE) {
-                LOG.info("[PascalParser] Found 'type' section at offset " + builder.getCurrentOffset());
+                // LOG.info("[PascalParser] Found 'type' section at offset " + builder.getCurrentOffset());
                 parseTypeSection(builder);
             } else {
                 builder.advanceLexer();
@@ -45,7 +45,7 @@ public class PascalStructuredParser implements PsiParser {
      *   TMyRecord = record...end;
      */
     private void parseTypeSection(PsiBuilder builder) {
-        LOG.info("[PascalParser] Entering parseTypeSection at offset " + builder.getCurrentOffset());
+        // LOG.info("[PascalParser] Entering parseTypeSection at offset " + builder.getCurrentOffset());
         // Consume 'type' keyword
         builder.advanceLexer();
         skipWhitespaceAndComments(builder);
@@ -55,25 +55,25 @@ public class PascalStructuredParser implements PsiParser {
             IElementType tokenType = builder.getTokenType();
             if (tokenType == PascalTokenTypes.IDENTIFIER) {
                 String id = builder.getTokenText();
-                LOG.info("[PascalParser] Evaluating identifier in type section: '" + id + "' at offset " + builder.getCurrentOffset());
+                // LOG.info("[PascalParser] Evaluating identifier in type section: '" + id + "' at offset " + builder.getCurrentOffset());
                 // Check if this looks like a type definition: IDENTIFIER = class|record|interface
                 if (isTypeDefinitionStart(builder)) {
-                    LOG.info("[PascalParser] Identified type definition start: " + id);
+                    // LOG.info("[PascalParser] Identified type definition start: " + id);
                     parseTypeDefinition(builder);
                 } else if (isOtherTypeDefinition(builder)) {
-                    LOG.info("[PascalParser] Identified other type definition: " + id);
+                    // LOG.info("[PascalParser] Identified other type definition: " + id);
                     parseOtherTypeDefinition(builder);
                 } else {
-                    LOG.info("[PascalParser] Identifier '" + id + "' is not a type definition start, skipping");
+                    // LOG.info("[PascalParser] Identifier '" + id + "' is not a type definition start, skipping");
                     builder.advanceLexer();
                 }
             } else {
-                LOG.info("[PascalParser] Skipping non-identifier token in type section: " + tokenType + " ('" + builder.getTokenText() + "')");
+                // LOG.info("[PascalParser] Skipping non-identifier token in type section: " + tokenType + " ('" + builder.getTokenText() + "')");
                 builder.advanceLexer();
             }
             skipWhitespaceAndComments(builder);
         }
-        LOG.info("[PascalParser] Leaving parseTypeSection at offset " + builder.getCurrentOffset());
+        // LOG.info("[PascalParser] Leaving parseTypeSection at offset " + builder.getCurrentOffset());
     }
 
     /**
@@ -92,7 +92,7 @@ public class PascalStructuredParser implements PsiParser {
 
         // Handle generic parameters: <T, K: class>
         if (builder.getTokenType() == PascalTokenTypes.LT) {
-            LOG.info("[PascalParser] isOtherTypeDefinition lookahead: found '<' for " + id);
+            // LOG.info("[PascalParser] isOtherTypeDefinition lookahead: found '<' for " + id);
             int depth = 1;
             builder.advanceLexer();
             while (!builder.eof() && depth > 0) {
@@ -104,9 +104,9 @@ public class PascalStructuredParser implements PsiParser {
         }
 
         boolean isOtherType = builder.getTokenType() == PascalTokenTypes.EQ;
-        if (isOtherType) {
-            LOG.info("[PascalParser] isOtherTypeDefinition lookahead: " + id + " has '=' at offset " + builder.getCurrentOffset());
-        }
+        // if (isOtherType) {
+        //     LOG.info("[PascalParser] isOtherTypeDefinition lookahead: " + id + " has '=' at offset " + builder.getCurrentOffset());
+        // }
         lookAhead.rollbackTo();
         return isOtherType;
     }
@@ -224,7 +224,7 @@ public class PascalStructuredParser implements PsiParser {
 
         // Handle generic parameters: <T, K: class>
         if (builder.getTokenType() == PascalTokenTypes.LT) {
-            LOG.info("[PascalParser] isTypeDefinitionStart lookahead: found '<' for " + id);
+            // LOG.info("[PascalParser] isTypeDefinitionStart lookahead: found '<' for " + id);
             int depth = 1;
             builder.advanceLexer();
             while (!builder.eof() && depth > 0) {
@@ -246,17 +246,17 @@ public class PascalStructuredParser implements PsiParser {
                 builder.advanceLexer(); // consume 'class'
                 skipWhitespaceAndComments(builder);
                 isTypeDef = builder.getTokenType() != PascalTokenTypes.KW_OF;
-                if (!isTypeDef) {
-                    LOG.info("[PascalParser] isTypeDefinitionStart lookahead: " + id + " = class of (metaclass), not a main type definition");
-                } else {
-                    LOG.info("[PascalParser] isTypeDefinitionStart lookahead: " + id + " = class (main type definition)");
-                }
+                // if (!isTypeDef) {
+                //     LOG.info("[PascalParser] isTypeDefinitionStart lookahead: " + id + " = class of (metaclass), not a main type definition");
+                // } else {
+                //     LOG.info("[PascalParser] isTypeDefinitionStart lookahead: " + id + " = class (main type definition)");
+                // }
             } else {
                 isTypeDef = afterEquals == PascalTokenTypes.KW_RECORD
                         || afterEquals == PascalTokenTypes.KW_INTERFACE;
-                if (isTypeDef) {
-                    LOG.info("[PascalParser] isTypeDefinitionStart lookahead: " + id + " = " + afterEquals + " (main type definition)");
-                }
+                // if (isTypeDef) {
+                //     LOG.info("[PascalParser] isTypeDefinitionStart lookahead: " + id + " = " + afterEquals + " (main type definition)");
+                // }
             }
         }
 
@@ -272,7 +272,7 @@ public class PascalStructuredParser implements PsiParser {
 
         // Get type name for logging
         String typeName = builder.getTokenText();
-        LOG.info("[PascalParser] Starting parseTypeDefinition for: " + typeName);
+        // LOG.info("[PascalParser] Starting parseTypeDefinition for: " + typeName);
 
         // Consume identifier
         builder.advanceLexer();
@@ -280,7 +280,7 @@ public class PascalStructuredParser implements PsiParser {
 
         // Consume generic parameters if present: <T: constructor>
         if (builder.getTokenType() == PascalTokenTypes.LT) {
-            LOG.info("[PascalParser] Found generic parameters for: " + typeName);
+            // LOG.info("[PascalParser] Found generic parameters for: " + typeName);
             parseGenericParameters(builder);
         }
 
@@ -289,7 +289,7 @@ public class PascalStructuredParser implements PsiParser {
             builder.advanceLexer();
             skipWhitespaceAndComments(builder);
         } else {
-            LOG.info("[PascalParser] Missing '=' in type definition for: " + typeName + ", found: " + builder.getTokenText());
+            // LOG.info("[PascalParser] Missing '=' in type definition for: " + typeName + ", found: " + builder.getTokenText());
         }
 
         // Get type kind for logging
@@ -335,11 +335,14 @@ public class PascalStructuredParser implements PsiParser {
 
         if (builder.getTokenType() == PascalTokenTypes.SEMI) {
             // Forward declaration (with or without inheritance)
-            LOG.info("[PascalParser] Parsed forward declaration: " + typeName + " = " + typeKind);
+            // LOG.info("[PascalParser] Parsed forward declaration: " + typeName + " = " + typeKind);
             builder.advanceLexer();
+        } else if (builder.getTokenType() == PascalTokenTypes.SEMI) {
+             // LOG.info("[PascalParser] Parsed forward declaration: " + typeName + " = " + typeKind);
+             builder.advanceLexer();
         } else {
             // Full declaration - consume until 'end' followed by semicolon
-            LOG.info("[PascalParser] Parsing full declaration body for: " + typeName + " at offset " + builder.getCurrentOffset());
+            // LOG.info("[PascalParser] Parsing full declaration body for: " + typeName + " at offset " + builder.getCurrentOffset());
             int nestedLevel = 1;
             while (!builder.eof() && nestedLevel > 0) {
                 IElementType current = builder.getTokenType();
@@ -374,16 +377,16 @@ public class PascalStructuredParser implements PsiParser {
                         lookAhead.rollbackTo();
 
                         if (hasBody) {
-                            LOG.info("[PascalParser] body: found nested structure start: " + current + ", nestedLevel -> " + (nestedLevel + 1));
+                            // LOG.info("[PascalParser] body: found nested structure start: " + current + ", nestedLevel -> " + (nestedLevel + 1));
                             nestedLevel++;
                         }
                     } else {
-                        LOG.info("[PascalParser] body: found structure start: " + current + ", nestedLevel -> " + (nestedLevel + 1));
+                        // LOG.info("[PascalParser] body: found structure start: " + current + ", nestedLevel -> " + (nestedLevel + 1));
                         nestedLevel++;
                     }
                 } else if (current == PascalTokenTypes.KW_END) {
                     nestedLevel--;
-                    LOG.info("[PascalParser] body: found 'end', nestedLevel -> " + nestedLevel);
+                    // LOG.info("[PascalParser] body: found 'end', nestedLevel -> " + nestedLevel);
                     if (nestedLevel == 0) {
                         builder.advanceLexer(); // consume 'end'
                         skipWhitespaceAndComments(builder);
@@ -395,51 +398,51 @@ public class PascalStructuredParser implements PsiParser {
                 }
                 builder.advanceLexer();
             }
-            LOG.info("[PascalParser] Parsed type definition: " + typeName + " = " + typeKind + " at offset " + builder.getCurrentOffset());
+            // LOG.info("[PascalParser] Parsed type definition: " + typeName + " = " + typeKind + " at offset " + builder.getCurrentOffset());
         }
 
         typeMarker.done(PascalElementTypes.TYPE_DEFINITION);
     }
 
     private void parseGenericParameters(PsiBuilder builder) {
-        LOG.info("[PascalParser] Entering parseGenericParameters at '" + builder.getTokenText() + "' (" + builder.getTokenType() + ")");
+        // LOG.info("[PascalParser] Entering parseGenericParameters at '" + builder.getTokenText() + "' (" + builder.getTokenType() + ")");
         builder.advanceLexer(); // consume '<'
         skipWhitespaceAndComments(builder);
 
         while (!builder.eof() && builder.getTokenType() != PascalTokenTypes.GT) {
             IElementType tokenType = builder.getTokenType();
             String tokenText = builder.getTokenText();
-            LOG.info("[PascalParser] Generic parameter loop, current token: '" + tokenText + "' (" + tokenType + ")");
+            // LOG.info("[PascalParser] Generic parameter loop, current token: '" + tokenText + "' (" + tokenType + ")");
 
             if (tokenType == PascalTokenTypes.IDENTIFIER) {
-                LOG.info("[PascalParser] Found generic parameter identifier: " + tokenText);
+                // LOG.info("[PascalParser] Found generic parameter identifier: " + tokenText);
                 PsiBuilder.Marker paramMarker = builder.mark();
                 builder.advanceLexer();
                 paramMarker.done(PascalElementTypes.GENERIC_PARAMETER);
             } else {
-                LOG.info("[PascalParser] Generic parameter skip token: " + (tokenType != null ? tokenType.toString() : "null") + " ('" + tokenText + "')");
+                // LOG.info("[PascalParser] Generic parameter skip token: " + (tokenType != null ? tokenType.toString() : "null") + " ('" + tokenText + "')");
                 builder.advanceLexer();
             }
             skipWhitespaceAndComments(builder);
 
             IElementType nextType = builder.getTokenType();
             if (nextType == PascalTokenTypes.COMMA) {
-                LOG.info("[PascalParser] Found comma in generic parameters");
+                // LOG.info("[PascalParser] Found comma in generic parameters");
                 builder.advanceLexer();
                 skipWhitespaceAndComments(builder);
             } else if (nextType == PascalTokenTypes.COLON) {
                 // Constraint: T: class, constructor, TSomeBase
-                LOG.info("[PascalParser] Found colon, parsing generic constraint for '" + tokenText + "'");
+                // LOG.info("[PascalParser] Found colon, parsing generic constraint for '" + tokenText + "'");
                 builder.advanceLexer();
                 skipWhitespaceAndComments(builder);
                 while (!builder.eof() && builder.getTokenType() != PascalTokenTypes.COMMA && builder.getTokenType() != PascalTokenTypes.GT) {
-                    LOG.info("[PascalParser] Consuming constraint token: " + builder.getTokenType() + " ('" + builder.getTokenText() + "')");
+                    // LOG.info("[PascalParser] Consuming constraint token: " + builder.getTokenType() + " ('" + builder.getTokenText() + "')");
                     builder.advanceLexer();
                     skipWhitespaceAndComments(builder);
                 }
                 // After constraints, we might have a comma before the next parameter
                 if (builder.getTokenType() == PascalTokenTypes.COMMA) {
-                    LOG.info("[PascalParser] Found comma after constraint");
+                    // LOG.info("[PascalParser] Found comma after constraint");
                     builder.advanceLexer();
                     skipWhitespaceAndComments(builder);
                 }
@@ -447,13 +450,13 @@ public class PascalStructuredParser implements PsiParser {
         }
 
         if (builder.getTokenType() == PascalTokenTypes.GT) {
-            LOG.info("[PascalParser] Found closing '>'");
+            // LOG.info("[PascalParser] Found closing '>'");
             builder.advanceLexer();
         } else {
-            LOG.info("[PascalParser] Warning: Generic parameters did not end with '>', found: '" + builder.getTokenText() + "' (" + builder.getTokenType() + ")");
+            // LOG.info("[PascalParser] Warning: Generic parameters did not end with '>', found: '" + builder.getTokenText() + "' (" + builder.getTokenType() + ")");
         }
         skipWhitespaceAndComments(builder);
-        LOG.info("[PascalParser] Leaving parseGenericParameters");
+        // LOG.info("[PascalParser] Leaving parseGenericParameters");
     }
 
     private void skipWhitespaceAndComments(PsiBuilder builder) {

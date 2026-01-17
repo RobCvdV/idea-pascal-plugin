@@ -10,6 +10,9 @@ import nl.akiar.pascal.PascalTokenTypes;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
 import nl.akiar.pascal.psi.TypeKind;
 import nl.akiar.pascal.stubs.PascalTypeStub;
+import com.intellij.openapi.util.TextRange;
+import com.intellij.psi.PsiReference;
+import nl.akiar.pascal.reference.PascalTypeReference;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -25,6 +28,7 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
 
     public PascalTypeDefinitionImpl(@NotNull ASTNode node) {
         super(node);
+        com.intellij.openapi.diagnostic.Logger.getInstance(PascalTypeDefinitionImpl.class).info("[PascalPSI] Created PascalTypeDefinitionImpl for: " + node.getElementType());
     }
 
     public PascalTypeDefinitionImpl(@NotNull PascalTypeStub stub, @NotNull IStubElementType<?, ?> nodeType) {
@@ -96,6 +100,7 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
         }
 
         // Parse from AST: TMyClass<T, K> = class
+        // Generic parameters MUST appear immediately after the type name, before '='
         List<String> results = new ArrayList<>();
         ASTNode node = getNode();
         for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
@@ -110,18 +115,27 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
             }
         }
 
-        // Fallback for older parser or non-structured parts
+        // Fallback: look for <...> ONLY between the type name and '='
         if (results.isEmpty()) {
-            ASTNode langle = node.findChildByType(PascalTokenTypes.LT);
-            if (langle != null) {
-                ASTNode rangle = node.findChildByType(PascalTokenTypes.GT);
-                if (rangle != null) {
-                    ASTNode child = langle.getTreeNext();
-                    while (child != null && child != rangle) {
-                        if (child.getElementType() == PascalTokenTypes.IDENTIFIER) {
-                            results.add(child.getText());
+            ASTNode nameNode = node.findChildByType(PascalTokenTypes.IDENTIFIER);
+            if (nameNode != null) {
+                ASTNode current = nameNode.getTreeNext();
+                // Look for '<' immediately after the name (skipping whitespace)
+                while (current != null && current.getElementType() == PascalTokenTypes.WHITE_SPACE) {
+                    current = current.getTreeNext();
+                }
+                if (current != null && current.getElementType() == PascalTokenTypes.LT) {
+                    // Found '<' right after name - collect identifiers until '>' or '='
+                    current = current.getTreeNext();
+                    while (current != null) {
+                        IElementType type = current.getElementType();
+                        if (type == PascalTokenTypes.GT || type == PascalTokenTypes.EQ) {
+                            break;
                         }
-                        child = child.getTreeNext();
+                        if (type == PascalTokenTypes.IDENTIFIER) {
+                            results.add(current.getText());
+                        }
+                        current = current.getTreeNext();
                     }
                 }
             }
@@ -145,6 +159,69 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
     public PsiElement setName(@NotNull String name) throws IncorrectOperationException {
         // For now, we don't support renaming
         throw new IncorrectOperationException("Renaming not supported yet");
+    }
+
+    @Override
+    public PsiReference getReference() {
+        // A type definition itself doesn't have a reference unless we consider it referencing its own name
+        // but usually we return the reference from the identifier.
+        // However, some IDE features look at the element itself.
+        return null;
+    }
+
+    @Override
+    @Nullable
+    public String getDocComment() {
+        // Look for comments immediately preceding this type definition
+        // Pascal doc comments can be: { comment }, (* comment *), or // comment
+        StringBuilder docBuilder = new StringBuilder();
+        PsiElement prev = getPrevSibling();
+
+        // Collect consecutive comments (skipping whitespace)
+        while (prev != null) {
+            IElementType type = prev.getNode().getElementType();
+            if (type == PascalTokenTypes.WHITE_SPACE) {
+                // Check if it's more than one newline (empty line) - stop collecting
+                String text = prev.getText();
+                long newlines = text.chars().filter(c -> c == '\n').count();
+                if (newlines > 1) {
+                    break; // Empty line separates doc comment from type
+                }
+                prev = prev.getPrevSibling();
+                continue;
+            }
+            if (type == PascalTokenTypes.BLOCK_COMMENT || type == PascalTokenTypes.LINE_COMMENT) {
+                String commentText = extractCommentContent(prev.getText(), type);
+                if (docBuilder.length() > 0) {
+                    docBuilder.insert(0, "\n");
+                }
+                docBuilder.insert(0, commentText);
+                prev = prev.getPrevSibling();
+            } else {
+                // Hit something other than a comment or whitespace
+                break;
+            }
+        }
+
+        String result = docBuilder.toString().trim();
+        return result.isEmpty() ? null : result;
+    }
+
+    private String extractCommentContent(String comment, IElementType type) {
+        if (type == PascalTokenTypes.LINE_COMMENT) {
+            // Remove leading //
+            if (comment.startsWith("//")) {
+                return comment.substring(2).trim();
+            }
+        } else if (type == PascalTokenTypes.BLOCK_COMMENT) {
+            // Remove { } or (* *)
+            if (comment.startsWith("{") && comment.endsWith("}")) {
+                return comment.substring(1, comment.length() - 1).trim();
+            } else if (comment.startsWith("(*") && comment.endsWith("*)")) {
+                return comment.substring(2, comment.length() - 2).trim();
+            }
+        }
+        return comment.trim();
     }
 
     @Override

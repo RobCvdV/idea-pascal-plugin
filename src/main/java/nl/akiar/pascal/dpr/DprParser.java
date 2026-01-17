@@ -54,8 +54,12 @@ public class DprParser {
         List<String> result = new ArrayList<>();
 
         try {
-            String content = new String(dprFile.contentsToByteArray(), StandardCharsets.UTF_8);
-            Path dprDir = Paths.get(dprFile.getParent().getPath());
+            // Use direct I/O instead of VFS contentsToByteArray() to avoid
+            // triggering charset detection which queries the file index,
+            // which calls library roots providers, causing infinite recursion.
+            Path filePath = Paths.get(dprFile.getPath());
+            String content = java.nio.file.Files.readString(filePath, StandardCharsets.UTF_8);
+            Path dprDir = filePath.getParent();
 
             result.addAll(parseReferencedFiles(content, dprDir));
         } catch (IOException e) {

@@ -25,4 +25,11 @@ public interface PascalTypeDefinition extends PsiNameIdentifierOwner, StubBasedP
      */
     @NotNull
     List<String> getTypeParameters();
+
+    /**
+     * Get the documentation comment preceding this type definition.
+     * Returns null if no doc comment is found.
+     */
+    @Nullable
+    String getDocComment();
 }

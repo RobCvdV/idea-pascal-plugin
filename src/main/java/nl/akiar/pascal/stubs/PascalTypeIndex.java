@@ -4,13 +4,16 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.stubs.StringStubIndexExtension;
 import com.intellij.psi.stubs.StubIndex;
 import com.intellij.psi.stubs.StubIndexKey;
 import nl.akiar.pascal.dpr.DprProjectService;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
+import nl.akiar.pascal.uses.PascalUsesClauseUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -68,6 +71,121 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
     }
 
     /**
+     * Find type definitions, prioritizing types from units in the uses clause.
+     * Returns types that are in scope first, followed by types that are out of scope.
+     *
+     * @param name The type name to search for
+     * @param fromFile The file containing the reference (for uses clause analysis)
+     * @param offset The offset of the reference in fromFile
+     * @return TypeLookupResult with in-scope and out-of-scope types
+     */
+    @NotNull
+    public static TypeLookupResult findTypesWithUsesValidation(
+            @NotNull String name,
+            @NotNull PsiFile fromFile,
+            int offset) {
+
+        Collection<PascalTypeDefinition> allTypes = findTypes(name, fromFile.getProject());
+        PascalUsesClauseUtil.UsesClauseInfo usesInfo = PascalUsesClauseUtil.parseUsesClause(fromFile);
+
+        List<PascalTypeDefinition> inScope = new ArrayList<>();
+        List<PascalTypeDefinition> outOfScope = new ArrayList<>();
+
+        for (PascalTypeDefinition typeDef : allTypes) {
+            PsiFile targetFile = typeDef.getContainingFile();
+            if (targetFile == null) continue;
+
+            // Same file is always in scope
+            if (targetFile.equals(fromFile)) {
+                inScope.add(typeDef);
+                continue;
+            }
+
+            String targetUnit = PascalUsesClauseUtil.getUnitName(targetFile);
+            if (usesInfo.isUnitAvailable(targetUnit, offset)) {
+                inScope.add(typeDef);
+            } else {
+                outOfScope.add(typeDef);
+            }
+        }
+
+        return new TypeLookupResult(inScope, outOfScope, usesInfo, offset);
+    }
+
+    /**
+     * Result of type lookup with uses clause validation.
+     */
+    public static class TypeLookupResult {
+        private final List<PascalTypeDefinition> inScopeTypes;
+        private final List<PascalTypeDefinition> outOfScopeTypes;
+        private final PascalUsesClauseUtil.UsesClauseInfo usesInfo;
+        private final int referenceOffset;
+
+        public TypeLookupResult(List<PascalTypeDefinition> inScope, List<PascalTypeDefinition> outOfScope,
+                               PascalUsesClauseUtil.UsesClauseInfo usesInfo, int referenceOffset) {
+            this.inScopeTypes = inScope;
+            this.outOfScopeTypes = outOfScope;
+            this.usesInfo = usesInfo;
+            this.referenceOffset = referenceOffset;
+        }
+
+        /** Types that are properly in scope (unit is in uses clause) */
+        public List<PascalTypeDefinition> getInScopeTypes() {
+            return inScopeTypes;
+        }
+
+        /** Types that exist but their unit is not in the uses clause */
+        public List<PascalTypeDefinition> getOutOfScopeTypes() {
+            return outOfScopeTypes;
+        }
+
+        /** All found types (in-scope first, then out-of-scope) */
+        public List<PascalTypeDefinition> getAllTypes() {
+            List<PascalTypeDefinition> all = new ArrayList<>(inScopeTypes);
+            all.addAll(outOfScopeTypes);
+            return all;
+        }
+
+        /** True if the type exists but is not in scope */
+        public boolean hasOutOfScopeTypes() {
+            return !outOfScopeTypes.isEmpty();
+        }
+
+        /** True if no types were found at all */
+        public boolean isEmpty() {
+            return inScopeTypes.isEmpty() && outOfScopeTypes.isEmpty();
+        }
+
+        /** Get error message for out-of-scope reference, or null if OK */
+        @Nullable
+        public String getErrorMessage() {
+            if (!inScopeTypes.isEmpty() || outOfScopeTypes.isEmpty()) {
+                return null; // OK or not found
+            }
+
+            // Type exists but not in scope
+            PascalTypeDefinition firstOutOfScope = outOfScopeTypes.get(0);
+            String unitName = PascalUsesClauseUtil.getUnitName(firstOutOfScope.getContainingFile());
+
+            if (usesInfo.isInInterfaceSection(referenceOffset)) {
+                if (usesInfo.getImplementationUses().contains(unitName.toLowerCase())) {
+                    return "Unit '" + unitName + "' is in implementation uses, but type is referenced in interface section. Add it to interface uses.";
+                }
+                return "Unit '" + unitName + "' is not in uses clause. Add it to interface uses.";
+            } else {
+                return "Unit '" + unitName + "' is not in uses clause.";
+            }
+        }
+
+        /** Get the unit name that needs to be added to uses clause */
+        @Nullable
+        public String getMissingUnit() {
+            if (outOfScopeTypes.isEmpty()) return null;
+            return PascalUsesClauseUtil.getUnitName(outOfScopeTypes.get(0).getContainingFile());
+        }
+    }
+
+    /**
      * Create a search scope containing files referenced by .dpr files.
      * Returns null if no DPR files found or no files referenced.
      */
@@ -93,7 +211,6 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
             return null;
         }
 
-        LOG.info("[DprScope] Created scope with " + virtualFiles.size() + " files from DPR references");
         return GlobalSearchScope.filesScope(project, virtualFiles);
     }
 }

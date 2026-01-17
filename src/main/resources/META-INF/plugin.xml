@@ -119,6 +119,21 @@
         <annotator language="ObjectPascal"
                    implementationClass="nl.akiar.pascal.annotator.PascalSemanticAnnotator"/>
 
+        <!-- Pascal Uses Clause Annotator for error highlighting -->
+        <annotator language="ObjectPascal"
+                   implementationClass="nl.akiar.pascal.annotator.PascalUsesClauseAnnotator"/>
+
+        <!-- Pascal Documentation Provider for hover documentation -->
+        <lang.documentationProvider language="ObjectPascal"
+                                    implementationClass="nl.akiar.pascal.documentation.PascalDocumentationProvider"/>
+
+        <!-- Pascal Symbol Navigation (Go to Declaration) -->
+        <psi.referenceContributor language="ObjectPascal"
+                                  implementation="nl.akiar.pascal.reference.PascalReferenceContributor"/>
+
+        <!-- Pascal Go to Declaration Handler (Cmd+Click navigation) -->
+        <gotoDeclarationHandler implementation="nl.akiar.pascal.navigation.PascalGotoDeclarationHandler"/>
+
         <!-- DPR Project Service for monorepo support -->
         <projectService serviceImplementation="nl.akiar.pascal.dpr.DprProjectService"/>
 

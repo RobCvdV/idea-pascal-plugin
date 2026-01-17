@@ -214,12 +214,21 @@ public class PascalStructuredParser implements PsiParser {
                             || current == PascalTokenTypes.KW_RECORD
                             || current == PascalTokenTypes.KW_INTERFACE) {
                         // Look ahead to see if this is a type with body or just a reference
+                        // "class function", "class procedure", etc. are method declarations, NOT nested classes
                         PsiBuilder.Marker lookAhead = builder.mark();
                         builder.advanceLexer();
                         skipWhitespaceAndComments(builder);
-                        boolean hasBody = builder.getTokenType() != PascalTokenTypes.SEMI
-                                && builder.getTokenType() != PascalTokenTypes.RPAREN
-                                && builder.getTokenType() != PascalTokenTypes.COMMA;
+                        IElementType afterClass = builder.getTokenType();
+                        boolean isClassMethod = afterClass == PascalTokenTypes.KW_FUNCTION
+                                || afterClass == PascalTokenTypes.KW_PROCEDURE
+                                || afterClass == PascalTokenTypes.KW_CONSTRUCTOR
+                                || afterClass == PascalTokenTypes.KW_DESTRUCTOR
+                                || afterClass == PascalTokenTypes.KW_PROPERTY
+                                || afterClass == PascalTokenTypes.KW_VAR;
+                        boolean hasBody = !isClassMethod
+                                && afterClass != PascalTokenTypes.SEMI
+                                && afterClass != PascalTokenTypes.RPAREN
+                                && afterClass != PascalTokenTypes.COMMA;
                         lookAhead.rollbackTo();
 
                         if (hasBody) {

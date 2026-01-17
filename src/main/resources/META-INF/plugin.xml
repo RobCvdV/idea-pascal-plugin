@@ -124,5 +124,15 @@
 
         <!-- DPR Library Roots Provider - indexes files referenced by .dpr files -->
         <additionalLibraryRootsProvider implementation="com.mendrix.pascal.dpr.DprLibraryRootsProvider"/>
+
+        <!-- Pascal Source Paths Settings Service -->
+        <projectService serviceImplementation="com.mendrix.pascal.settings.PascalSourcePathsSettings"/>
+
+        <!-- Pascal Source Paths Settings Page -->
+        <projectConfigurable
+            id="pascal.sourcePaths"
+            parentId="language"
+            displayName="Pascal Source Paths"
+            instance="com.mendrix.pascal.settings.PascalSourcePathsConfigurable"/>
     </extensions>
 </idea-plugin>

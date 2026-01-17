@@ -7,6 +7,7 @@ import com.intellij.openapi.roots.AdditionalLibraryRootsProvider;
 import com.intellij.openapi.roots.SyntheticLibrary;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.mendrix.pascal.settings.PascalSourcePathsSettings;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -14,9 +15,9 @@ import javax.swing.*;
 import java.util.*;
 
 /**
- * Provides additional library roots from DPR-referenced files.
+ * Provides additional library roots from DPR-referenced files and user-configured paths.
  * This makes IntelliJ index files that are referenced by .dpr files
- * but are outside the current project folder.
+ * or configured in Settings > Pascal Source Paths.
  */
 public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
     private static final Logger LOG = Logger.getInstance(DprLibraryRootsProvider.class);
@@ -24,11 +25,18 @@ public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
     @Override
     @NotNull
     public Collection<SyntheticLibrary> getAdditionalProjectLibraries(@NotNull Project project) {
-        DprProjectService dprService = DprProjectService.getInstance(project);
-        Set<String> directories = dprService.getReferencedDirectories();
+        Set<String> allDirectories = new HashSet<>();
 
-        if (directories.isEmpty()) {
-            LOG.info("[DprLibraryRoots] No DPR-referenced directories found");
+        // 1. Add DPR-referenced directories
+        DprProjectService dprService = DprProjectService.getInstance(project);
+        allDirectories.addAll(dprService.getReferencedDirectories());
+
+        // 2. Add user-configured source paths
+        PascalSourcePathsSettings settings = PascalSourcePathsSettings.getInstance(project);
+        allDirectories.addAll(settings.getSourcePaths());
+
+        if (allDirectories.isEmpty()) {
+            LOG.info("[PascalLibraryRoots] No source directories found");
             return Collections.emptyList();
         }
 
@@ -36,7 +44,7 @@ public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
         List<VirtualFile> roots = new ArrayList<>();
         LocalFileSystem fs = LocalFileSystem.getInstance();
 
-        for (String dirPath : directories) {
+        for (String dirPath : allDirectories) {
             VirtualFile dir = fs.findFileByPath(dirPath);
             if (dir != null && dir.isValid() && dir.isDirectory()) {
                 // Only add directories that are NOT already in the project
@@ -47,14 +55,14 @@ public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
         }
 
         if (roots.isEmpty()) {
-            LOG.info("[DprLibraryRoots] All DPR directories are already in project");
+            LOG.info("[PascalLibraryRoots] All directories are already in project");
             return Collections.emptyList();
         }
 
-        LOG.info("[DprLibraryRoots] Adding " + roots.size() + " directories as library roots");
+        LOG.info("[PascalLibraryRoots] Adding " + roots.size() + " directories as library roots");
 
-        // Create a single synthetic library containing all DPR-referenced directories
-        SyntheticLibrary library = new DprSyntheticLibrary(roots);
+        // Create a single synthetic library containing all source directories
+        SyntheticLibrary library = new PascalSyntheticLibrary(roots);
         return Collections.singletonList(library);
     }
 
@@ -68,12 +76,12 @@ public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
     }
 
     /**
-     * Synthetic library representing DPR-referenced source files.
+     * Synthetic library representing Pascal source directories.
      */
-    private static class DprSyntheticLibrary extends SyntheticLibrary implements ItemPresentation {
+    private static class PascalSyntheticLibrary extends SyntheticLibrary implements ItemPresentation {
         private final List<VirtualFile> roots;
 
-        DprSyntheticLibrary(List<VirtualFile> roots) {
+        PascalSyntheticLibrary(List<VirtualFile> roots) {
             this.roots = roots;
         }
 
@@ -87,7 +95,7 @@ public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
         public boolean equals(Object o) {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
-            DprSyntheticLibrary that = (DprSyntheticLibrary) o;
+            PascalSyntheticLibrary that = (PascalSyntheticLibrary) o;
             return Objects.equals(roots, that.roots);
         }
 
@@ -99,13 +107,13 @@ public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
         @Override
         @Nullable
         public String getPresentableText() {
-            return "Delphi Project References";
+            return "Pascal Source Paths";
         }
 
         @Override
         @Nullable
         public String getLocationString() {
-            return roots.size() + " directories from .dpr files";
+            return roots.size() + " directories";
         }
 
         @Override

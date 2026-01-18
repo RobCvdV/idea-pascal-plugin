@@ -32,4 +32,10 @@ public interface PascalTypeDefinition extends PsiNameIdentifierOwner, StubBasedP
      */
     @Nullable
     String getDocComment();
+
+    /**
+     * Get the full header of the type declaration (e.g. "TMyClass = class(TObject)").
+     */
+    @NotNull
+    String getDeclarationHeader();
 }

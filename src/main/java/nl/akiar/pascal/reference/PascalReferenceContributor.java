@@ -41,6 +41,14 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
                     return new PsiReference[]{new PascalUnitReference(element)};
                 }
 
+                if (type == PascalTokenTypes.IDENTIFIER) {
+                    // Check if inside a unit reference
+                    PsiElement parent = element.getParent();
+                    if (parent != null && parent.getNode() != null && parent.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
+                        return new PsiReference[]{new PascalUnitReference(element)};
+                    }
+                }
+
                 if (type != PascalTokenTypes.IDENTIFIER) {
                     return PsiReference.EMPTY_ARRAY;
                 }

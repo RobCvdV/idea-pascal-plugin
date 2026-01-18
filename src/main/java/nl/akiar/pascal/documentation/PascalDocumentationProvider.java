@@ -3,14 +3,24 @@ package nl.akiar.pascal.documentation;
 import com.intellij.lang.documentation.AbstractDocumentationProvider;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.colors.EditorColorsManager;
+import com.intellij.openapi.editor.colors.EditorColorsScheme;
+import com.intellij.openapi.editor.colors.TextAttributesKey;
+import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import nl.akiar.pascal.PascalSyntaxHighlighter;
+import nl.akiar.pascal.PascalTokenType;
 import nl.akiar.pascal.PascalTokenTypes;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
+import nl.akiar.pascal.psi.TypeKind;
 import nl.akiar.pascal.stubs.PascalTypeIndex;
+import com.intellij.lang.ASTNode;
+import com.intellij.psi.tree.IElementType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.awt.*;
 import java.util.Collection;
 import java.util.List;
 
@@ -53,9 +63,17 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             LOG.info("[PascalDoc] Generating doc for type definition: " + typeDef.getName());
             StringBuilder sb = new StringBuilder();
 
-            // Type signature
-            sb.append("<b>").append(escapeHtml(typeDef.getName())).append("</b>");
-            sb.append(" (").append(typeDef.getTypeKind().name().toLowerCase()).append(")");
+            EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
+            Color bgColor = scheme.getDefaultBackground();
+            Color fgColor = scheme.getDefaultForeground();
+            String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
+            String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
+
+            // Type signature (header)
+            sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
+              .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
+            appendHighlightedHeader(sb, typeDef, scheme);
+            sb.append("</div>");
 
             // Generic parameters (only if present)
             List<String> typeParams = typeDef.getTypeParameters();
@@ -90,6 +108,141 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             return sb.toString();
         }
         return null;
+    }
+
+    private void appendHighlightedHeader(StringBuilder sb, PascalTypeDefinition typeDef, EditorColorsScheme scheme) {
+        // Re-implementing logic to iterate tokens for better highlighting:
+        ASTNode node = typeDef.getNode();
+        ASTNode child = node.getFirstChildNode();
+        TypeKind kind = typeDef.getTypeKind();
+        boolean foundKindKeyword = false;
+
+        while (child != null) {
+            IElementType type = child.getElementType();
+            String text = child.getText();
+
+            if (type == PascalTokenTypes.SEMI) {
+                sb.append(";");
+                break;
+            }
+
+            if (kind == TypeKind.CLASS || kind == TypeKind.RECORD || kind == TypeKind.INTERFACE) {
+                if (foundKindKeyword) {
+                    if (isBodyStartKeyword(type)) {
+                        break;
+                    }
+                } else {
+                    if (type == PascalTokenTypes.KW_CLASS || type == PascalTokenTypes.KW_RECORD || type == PascalTokenTypes.KW_INTERFACE) {
+                        foundKindKeyword = true;
+                    }
+                }
+            }
+
+            if (isKeyword(type)) {
+                appendStyled(sb, text, PascalSyntaxHighlighter.KEYWORD, scheme, true);
+            } else if (type == PascalTokenTypes.IDENTIFIER) {
+                if (text.equals(typeDef.getName())) {
+                    TextAttributesKey colorKey = getColorForTypeKind(typeDef.getTypeKind());
+                    appendStyled(sb, text, colorKey != null ? colorKey : PascalSyntaxHighlighter.IDENTIFIER, scheme, true);
+                } else {
+                    // Try to see if it's a known type
+                    TextAttributesKey colorKey = getIdentifierColor(text, typeDef);
+                    appendStyled(sb, text, colorKey, scheme, false);
+                }
+            } else if (type == PascalTokenTypes.STRING_LITERAL) {
+                appendStyled(sb, text, PascalSyntaxHighlighter.STRING, scheme, false);
+            } else {
+                sb.append(escapeHtml(text));
+            }
+
+            child = child.getTreeNext();
+        }
+    }
+
+    private TextAttributesKey getIdentifierColor(String text, PascalTypeDefinition context) {
+        // Simple heuristic for common types if we don't want to do a full index lookup here
+        if (text.equalsIgnoreCase("TObject")) return PascalSyntaxHighlighter.TYPE_CLASS;
+        if (text.equalsIgnoreCase("Integer") || text.equalsIgnoreCase("String") || text.equalsIgnoreCase("Boolean")) return PascalSyntaxHighlighter.TYPE_SIMPLE;
+        
+        return PascalSyntaxHighlighter.IDENTIFIER;
+    }
+
+    private void appendStyled(StringBuilder sb, String text, TextAttributesKey key, EditorColorsScheme scheme, boolean bold) {
+        TextAttributes attr = scheme.getAttributes(key);
+        Color color = attr != null ? attr.getForegroundColor() : scheme.getDefaultForeground();
+        if (color == null) color = Color.BLACK;
+
+        sb.append("<span style='color: ").append(colorToHex(color)).append(";");
+        if (bold || (attr != null && (attr.getFontType() & Font.BOLD) != 0)) {
+            sb.append(" font-weight: bold;");
+        }
+        sb.append("'>").append(escapeHtml(text)).append("</span>");
+    }
+
+    private TextAttributesKey getColorForTypeKind(TypeKind kind) {
+        if (kind == null) return null;
+        switch (kind) {
+            case CLASS:
+                return PascalSyntaxHighlighter.TYPE_CLASS;
+            case RECORD:
+                return PascalSyntaxHighlighter.TYPE_RECORD;
+            case INTERFACE:
+                return PascalSyntaxHighlighter.TYPE_INTERFACE;
+            case PROCEDURAL:
+                return PascalSyntaxHighlighter.TYPE_PROCEDURAL;
+            case ENUM:
+                return PascalSyntaxHighlighter.TYPE_ENUM;
+            case ALIAS:
+                return PascalSyntaxHighlighter.TYPE_SIMPLE;
+            default:
+                return null;
+        }
+    }
+
+    private String colorToHex(Color color) {
+        return String.format("#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
+    }
+
+    private boolean isBodyStartKeyword(IElementType type) {
+        return type == PascalTokenTypes.KW_PRIVATE
+                || type == PascalTokenTypes.KW_PROTECTED
+                || type == PascalTokenTypes.KW_PUBLIC
+                || type == PascalTokenTypes.KW_PUBLISHED
+                || type == PascalTokenTypes.KW_STRICT
+                || type == PascalTokenTypes.KW_VAR
+                || type == PascalTokenTypes.KW_CONST
+                || type == PascalTokenTypes.KW_TYPE
+                || type == PascalTokenTypes.KW_PROCEDURE
+                || type == PascalTokenTypes.KW_FUNCTION
+                || type == PascalTokenTypes.KW_CONSTRUCTOR
+                || type == PascalTokenTypes.KW_DESTRUCTOR
+                || type == PascalTokenTypes.KW_PROPERTY
+                || type == PascalTokenTypes.KW_OPERATOR
+                || type == PascalTokenTypes.KW_BEGIN;
+    }
+
+    private boolean isKeyword(IElementType type) {
+        // Simple check: keywords are PascalTokenType but not IDENTIFIER, and not literals/comments
+        if (!(type instanceof PascalTokenType)) return false;
+        if (type == PascalTokenTypes.IDENTIFIER) return false;
+        if (type == PascalTokenTypes.STRING_LITERAL) return false;
+        if (type == PascalTokenTypes.INTEGER_LITERAL) return false;
+        if (type == PascalTokenTypes.FLOAT_LITERAL) return false;
+        if (type == PascalTokenTypes.HEX_LITERAL) return false;
+        if (type == PascalTokenTypes.CHAR_LITERAL) return false;
+        if (type == PascalTokenTypes.LINE_COMMENT) return false;
+        if (type == PascalTokenTypes.BLOCK_COMMENT) return false;
+        if (type == PascalTokenTypes.COMPILER_DIRECTIVE) return false;
+        
+        // Also exclude symbols
+        String name = type.toString();
+        if (name.equals("LPAREN") || name.equals("RPAREN") || name.equals("LBRACKET") || name.equals("RBRACKET")
+            || name.equals("COMMA") || name.equals("SEMI") || name.equals("DOT") || name.equals("COLON")
+            || name.equals("EQ") || name.equals("PLUS") || name.equals("MINUS") || name.equals("MULT") || name.equals("DIVIDE")) {
+            return false;
+        }
+
+        return true;
     }
 
     private String escapeHtml(String text) {

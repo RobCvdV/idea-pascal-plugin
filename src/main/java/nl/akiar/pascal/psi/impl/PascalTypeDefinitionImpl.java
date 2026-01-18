@@ -226,6 +226,62 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
     }
 
     @Override
+    @NotNull
+    public String getDeclarationHeader() {
+        ASTNode node = getNode();
+        StringBuilder sb = new StringBuilder();
+        ASTNode child = node.getFirstChildNode();
+        TypeKind kind = getTypeKind();
+        boolean foundKindKeyword = false;
+
+        while (child != null) {
+            IElementType type = child.getElementType();
+
+            // Stop at semicolon
+            if (type == PascalTokenTypes.SEMI) {
+                sb.append(";");
+                break;
+            }
+
+            // For structured types, stop at keywords that start the body
+            if (kind == TypeKind.CLASS || kind == TypeKind.RECORD || kind == TypeKind.INTERFACE) {
+                if (foundKindKeyword) {
+                    if (isBodyStartKeyword(type)) {
+                        break;
+                    }
+                } else {
+                    if (type == PascalTokenTypes.KW_CLASS || type == PascalTokenTypes.KW_RECORD || type == PascalTokenTypes.KW_INTERFACE) {
+                        foundKindKeyword = true;
+                    }
+                }
+            }
+
+            sb.append(child.getText());
+            child = child.getTreeNext();
+        }
+
+        return sb.toString().trim();
+    }
+
+    private boolean isBodyStartKeyword(IElementType type) {
+        return type == PascalTokenTypes.KW_PRIVATE
+                || type == PascalTokenTypes.KW_PROTECTED
+                || type == PascalTokenTypes.KW_PUBLIC
+                || type == PascalTokenTypes.KW_PUBLISHED
+                || type == PascalTokenTypes.KW_STRICT
+                || type == PascalTokenTypes.KW_VAR
+                || type == PascalTokenTypes.KW_CONST
+                || type == PascalTokenTypes.KW_TYPE
+                || type == PascalTokenTypes.KW_PROCEDURE
+                || type == PascalTokenTypes.KW_FUNCTION
+                || type == PascalTokenTypes.KW_CONSTRUCTOR
+                || type == PascalTokenTypes.KW_DESTRUCTOR
+                || type == PascalTokenTypes.KW_PROPERTY
+                || type == PascalTokenTypes.KW_OPERATOR
+                || type == PascalTokenTypes.KW_BEGIN;
+    }
+
+    @Override
     public String toString() {
         return "PascalTypeDefinition(" + getName() + ", " + getTypeKind() + ")";
     }

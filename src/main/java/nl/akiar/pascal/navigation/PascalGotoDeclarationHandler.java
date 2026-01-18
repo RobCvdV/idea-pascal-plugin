@@ -40,11 +40,21 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
             return null;
         }
 
+        // Handle unit references in uses clause
+        PsiElement parent = sourceElement.getParent();
+        if (parent != null && parent.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE) {
+            nl.akiar.pascal.reference.PascalUnitReference ref = new nl.akiar.pascal.reference.PascalUnitReference(sourceElement);
+            PsiElement resolved = ref.resolve();
+            if (resolved != null) {
+                LOG.info("[PascalNav]  -> Resolved to unit file: " + ((PsiFile)resolved).getName());
+                return new PsiElement[]{resolved};
+            }
+        }
+
         String typeName = sourceElement.getText();
         LOG.info("[PascalNav] GotoDeclaration for: " + typeName);
 
         // Skip if this identifier IS a type definition name
-        PsiElement parent = sourceElement.getParent();
         if (parent instanceof PascalTypeDefinition) {
             if (((PascalTypeDefinition) parent).getNameIdentifier() == sourceElement) {
                 LOG.info("[PascalNav]  -> Skipping: this is the definition name itself");

@@ -30,10 +30,12 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
             new AttributesDescriptor("Semicolon", PascalSyntaxHighlighter.SEMICOLON),
             new AttributesDescriptor("Comma", PascalSyntaxHighlighter.COMMA),
             new AttributesDescriptor("Dot", PascalSyntaxHighlighter.DOT),
+            new AttributesDescriptor("Unit reference", PascalSyntaxHighlighter.UNIT_REFERENCE),
             // Semantic type colors
             new AttributesDescriptor("Type//Class type", PascalSyntaxHighlighter.TYPE_CLASS),
             new AttributesDescriptor("Type//Record type", PascalSyntaxHighlighter.TYPE_RECORD),
             new AttributesDescriptor("Type//Interface type", PascalSyntaxHighlighter.TYPE_INTERFACE),
+            new AttributesDescriptor("Type//Enum type", PascalSyntaxHighlighter.TYPE_ENUM),
             new AttributesDescriptor("Type//Generic parameter", PascalSyntaxHighlighter.TYPE_PARAMETER),
             new AttributesDescriptor("Type//Procedural type", PascalSyntaxHighlighter.TYPE_PROCEDURAL),
             new AttributesDescriptor("Type//Simple type", PascalSyntaxHighlighter.TYPE_SIMPLE),
@@ -64,6 +66,9 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
                "  Classes, SysUtils;\n" +
                "\n" +
                "type\n" +
+               "  TMyEnum = (Red, Green, Blue);\n" +
+               "  TMyAlias = Integer;\n" +
+               "\n" +
                "  { Procedural type }\n" +
                "  TCallback = reference to procedure(Item: TObject);\n" +
                "\n" +
@@ -72,13 +77,15 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
                "  private\n" +
                "    FName: string;\n" +
                "    FValue: T;\n" +
+               "    FColor: TMyEnum;\n" +
                "  public\n" +
                "    constructor Create(const AName: string);\n" +
                "    destructor Destroy; override;\n" +
-               "    procedure DoSomething(Count: Integer); virtual;\n" +
+               "    procedure DoSomething(Count: TMyAlias); virtual;\n" +
                "    function Calculate(X, Y: Double): Double;\n" +
                "    property Name: string read FName write FName;\n" +
                "    property Value: T read FValue write FValue;\n" +
+               "    property Color: TMyEnum read FColor write FColor;\n" +
                "  end;\n" +
                "\n" +
                "const\n" +

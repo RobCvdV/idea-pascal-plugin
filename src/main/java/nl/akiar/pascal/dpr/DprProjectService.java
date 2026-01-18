@@ -3,6 +3,7 @@ package nl.akiar.pascal.dpr;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 
@@ -80,7 +81,7 @@ public class DprProjectService implements Disposable {
         Set<String> newAllFiles = new HashSet<>();
 
         // Find all .dpr files by traversing VFS (avoid FilenameIndex to prevent circular dependency)
-        VirtualFile baseDir = project.getBaseDir();
+        VirtualFile baseDir = ProjectUtil.guessProjectDir(project);
         if (baseDir != null) {
             List<VirtualFile> dprFiles = new ArrayList<>();
             findDprFilesRecursively(baseDir, dprFiles, 10); // max depth 10
@@ -135,7 +136,7 @@ public class DprProjectService implements Disposable {
      * This helps with monorepo structures where .dpr might be outside the opened folder.
      */
     private void scanParentDirectoriesForDpr(Map<String, List<String>> cache, Set<String> allFiles) {
-        VirtualFile baseDir = project.getBaseDir();
+        VirtualFile baseDir = ProjectUtil.guessProjectDir(project);
         if (baseDir == null) return;
 
         VirtualFile parent = baseDir.getParent();

@@ -28,7 +28,6 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
 
     public PascalTypeDefinitionImpl(@NotNull ASTNode node) {
         super(node);
-        com.intellij.openapi.diagnostic.Logger.getInstance(PascalTypeDefinitionImpl.class).info("[PascalPSI] Created PascalTypeDefinitionImpl for: " + node.getElementType());
     }
 
     public PascalTypeDefinitionImpl(@NotNull PascalTypeStub stub, @NotNull IStubElementType<?, ?> nodeType) {
@@ -170,13 +169,6 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
         throw new IncorrectOperationException("Renaming not supported yet");
     }
 
-    @Override
-    public PsiReference getReference() {
-        // A type definition itself doesn't have a reference unless we consider it referencing its own name
-        // but usually we return the reference from the identifier.
-        // However, some IDE features look at the element itself.
-        return null;
-    }
 
     @Override
     @Nullable

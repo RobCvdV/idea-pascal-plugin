@@ -29,6 +29,8 @@ public class PascalStructuredParser implements PsiParser {
             if (tokenType == PascalTokenTypes.KW_TYPE) {
                 // LOG.info("[PascalParser] Found 'type' section at offset " + builder.getCurrentOffset());
                 parseTypeSection(builder);
+            } else if (tokenType == PascalTokenTypes.KW_USES) {
+                parseUsesSection(builder);
             } else {
                 builder.advanceLexer();
             }
@@ -161,7 +163,7 @@ public class PascalStructuredParser implements PsiParser {
             skipWhitespaceAndComments(builder);
         }
 
-        LOG.info("[PascalParser] Parsing other type definition: " + typeName + " starting at " + builder.getTokenText());
+        // LOG.info("[PascalParser] Parsing other type definition: " + typeName + " starting at " + builder.getTokenText());
 
         // Handle procedure types and method references
         // e.g., TMyProc = procedure(A: Integer);
@@ -525,6 +527,55 @@ public class PascalStructuredParser implements PsiParser {
         }
         skipWhitespaceAndComments(builder);
         // LOG.info("[PascalParser] Leaving parseGenericParameters");
+    }
+
+    /**
+     * Parse a uses section.
+     * uses Unit1, Unit2, Unit3 in 'Unit3.pas';
+     */
+    private void parseUsesSection(PsiBuilder builder) {
+        builder.advanceLexer(); // consume 'uses'
+        skipWhitespaceAndComments(builder);
+
+        while (!builder.eof() && builder.getTokenType() != PascalTokenTypes.SEMI && !isSectionKeyword(builder.getTokenType())) {
+            if (builder.getTokenType() == PascalTokenTypes.IDENTIFIER) {
+                PsiBuilder.Marker unitMarker = builder.mark();
+                // Consume dotted identifier
+                builder.advanceLexer();
+                skipWhitespaceAndComments(builder);
+                while (builder.getTokenType() == PascalTokenTypes.DOT) {
+                    builder.advanceLexer();
+                    skipWhitespaceAndComments(builder);
+                    if (builder.getTokenType() == PascalTokenTypes.IDENTIFIER) {
+                        builder.advanceLexer();
+                        skipWhitespaceAndComments(builder);
+                    } else {
+                        break;
+                    }
+                }
+                unitMarker.done(PascalElementTypes.UNIT_REFERENCE);
+
+                // Check for 'in' clause
+                if (builder.getTokenType() == PascalTokenTypes.KW_IN) {
+                    builder.advanceLexer();
+                    skipWhitespaceAndComments(builder);
+                    if (builder.getTokenType() == PascalTokenTypes.STRING_LITERAL) {
+                        builder.advanceLexer();
+                        skipWhitespaceAndComments(builder);
+                    }
+                }
+            } else if (builder.getTokenType() == PascalTokenTypes.COMMA) {
+                builder.advanceLexer();
+                skipWhitespaceAndComments(builder);
+            } else {
+                builder.advanceLexer();
+                skipWhitespaceAndComments(builder);
+            }
+        }
+
+        if (builder.getTokenType() == PascalTokenTypes.SEMI) {
+            builder.advanceLexer();
+        }
     }
 
     private void skipWhitespaceAndComments(PsiBuilder builder) {

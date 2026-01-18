@@ -18,4 +18,9 @@ public interface PascalElementTypes {
      * Element type for generic parameters.
      */
     com.intellij.psi.tree.IElementType GENERIC_PARAMETER = new nl.akiar.pascal.PascalTokenType("GENERIC_PARAMETER");
+
+    /**
+     * Element type for unit references in uses clause.
+     */
+    com.intellij.psi.tree.IElementType UNIT_REFERENCE = new nl.akiar.pascal.PascalTokenType("UNIT_REFERENCE");
 }

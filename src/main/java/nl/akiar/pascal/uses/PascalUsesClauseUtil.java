@@ -2,10 +2,15 @@ package nl.akiar.pascal.uses;
 
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.Key;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.util.CachedValue;
+import com.intellij.psi.util.CachedValueProvider;
+import com.intellij.psi.util.CachedValuesManager;
 import nl.akiar.pascal.PascalTokenTypes;
+import nl.akiar.pascal.psi.PascalElementTypes;
 import nl.akiar.pascal.settings.PascalSourcePathsSettings;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -18,6 +23,7 @@ import java.util.*;
  */
 public class PascalUsesClauseUtil {
     private static final Logger LOG = Logger.getInstance(PascalUsesClauseUtil.class);
+    private static final Key<CachedValue<UsesClauseInfo>> USES_CLAUSE_CACHE_KEY = Key.create("PASCAL_USES_CLAUSE_CACHE");
 
     /**
      * Result of parsing uses clauses from a Pascal file.
@@ -168,34 +174,46 @@ public class PascalUsesClauseUtil {
      */
     @NotNull
     public static UsesClauseInfo parseUsesClause(@NotNull PsiFile file) {
-        Set<String> interfaceUses = new LinkedHashSet<>();
-        Set<String> implementationUses = new LinkedHashSet<>();
-        int interfaceSectionStart = -1;
-        int implementationSectionStart = -1;
+        return CachedValuesManager.getManager(file.getProject()).getCachedValue(file, USES_CLAUSE_CACHE_KEY, () -> {
+            Set<String> interfaceUses = new LinkedHashSet<>();
+            Set<String> implementationUses = new LinkedHashSet<>();
+            int interfaceSectionStart = -1;
+            int implementationSectionStart = -1;
 
-        ASTNode fileNode = file.getNode();
-        if (fileNode == null) {
-            return new UsesClauseInfo(interfaceUses, implementationUses, interfaceSectionStart, implementationSectionStart);
-        }
+            ASTNode fileNode = file.getNode();
+            if (fileNode == null) {
+                return CachedValueProvider.Result.create(
+                        new UsesClauseInfo(interfaceUses, implementationUses, interfaceSectionStart, implementationSectionStart),
+                        file);
+            }
 
-        // Use a recursive search for sections and uses clauses
-        ParseState state = new ParseState();
-        findSectionsAndUses(fileNode, state, interfaceUses, implementationUses);
+            // Use a recursive search for sections and uses clauses
+            ParseState state = new ParseState();
+            findSectionsAndUses(fileNode, state, interfaceUses, implementationUses);
 
-        // For program files (no interface/implementation), treat all uses as "interface" uses
-        // and make them available everywhere
-        if (state.interfaceSectionStart < 0 && state.implementationSectionStart < 0 && !interfaceUses.isEmpty()) {
-            // File has uses but no sections - it's likely a program file
-            state.interfaceSectionStart = 0;
-        }
+            // For program files (no interface/implementation), treat all uses as "interface" uses
+            // and make them available everywhere
+            if (state.interfaceSectionStart < 0 && state.implementationSectionStart < 0 && !interfaceUses.isEmpty()) {
+                // File has uses but no sections - it's likely a program or project file
+                state.interfaceSectionStart = 0;
+            }
 
-        LOG.info("[PascalUses] Parsed file " + file.getName() +
-                 ": interface uses=" + interfaceUses +
-                 ", implementation uses=" + implementationUses +
-                 ", interfaceStart=" + state.interfaceSectionStart +
-                 ", implementationStart=" + state.implementationSectionStart);
+            // If it's a project/program file, we might have uses without sections, 
+            // but we still want to mark it as being in "interface" scope so errors are reported correctly
+            if (state.interfaceSectionStart < 0 && (file.getName().endsWith(".dpr") || file.getName().endsWith(".lpr"))) {
+                state.interfaceSectionStart = 0;
+            }
 
-        return new UsesClauseInfo(interfaceUses, implementationUses, state.interfaceSectionStart, state.implementationSectionStart);
+            // LOG.info("[PascalUses] Parsed file " + file.getName() +
+            //          ": interface uses=" + interfaceUses +
+            //          ", implementation uses=" + implementationUses +
+            //          ", interfaceStart=" + state.interfaceSectionStart +
+            //          ", implementationStart=" + state.implementationSectionStart);
+
+            return CachedValueProvider.Result.create(
+                    new UsesClauseInfo(interfaceUses, implementationUses, state.interfaceSectionStart, state.implementationSectionStart),
+                    file);
+        }, false);
     }
 
     private static class ParseState {
@@ -225,10 +243,13 @@ public class PascalUsesClauseUtil {
             } else if (type == PascalTokenTypes.KW_USES) {
                 Set<String> targetSet = state.inImplementationSection ? implementationUses : interfaceUses;
                 parseUsesClauseContent(child, targetSet);
+                // After parsing KW_USES, we skip its immediate siblings handled by parseUsesClauseContent
+                // but findSectionsAndUses will still visit them as siblings of KW_USES in the next iteration.
             }
-
-            // Recurse into children to handle potentially nested structures
-            findSectionsAndUses(child, state, interfaceUses, implementationUses);
+            // Recurse into children
+            if (type != PascalTokenTypes.KW_USES) { // Optimization: KW_USES is a leaf in current structured parser, no need to recurse
+                findSectionsAndUses(child, state, interfaceUses, implementationUses);
+            }
 
             child = child.getTreeNext();
         }
@@ -239,7 +260,23 @@ public class PascalUsesClauseUtil {
      * Handles dotted unit names like "System.Generics.Collections" or "Next.Core.Struct".
      */
     private static void parseUsesClauseContent(ASTNode usesNode, Set<String> targetSet) {
+        // The children of 'uses' node might contain the unit references if it's a structured node
+        if (usesNode.getFirstChildNode() != null) {
+            ASTNode child = usesNode.getFirstChildNode();
+            while (child != null) {
+                if (child.getElementType() == PascalElementTypes.UNIT_REFERENCE) {
+                    targetSet.add(child.getText().toLowerCase());
+                } else if (child.getElementType() == PascalTokenTypes.IDENTIFIER) {
+                    // Fallback for simple identifiers if UNIT_REFERENCE is not used
+                    targetSet.add(child.getText().toLowerCase());
+                }
+                child = child.getTreeNext();
+            }
+        }
+
         ASTNode current = usesNode.getTreeNext();
+        // Skip whitespace and comments immediately after 'uses'
+        current = skipIgnorableTokens(current);
 
         while (current != null) {
             IElementType type = current.getElementType();
@@ -247,6 +284,11 @@ public class PascalUsesClauseUtil {
             if (type == PascalTokenTypes.SEMI) {
                 // End of uses clause
                 break;
+            } else if (type == PascalElementTypes.UNIT_REFERENCE) {
+                targetSet.add(current.getText().toLowerCase());
+                current = current.getTreeNext();
+                current = skipIgnorableTokens(current);
+                continue;
             } else if (type == PascalTokenTypes.IDENTIFIER) {
                 // Build the full dotted unit name: Next.Core.Struct
                 StringBuilder unitName = new StringBuilder(current.getText());
@@ -276,7 +318,9 @@ public class PascalUsesClauseUtil {
                 }
 
                 targetSet.add(unitName.toString().toLowerCase());
-                continue; // Don't advance again, we already moved past the unit name
+                // We are now past the unit name (and dots), and skipIgnorableTokens was called.
+                // Next token could be COMMA, SEMI, or KW_IN.
+                continue; 
             } else if (type == PascalTokenTypes.KW_IN) {
                 // Skip "in 'path'" part
                 current = current.getTreeNext();
@@ -288,10 +332,16 @@ public class PascalUsesClauseUtil {
                     current = current.getTreeNext();
                 }
                 if (current == null) break;
-                continue; // Don't advance again, we are at COMMA or SEMI
+                // We are at COMMA or SEMI, the loop will handle it (skip COMMA or break SEMI)
+            } else if (type == PascalTokenTypes.COMMA) {
+                current = current.getTreeNext();
+                current = skipIgnorableTokens(current);
+                continue;
+            } else {
+                // Unexpected token, skip it
+                current = current.getTreeNext();
+                current = skipIgnorableTokens(current);
             }
-            // Skip whitespace, comments, commas
-            current = current.getTreeNext();
         }
     }
 

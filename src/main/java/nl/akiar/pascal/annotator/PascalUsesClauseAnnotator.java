@@ -8,7 +8,9 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import nl.akiar.pascal.PascalLanguage;
 import nl.akiar.pascal.PascalTokenTypes;
+import nl.akiar.pascal.psi.PascalElementTypes;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
+import nl.akiar.pascal.reference.PascalUnitReference;
 import nl.akiar.pascal.stubs.PascalTypeIndex;
 import nl.akiar.pascal.uses.PascalUsesClauseUtil;
 import org.jetbrains.annotations.NotNull;
@@ -26,6 +28,27 @@ public class PascalUsesClauseAnnotator implements Annotator {
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
         // Only process Pascal files
         if (element.getLanguage() != PascalLanguage.INSTANCE) {
+            return;
+        }
+
+        // Handle unit references in uses clause
+        if (element.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
+            PascalUnitReference ref = new PascalUnitReference(element);
+            PsiElement resolved = ref.resolve();
+            if (resolved == null) {
+                holder.newAnnotation(HighlightSeverity.ERROR, "Unknown unit `" + element.getText() + "`, please add unit and location to the projectfile: `Projectfile.dpr`")
+                        .range(element)
+                        .create();
+            } else if (ref.isResolvedViaScopeNames()) {
+                PsiFile targetFile = (PsiFile) resolved;
+                String fullUnitName = targetFile.getName();
+                if (fullUnitName.endsWith(".pas")) {
+                    fullUnitName = fullUnitName.substring(0, fullUnitName.length() - 4);
+                }
+                holder.newAnnotation(HighlightSeverity.WARNING, "Unit '" + fullUnitName + "' is resolved via unit scope names. Using short unit names in the uses clause is considered bad practice.")
+                        .range(element)
+                        .create();
+            }
             return;
         }
 

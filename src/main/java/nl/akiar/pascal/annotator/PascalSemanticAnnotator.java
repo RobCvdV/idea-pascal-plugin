@@ -8,6 +8,7 @@ import com.intellij.lang.ASTNode;
 import com.intellij.psi.PsiElement;
 import nl.akiar.pascal.PascalSyntaxHighlighter;
 import nl.akiar.pascal.PascalTokenTypes;
+import nl.akiar.pascal.psi.PascalElementTypes;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
 import nl.akiar.pascal.psi.TypeKind;
 import nl.akiar.pascal.stubs.PascalTypeIndex;
@@ -69,8 +70,17 @@ public class PascalSemanticAnnotator implements Annotator {
     @Override
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
         // Color generic parameters
-        if (element.getNode() != null && element.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.GENERIC_PARAMETER) {
+        if (element.getNode() != null && element.getNode().getElementType() == PascalElementTypes.GENERIC_PARAMETER) {
             annotateGenericParameter(element, holder);
+            return;
+        }
+
+        // Color unit references in uses clause
+        if (element.getNode() != null && element.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
+            holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
+                    .range(element)
+                    .textAttributes(PascalSyntaxHighlighter.UNIT_REFERENCE)
+                    .create();
             return;
         }
 
@@ -127,6 +137,12 @@ public class PascalSemanticAnnotator implements Annotator {
     }
 
     private void annotateTypeReference(PsiElement element, AnnotationHolder holder) {
+        // Skip if inside a unit reference in uses clause
+        PsiElement parent = element.getParent();
+        if (parent != null && parent.getNode() != null && parent.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
+            return;
+        }
+
         String text = element.getText();
 
         // Check for TObject - specifically requested to be class color
@@ -170,7 +186,6 @@ public class PascalSemanticAnnotator implements Annotator {
         }
 
         // Skip the name identifier of a type definition (already colored by annotateTypeDefinition)
-        PsiElement parent = element.getParent();
         if (parent instanceof PascalTypeDefinition) {
             PascalTypeDefinition typeDef = (PascalTypeDefinition) parent;
             if (element.equals(typeDef.getNameIdentifier())) {
@@ -215,6 +230,10 @@ public class PascalSemanticAnnotator implements Annotator {
                 return PascalSyntaxHighlighter.TYPE_INTERFACE;
             case PROCEDURAL:
                 return PascalSyntaxHighlighter.TYPE_PROCEDURAL;
+            case ENUM:
+                return PascalSyntaxHighlighter.TYPE_ENUM;
+            case ALIAS:
+                return PascalSyntaxHighlighter.TYPE_SIMPLE;
             default:
                 return null;
         }

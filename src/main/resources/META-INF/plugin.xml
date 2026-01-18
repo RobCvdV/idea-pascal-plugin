@@ -134,6 +134,9 @@
         <!-- Pascal Go to Declaration Handler (Cmd+Click navigation) -->
         <gotoDeclarationHandler implementation="nl.akiar.pascal.navigation.PascalGotoDeclarationHandler"/>
 
+        <!-- Pascal Project Service for .dproj and .optset support -->
+        <projectService serviceImplementation="nl.akiar.pascal.project.PascalProjectService"/>
+
         <!-- DPR Project Service for monorepo support -->
         <projectService serviceImplementation="nl.akiar.pascal.dpr.DprProjectService"/>
 

@@ -8,7 +8,10 @@ import com.intellij.psi.*;
 import com.intellij.util.ProcessingContext;
 import com.intellij.psi.tree.IElementType;
 import nl.akiar.pascal.PascalLanguage;
+import nl.akiar.pascal.PascalPsiElement;
 import nl.akiar.pascal.PascalTokenTypes;
+import nl.akiar.pascal.psi.PascalElementTypes;
+import nl.akiar.pascal.psi.PascalTypeDefinition;
 import org.jetbrains.annotations.NotNull;
 
 public class PascalReferenceContributor extends PsiReferenceContributor {
@@ -34,14 +37,18 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
                          " expectedHash: " + System.identityHashCode(PascalTokenTypes.IDENTIFIER) +
                          " match: " + (type == PascalTokenTypes.IDENTIFIER));
 
+                if (type == PascalElementTypes.UNIT_REFERENCE) {
+                    return new PsiReference[]{new PascalUnitReference(element)};
+                }
+
                 if (type != PascalTokenTypes.IDENTIFIER) {
                     return PsiReference.EMPTY_ARRAY;
                 }
 
                 // Skip if it's a definition
                 PsiElement parent = element.getParent();
-                if (parent instanceof nl.akiar.pascal.psi.PascalTypeDefinition) {
-                    if (((nl.akiar.pascal.psi.PascalTypeDefinition) parent).getNameIdentifier() == element) {
+                if (parent instanceof PascalTypeDefinition) {
+                    if (((PascalTypeDefinition) parent).getNameIdentifier() == element) {
                         LOG.info("[PascalNav]  -> Skipping definition name: " + text);
                         return PsiReference.EMPTY_ARRAY;
                     }
@@ -52,9 +59,8 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
             }
         };
 
-        // Use a broader pattern to debug - match any element in Pascal language
         registrar.registerReferenceProvider(
-                PlatformPatterns.psiElement()
+                PlatformPatterns.psiElement(PascalPsiElement.class)
                         .withLanguage(PascalLanguage.INSTANCE),
                 provider);
         LOG.info("[PascalNav] Registration complete (broad pattern for debugging)");

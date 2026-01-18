@@ -3,10 +3,12 @@ package nl.akiar.pascal.dpr;
 import com.intellij.navigation.ItemPresentation;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.roots.AdditionalLibraryRootsProvider;
 import com.intellij.openapi.roots.SyntheticLibrary;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
+import nl.akiar.pascal.project.PascalProjectService;
 import nl.akiar.pascal.settings.PascalSourcePathsSettings;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -31,7 +33,11 @@ public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
         DprProjectService dprService = DprProjectService.getInstance(project);
         allDirectories.addAll(dprService.getReferencedDirectories());
 
-        // 2. Add user-configured source paths
+        // 2. Add directories discovered from .dproj and .optset
+        PascalProjectService pascalProjectService = PascalProjectService.getInstance(project);
+        allDirectories.addAll(pascalProjectService.getDiscoveredDirectories());
+
+        // 3. Add user-configured source paths
         PascalSourcePathsSettings settings = PascalSourcePathsSettings.getInstance(project);
         allDirectories.addAll(settings.getSourcePaths());
 
@@ -67,7 +73,7 @@ public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
     }
 
     private boolean isInsideProject(@NotNull Project project, @NotNull VirtualFile file) {
-        VirtualFile baseDir = project.getBaseDir();
+        VirtualFile baseDir = ProjectUtil.guessProjectDir(project);
         if (baseDir == null) return false;
 
         String basePath = baseDir.getPath();

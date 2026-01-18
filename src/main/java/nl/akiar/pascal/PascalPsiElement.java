@@ -14,15 +14,6 @@ public class PascalPsiElement extends ASTWrapperPsiElement {
 
     public PascalPsiElement(@NotNull ASTNode node) {
         super(node);
-        LOG.info("[PascalPSI] Created PascalPsiElement for: " + node.getElementType());
     }
 
-    @Override
-    public PsiReference getReference() {
-        PsiReference[] refs = getReferences();
-        if (refs.length > 0) {
-            return refs[0];
-        }
-        return super.getReference();
-    }
 }

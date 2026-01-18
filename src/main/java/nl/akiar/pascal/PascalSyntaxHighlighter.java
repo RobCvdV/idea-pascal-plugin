@@ -50,6 +50,9 @@ public class PascalSyntaxHighlighter extends SyntaxHighlighterBase {
     public static final TextAttributesKey DOT =
             createTextAttributesKey("PASCAL_DOT", DefaultLanguageHighlighterColors.DOT);
 
+    public static final TextAttributesKey UNIT_REFERENCE =
+            createTextAttributesKey("PASCAL_UNIT_REFERENCE", DefaultLanguageHighlighterColors.IDENTIFIER);
+
     // Type definition colors for semantic highlighting
     public static final TextAttributesKey TYPE_CLASS =
             createTextAttributesKey("PASCAL_TYPE_CLASS", DefaultLanguageHighlighterColors.CLASS_NAME);
@@ -65,6 +68,9 @@ public class PascalSyntaxHighlighter extends SyntaxHighlighterBase {
 
     public static final TextAttributesKey TYPE_PROCEDURAL =
             createTextAttributesKey("PASCAL_TYPE_PROCEDURAL", DefaultLanguageHighlighterColors.FUNCTION_DECLARATION);
+
+    public static final TextAttributesKey TYPE_ENUM =
+            createTextAttributesKey("PASCAL_TYPE_ENUM", DefaultLanguageHighlighterColors.CONSTANT);
 
     public static final TextAttributesKey TYPE_SIMPLE =
             createTextAttributesKey("PASCAL_TYPE_SIMPLE", DefaultLanguageHighlighterColors.PREDEFINED_SYMBOL);

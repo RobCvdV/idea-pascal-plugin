@@ -8,5 +8,7 @@ public enum TypeKind {
     RECORD,
     INTERFACE,
     PROCEDURAL,
+    ENUM,
+    ALIAS,
     UNKNOWN
 }

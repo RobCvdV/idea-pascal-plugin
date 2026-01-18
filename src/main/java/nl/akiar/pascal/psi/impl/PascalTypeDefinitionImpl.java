@@ -86,6 +86,10 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
                     return TypeKind.INTERFACE;
                 } else if (type == PascalTokenTypes.KW_REFERENCE || type == PascalTokenTypes.KW_PROCEDURE || type == PascalTokenTypes.KW_FUNCTION) {
                     return TypeKind.PROCEDURAL;
+                } else if (type == PascalTokenTypes.LPAREN) {
+                    return TypeKind.ENUM;
+                } else if (type == PascalTokenTypes.IDENTIFIER || type == PascalTokenTypes.KW_STRING || type == PascalTokenTypes.KW_ARRAY || type == PascalTokenTypes.KW_SET || type == PascalTokenTypes.KW_FILE) {
+                    return TypeKind.ALIAS;
                 } else {
                     // If we found something else after equals, it's not one of our main kinds
                     // but we should keep looking just in case (though unlikely in valid Pascal)

@@ -215,6 +215,32 @@ public class PascalStructuredParser implements PsiParser {
             }
         }
 
+        // Consume until semicolon or next section
+        while (!builder.eof() && builder.getTokenType() != PascalTokenTypes.SEMI && !isSectionKeyword(builder.getTokenType())) {
+            IElementType current = builder.getTokenType();
+            if (current == PascalTokenTypes.LPAREN) {
+                int depth = 1;
+                builder.advanceLexer();
+                while (!builder.eof() && depth > 0) {
+                    if (builder.getTokenType() == PascalTokenTypes.LPAREN) depth++;
+                    else if (builder.getTokenType() == PascalTokenTypes.RPAREN) depth--;
+                    builder.advanceLexer();
+                }
+                continue;
+            }
+            if (current == PascalTokenTypes.LBRACKET) {
+                int depth = 1;
+                builder.advanceLexer();
+                while (!builder.eof() && depth > 0) {
+                    if (builder.getTokenType() == PascalTokenTypes.LBRACKET) depth++;
+                    else if (builder.getTokenType() == PascalTokenTypes.RBRACKET) depth--;
+                    builder.advanceLexer();
+                }
+                continue;
+            }
+            builder.advanceLexer();
+        }
+
         // Consume until semicolon
         skipToSemicolon(builder);
 

@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>nl.akiar.pascal-support</id>
     <name>Delphi Pascal Support</name>
-    <version>1.2.0</version>
+    <version>0.0.2</version>
     <vendor>Akiar</vendor>
 
     <description><![CDATA[
@@ -24,40 +24,12 @@
     ]]></description>
 
     <change-notes><![CDATA[
-    Version 1.2.0:
-    - Added semantic highlighting for Pascal type definitions
-    - Classes, records, and interfaces get distinct colors
-    - Added stub indexing for type definitions (POC)
+    Version 0.0.2:
+    - Object Pascal (.pas, .dpr, .dpk): syntax highlighting, compiler directive highlighting, code folding for major block types, interface/implementation folding, configurable colors
+    - DFM (.dfm): syntax highlighting for keywords/properties/object and class names, literals and comments, code folding for object/item blocks, configurable colors
 
-    Version 1.1.0:
-    - Added Object Pascal language support (.pas, .dpr, .dpk)
-    - Full Pascal syntax highlighting with 80+ keywords
-    - Pascal code folding for all block types
-    - Compiler directive highlighting
-    - Pascal Color Settings Page
-
-    Version 1.0.5:
-    - Added property name highlighting (left side of = assignments)
-    - Added boolean highlighting (True/False)
-    - Object references after = now highlighted as object names
-
-    Version 1.0.4:
-    - Added distinct highlighting for object names and class/type names
-    - Added code folding for item...end blocks
-
-    Version 1.0.3:
-    - Added Color Settings Page for customizing syntax highlighting colors
-    - Rewrote lexer for improved stability
-
-    Version 1.0.2:
-    - Fixed lexer adapter causing "discontinuous token sequence" errors
-    - Fixed folding builder creating out-of-range fold regions
-
-    Version 1.0.1:
-    - Bug fixes
-
-    Version 1.0.0:
-    - Initial release with DFM support
+    Version 0.0.1:
+    - Initial release with DFM and Object Pascal support: basic syntax highlighting and code folding, configurable colors
     ]]></change-notes>
 
     <!-- IntelliJ Platform compatibility -->

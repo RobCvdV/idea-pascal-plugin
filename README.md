@@ -35,13 +35,13 @@ A comprehensive IntelliJ IDEA plugin that provides syntax highlighting and code 
    ./gradlew buildPlugin
    ```
 
-3. The plugin will be built to: `build/distributions/pascal-plugin-1.2.0.zip`
+3. The plugin will be built to: `build/distributions/pascal-plugin-#.#.#.zip`
 
 ## Installing the Plugin
 1. Open IntelliJ IDEA (or any JetBrains IDE)
 2. Go to **Settings** (or **Preferences** on macOS) → **Plugins**
 3. Click the gear icon ⚙️ → **Install Plugin from Disk...**
-4. Navigate to and select: `build/distributions/pascal-plugin-1.2.0.zip`
+4. Navigate to and select: `build/distributions/pascal-plugin-#.#.#.zip`
 5. Click **OK** and restart IntelliJ IDEA
 
 ## Development

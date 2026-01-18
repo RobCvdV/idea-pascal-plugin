@@ -6,6 +6,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.tree.IElementType;
 import nl.akiar.pascal.PascalTokenTypes;
+import nl.akiar.pascal.settings.PascalSourcePathsSettings;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -62,15 +63,91 @@ public class PascalUsesClauseUtil {
             return implementationSectionStart;
         }
 
+        /**
+         * Check if a unit is available at a given offset, considering unit scope names.
+         * @param unitName The unit name to check (e.g. "SysUtils")
+         * @param offset The offset in the file
+         * @param scopes Optional list of scope names (e.g. ["System"])
+         * @return Name found in uses clause if the unit (or unit with scope) is in the uses clause, null otherwise
+         */
+        @Nullable
+        public String findUnitInUses(String unitName, int offset, @Nullable List<String> scopes) {
+            String lowerUnit = unitName.toLowerCase();
+
+            // 1. Implicit inclusion: if unitName itself is a scope name (e.g., "System"),
+            // it is considered to be in uses clause of EVERY file always.
+            if (scopes != null) {
+                for (String scope : scopes) {
+                    if (lowerUnit.equalsIgnoreCase(scope)) {
+                        return unitName;
+                    }
+                }
+            }
+
+            Set<String> availableUnits = getAvailableUnits(offset);
+
+            // 2. Direct match in uses clause
+            if (availableUnits.contains(lowerUnit)) {
+                return unitName;
+            }
+
+            if (scopes != null) {
+                for (String scope : scopes) {
+                    String lowerScope = scope.toLowerCase();
+
+                    // 3. Scoped match (e.g., "System.SysUtils" in uses clause allows "SysUtils")
+                    String scopedName = (lowerScope + "." + lowerUnit);
+                    if (availableUnits.contains(scopedName)) {
+                        // Return the actual scoped name from uses if possible
+                        for (String unit : availableUnits) {
+                            if (unit.equals(scopedName)) return unit;
+                        }
+                        return scope + "." + unitName;
+                    }
+
+                    // 4. Reverse scoped match (e.g., "SysUtils" in uses clause allows "System.SysUtils" unit)
+                    // If targetUnit is "System.SysUtils" and "System" is a scope, and "SysUtils" is in uses clause
+                    if (lowerUnit.startsWith(lowerScope + ".")) {
+                        String shortUnitName = lowerUnit.substring(lowerScope.length() + 1);
+                        if (availableUnits.contains(shortUnitName)) {
+                            // Return the short unit name that was found in uses
+                            for (String unit : availableUnits) {
+                                if (unit.equals(shortUnitName)) return unit;
+                            }
+                            return shortUnitName;
+                        }
+                    }
+                }
+            }
+
+            return null;
+        }
+
         /** Check if a unit is available at a given offset */
         public boolean isUnitAvailable(String unitName, int offset) {
-            String lowerUnit = unitName.toLowerCase();
+            return isUnitAvailable(unitName, offset, null);
+        }
+
+        /**
+         * Check if a unit is available at a given offset, considering unit scope names.
+         * @param unitName The unit name to check (e.g. "SysUtils")
+         * @param offset The offset in the file
+         * @param scopes Optional list of scope names (e.g. ["System"])
+         * @return true if the unit (or unit with scope) is in the uses clause
+         */
+        public boolean isUnitAvailable(String unitName, int offset, @Nullable List<String> scopes) {
+            return findUnitInUses(unitName, offset, scopes) != null;
+        }
+
+        private Set<String> getAvailableUnits(int offset) {
             // If in implementation section, both uses clauses are available
             if (implementationSectionStart >= 0 && offset >= implementationSectionStart) {
-                return interfaceUses.contains(lowerUnit) || implementationUses.contains(lowerUnit);
+                Set<String> all = new HashSet<>(interfaceUses);
+                all.addAll(implementationUses);
+                return all;
             }
             // If in interface section, only interface uses are available
-            return interfaceUses.contains(lowerUnit);
+            return interfaceUses;
         }
 
         /** Check if an offset is in the interface section */
@@ -101,43 +178,60 @@ public class PascalUsesClauseUtil {
             return new UsesClauseInfo(interfaceUses, implementationUses, interfaceSectionStart, implementationSectionStart);
         }
 
-        // Track current section
-        boolean inInterfaceSection = false;
-        boolean inImplementationSection = false;
-
-        ASTNode child = fileNode.getFirstChildNode();
-        while (child != null) {
-            IElementType type = child.getElementType();
-
-            if (type == PascalTokenTypes.KW_INTERFACE) {
-                inInterfaceSection = true;
-                inImplementationSection = false;
-                interfaceSectionStart = child.getStartOffset();
-            } else if (type == PascalTokenTypes.KW_IMPLEMENTATION) {
-                inInterfaceSection = false;
-                inImplementationSection = true;
-                implementationSectionStart = child.getStartOffset();
-            } else if (type == PascalTokenTypes.KW_USES) {
-                // Parse the uses clause
-                Set<String> targetSet = inImplementationSection ? implementationUses : interfaceUses;
-                parseUsesClauseContent(child, targetSet);
-            }
-
-            child = child.getTreeNext();
-        }
+        // Use a recursive search for sections and uses clauses
+        ParseState state = new ParseState();
+        findSectionsAndUses(fileNode, state, interfaceUses, implementationUses);
 
         // For program files (no interface/implementation), treat all uses as "interface" uses
         // and make them available everywhere
-        if (interfaceSectionStart < 0 && implementationSectionStart < 0 && !interfaceUses.isEmpty()) {
+        if (state.interfaceSectionStart < 0 && state.implementationSectionStart < 0 && !interfaceUses.isEmpty()) {
             // File has uses but no sections - it's likely a program file
-            interfaceSectionStart = 0;
+            state.interfaceSectionStart = 0;
         }
 
         LOG.info("[PascalUses] Parsed file " + file.getName() +
                  ": interface uses=" + interfaceUses +
-                 ", implementation uses=" + implementationUses);
+                 ", implementation uses=" + implementationUses +
+                 ", interfaceStart=" + state.interfaceSectionStart +
+                 ", implementationStart=" + state.implementationSectionStart);
 
-        return new UsesClauseInfo(interfaceUses, implementationUses, interfaceSectionStart, implementationSectionStart);
+        return new UsesClauseInfo(interfaceUses, implementationUses, state.interfaceSectionStart, state.implementationSectionStart);
+    }
+
+    private static class ParseState {
+        boolean inInterfaceSection = false;
+        boolean inImplementationSection = false;
+        int interfaceSectionStart = -1;
+        int implementationSectionStart = -1;
+    }
+
+    private static void findSectionsAndUses(ASTNode node, ParseState state, Set<String> interfaceUses, Set<String> implementationUses) {
+        ASTNode child = node.getFirstChildNode();
+        while (child != null) {
+            IElementType type = child.getElementType();
+
+            if (type == PascalTokenTypes.KW_INTERFACE) {
+                state.inInterfaceSection = true;
+                state.inImplementationSection = false;
+                if (state.interfaceSectionStart < 0) {
+                    state.interfaceSectionStart = child.getStartOffset();
+                }
+            } else if (type == PascalTokenTypes.KW_IMPLEMENTATION) {
+                state.inInterfaceSection = false;
+                state.inImplementationSection = true;
+                if (state.implementationSectionStart < 0) {
+                    state.implementationSectionStart = child.getStartOffset();
+                }
+            } else if (type == PascalTokenTypes.KW_USES) {
+                Set<String> targetSet = state.inImplementationSection ? implementationUses : interfaceUses;
+                parseUsesClauseContent(child, targetSet);
+            }
+
+            // Recurse into children to handle potentially nested structures
+            findSectionsAndUses(child, state, interfaceUses, implementationUses);
+
+            child = child.getTreeNext();
+        }
     }
 
     /**
@@ -158,30 +252,24 @@ public class PascalUsesClauseUtil {
                 StringBuilder unitName = new StringBuilder(current.getText());
                 current = current.getTreeNext();
 
-                // Skip whitespace
-                while (current != null && current.getElementType() == PascalTokenTypes.WHITE_SPACE) {
-                    current = current.getTreeNext();
-                }
+                // Skip whitespace and comments
+                current = skipIgnorableTokens(current);
 
                 // Check for dots and more identifiers
                 while (current != null && current.getElementType() == PascalTokenTypes.DOT) {
                     unitName.append(".");
                     current = current.getTreeNext();
 
-                    // Skip whitespace after dot
-                    while (current != null && current.getElementType() == PascalTokenTypes.WHITE_SPACE) {
-                        current = current.getTreeNext();
-                    }
+                    // Skip whitespace and comments after dot
+                    current = skipIgnorableTokens(current);
 
                     // Get next identifier
                     if (current != null && current.getElementType() == PascalTokenTypes.IDENTIFIER) {
                         unitName.append(current.getText());
                         current = current.getTreeNext();
 
-                        // Skip whitespace
-                        while (current != null && current.getElementType() == PascalTokenTypes.WHITE_SPACE) {
-                            current = current.getTreeNext();
-                        }
+                        // Skip whitespace and comments
+                        current = skipIgnorableTokens(current);
                     } else {
                         break;
                     }
@@ -190,19 +278,39 @@ public class PascalUsesClauseUtil {
                 targetSet.add(unitName.toString().toLowerCase());
                 continue; // Don't advance again, we already moved past the unit name
             } else if (type == PascalTokenTypes.KW_IN) {
-                // Skip "in 'path'" part - just advance past the string
+                // Skip "in 'path'" part
                 current = current.getTreeNext();
-                while (current != null &&
-                       current.getElementType() != PascalTokenTypes.COMMA &&
-                       current.getElementType() != PascalTokenTypes.SEMI) {
+                while (current != null) {
+                    IElementType currentType = current.getElementType();
+                    if (currentType == PascalTokenTypes.COMMA || currentType == PascalTokenTypes.SEMI) {
+                        break;
+                    }
                     current = current.getTreeNext();
                 }
                 if (current == null) break;
-                continue; // Don't advance again
+                continue; // Don't advance again, we are at COMMA or SEMI
             }
             // Skip whitespace, comments, commas
             current = current.getTreeNext();
         }
+    }
+
+    /**
+     * Skip whitespace, comments and compiler directives.
+     */
+    private static ASTNode skipIgnorableTokens(ASTNode node) {
+        while (node != null) {
+            IElementType type = node.getElementType();
+            if (type == PascalTokenTypes.WHITE_SPACE ||
+                type == PascalTokenTypes.LINE_COMMENT ||
+                type == PascalTokenTypes.BLOCK_COMMENT ||
+                type == PascalTokenTypes.COMPILER_DIRECTIVE) {
+                node = node.getTreeNext();
+            } else {
+                break;
+            }
+        }
+        return node;
     }
 
     /**
@@ -238,7 +346,9 @@ public class PascalUsesClauseUtil {
         UsesClauseInfo usesInfo = parseUsesClause(referenceFile);
         String targetUnit = getUnitName(targetFile);
 
-        if (usesInfo.isUnitAvailable(targetUnit, referenceOffset)) {
+        List<String> scopes = PascalSourcePathsSettings.getInstance(referenceFile.getProject()).getUnitScopeNames();
+
+        if (usesInfo.isUnitAvailable(targetUnit, referenceOffset, scopes)) {
             return null; // OK
         }
 

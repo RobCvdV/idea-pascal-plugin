@@ -104,9 +104,17 @@ public class PascalStructuredParser implements PsiParser {
         }
 
         boolean isOtherType = builder.getTokenType() == PascalTokenTypes.EQ;
-        // if (isOtherType) {
-        //     LOG.info("[PascalParser] isOtherTypeDefinition lookahead: " + id + " has '=' at offset " + builder.getCurrentOffset());
-        // }
+        if (isOtherType) {
+            PsiBuilder.Marker lookAhead2 = builder.mark();
+            builder.advanceLexer(); // consume '='
+            skipWhitespaceAndComments(builder);
+            if (builder.getTokenType() == PascalTokenTypes.KW_TYPE) {
+                // TDateTime = type Double;
+                isOtherType = true;
+            }
+            lookAhead2.rollbackTo();
+        }
+
         lookAhead.rollbackTo();
         return isOtherType;
     }
@@ -143,6 +151,12 @@ public class PascalStructuredParser implements PsiParser {
 
         // Consume '='
         if (builder.getTokenType() == PascalTokenTypes.EQ) {
+            builder.advanceLexer();
+            skipWhitespaceAndComments(builder);
+        }
+
+        // Handle 'type' modifier: TDateTime = type Double;
+        if (builder.getTokenType() == PascalTokenTypes.KW_TYPE) {
             builder.advanceLexer();
             skipWhitespaceAndComments(builder);
         }
@@ -241,6 +255,12 @@ public class PascalStructuredParser implements PsiParser {
             skipWhitespaceAndComments(builder);
 
             IElementType afterEquals = builder.getTokenType();
+            if (afterEquals == PascalTokenTypes.KW_PACKED) {
+                builder.advanceLexer(); // consume 'packed'
+                skipWhitespaceAndComments(builder);
+                afterEquals = builder.getTokenType();
+            }
+
             if (afterEquals == PascalTokenTypes.KW_CLASS) {
                 // Check it's not "class of" (metaclass type alias)
                 builder.advanceLexer(); // consume 'class'
@@ -297,6 +317,11 @@ public class PascalStructuredParser implements PsiParser {
         String typeKind = kindToken != null ? kindToken.toString() : "UNKNOWN";
 
         // Consume class/record/interface keyword
+        // Handle 'packed' if present
+        if (builder.getTokenType() == PascalTokenTypes.KW_PACKED) {
+            builder.advanceLexer();
+            skipWhitespaceAndComments(builder);
+        }
         builder.advanceLexer();
 
         // For forward declarations, we're done after semicolon
@@ -337,9 +362,6 @@ public class PascalStructuredParser implements PsiParser {
             // Forward declaration (with or without inheritance)
             // LOG.info("[PascalParser] Parsed forward declaration: " + typeName + " = " + typeKind);
             builder.advanceLexer();
-        } else if (builder.getTokenType() == PascalTokenTypes.SEMI) {
-             // LOG.info("[PascalParser] Parsed forward declaration: " + typeName + " = " + typeKind);
-             builder.advanceLexer();
         } else {
             // Full declaration - consume until 'end' followed by semicolon
             // LOG.info("[PascalParser] Parsing full declaration body for: " + typeName + " at offset " + builder.getCurrentOffset());
@@ -348,19 +370,37 @@ public class PascalStructuredParser implements PsiParser {
                 IElementType current = builder.getTokenType();
 
                 // Track nested structures that have their own 'end'
+                if (current == PascalTokenTypes.KW_TYPE) {
+                    // LOG.info("[PascalParser] Found nested 'type' section inside structure body");
+                    parseTypeSection(builder);
+                    continue; // parseTypeSection advances lexer past the section
+                }
+
                 if (current == PascalTokenTypes.KW_BEGIN
                         || current == PascalTokenTypes.KW_RECORD
-                        || current == PascalTokenTypes.KW_CASE
+                        || current == PascalTokenTypes.KW_PACKED
                         || current == PascalTokenTypes.KW_CLASS
                         || current == PascalTokenTypes.KW_INTERFACE) {
                     // Check if this is a nested type definition (has 'end'), not just a type reference
                     // A nested type has: class/record/interface NOT followed by a semicolon
                     if (current == PascalTokenTypes.KW_CLASS
                             || current == PascalTokenTypes.KW_RECORD
+                            || current == PascalTokenTypes.KW_PACKED
                             || current == PascalTokenTypes.KW_INTERFACE) {
                         // Look ahead to see if this is a type with body or just a reference
                         // "class function", "class procedure", etc. are method declarations, NOT nested classes
                         PsiBuilder.Marker lookAhead = builder.mark();
+                        if (current == PascalTokenTypes.KW_PACKED) {
+                            builder.advanceLexer();
+                            skipWhitespaceAndComments(builder);
+                            current = builder.getTokenType();
+                        }
+
+                        // Check if we are at a keyword that actually starts a structure with 'end'
+                        boolean canHaveEnd = current == PascalTokenTypes.KW_CLASS
+                                || current == PascalTokenTypes.KW_RECORD
+                                || current == PascalTokenTypes.KW_INTERFACE;
+
                         builder.advanceLexer();
                         skipWhitespaceAndComments(builder);
                         IElementType afterClass = builder.getTokenType();
@@ -369,8 +409,10 @@ public class PascalStructuredParser implements PsiParser {
                                 || afterClass == PascalTokenTypes.KW_CONSTRUCTOR
                                 || afterClass == PascalTokenTypes.KW_DESTRUCTOR
                                 || afterClass == PascalTokenTypes.KW_PROPERTY
+                                || afterClass == PascalTokenTypes.KW_OPERATOR
                                 || afterClass == PascalTokenTypes.KW_VAR;
-                        boolean hasBody = !isClassMethod
+                        boolean hasBody = canHaveEnd
+                                && !isClassMethod
                                 && afterClass != PascalTokenTypes.SEMI
                                 && afterClass != PascalTokenTypes.RPAREN
                                 && afterClass != PascalTokenTypes.COMMA;
@@ -488,6 +530,11 @@ public class PascalStructuredParser implements PsiParser {
                 || type == PascalTokenTypes.KW_INITIALIZATION
                 || type == PascalTokenTypes.KW_FINALIZATION
                 || type == PascalTokenTypes.KW_BEGIN
-                || type == PascalTokenTypes.KW_END;
+                || type == PascalTokenTypes.KW_END
+                || type == PascalTokenTypes.KW_PRIVATE
+                || type == PascalTokenTypes.KW_PROTECTED
+                || type == PascalTokenTypes.KW_PUBLIC
+                || type == PascalTokenTypes.KW_PUBLISHED
+                || type == PascalTokenTypes.KW_STRICT;
     }
 }

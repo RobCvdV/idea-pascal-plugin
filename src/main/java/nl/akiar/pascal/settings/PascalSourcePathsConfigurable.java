@@ -28,7 +28,9 @@ public class PascalSourcePathsConfigurable implements Configurable {
     private final Project project;
     private JPanel mainPanel;
     private JBList<String> pathList;
-    private DefaultListModel<String> listModel;
+    private DefaultListModel<String> pathListModel;
+    private JBList<String> scopeList;
+    private DefaultListModel<String> scopeListModel;
 
     public PascalSourcePathsConfigurable(Project project) {
         this.project = project;
@@ -43,45 +45,86 @@ public class PascalSourcePathsConfigurable implements Configurable {
     @Override
     @Nullable
     public JComponent createComponent() {
-        mainPanel = new JPanel(new BorderLayout());
+        mainPanel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.fill = GridBagConstraints.BOTH;
+        gbc.gridx = 0;
+        gbc.weightx = 1.0;
 
-        // Create list model and list
-        listModel = new DefaultListModel<>();
-        pathList = new JBList<>(listModel);
+        // --- Source Paths Section ---
+        gbc.gridy = 0;
+        gbc.weighty = 0.0;
+        JLabel pathLabel = new JLabel("<html><b>Pascal Source Paths</b><br>" +
+                "Add directories containing Pascal source files (.pas, .dpr, .dpk).<br>" +
+                "Types defined in these directories will be available for semantic highlighting.</html>");
+        pathLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
+        mainPanel.add(pathLabel, gbc);
+
+        gbc.gridy = 1;
+        gbc.weighty = 0.5;
+        pathListModel = new DefaultListModel<>();
+        pathList = new JBList<>(pathListModel);
         pathList.setEmptyText("No source paths configured. Click + to add paths.");
+        
+        JPanel pathPanel = ToolbarDecorator.createDecorator(pathList)
+                .setAddAction(button -> addPath())
+                .setRemoveAction(button -> removePath())
+                .disableUpDownActions()
+                .createPanel();
+        mainPanel.add(pathPanel, gbc);
 
-        // Create toolbar with add/remove buttons
-        ToolbarDecorator decorator = ToolbarDecorator.createDecorator(pathList)
-                .setAddAction(new AnActionButtonRunnable() {
-                    @Override
-                    public void run(AnActionButton button) {
-                        addPath();
-                    }
-                })
-                .setRemoveAction(new AnActionButtonRunnable() {
-                    @Override
-                    public void run(AnActionButton button) {
-                        removePath();
-                    }
-                })
-                .disableUpDownActions();
+        // --- Unit Scope Names Section ---
+        gbc.gridy = 2;
+        gbc.weighty = 0.0;
+        gbc.insets = new Insets(10, 0, 0, 0);
+        JLabel scopeLabel = new JLabel("<html><b>Unit Scope Names</b><br>" +
+                "Delphi unit scope names (e.g., 'System'). If configured, 'SysUtils' in uses clause<br>" +
+                "can be recognized as 'System.SysUtils'. Using short names is considered bad practice.</html>");
+        scopeLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
+        mainPanel.add(scopeLabel, gbc);
 
-        JPanel listPanel = decorator.createPanel();
+        gbc.gridy = 3;
+        gbc.weighty = 0.5;
+        gbc.insets = new Insets(0, 0, 0, 0);
+        scopeListModel = new DefaultListModel<>();
+        scopeList = new JBList<>(scopeListModel);
+        scopeList.setEmptyText("No unit scope names configured. Click + to add scopes.");
 
-        // Add description label
-        JLabel descriptionLabel = new JLabel(
-                "<html>Add directories containing Pascal source files (.pas, .dpr, .dpk).<br>" +
-                "Types defined in these directories will be available for semantic highlighting.</html>"
-        );
-        descriptionLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        JPanel scopePanel = ToolbarDecorator.createDecorator(scopeList)
+                .setAddAction(button -> addScope())
+                .setRemoveAction(button -> removeScope())
+                .disableUpDownActions()
+                .createPanel();
+        mainPanel.add(scopePanel, gbc);
 
-        mainPanel.add(descriptionLabel, BorderLayout.NORTH);
-        mainPanel.add(listPanel, BorderLayout.CENTER);
-
-        // Load current settings
         reset();
-
         return mainPanel;
+    }
+
+    private void addScope() {
+        String scope = JOptionPane.showInputDialog(mainPanel, "Enter unit scope name (e.g. System):", "Add Unit Scope", JOptionPane.PLAIN_MESSAGE);
+        if (scope != null && !scope.trim().isEmpty()) {
+            scope = scope.trim();
+            if (!containsScope(scope)) {
+                scopeListModel.addElement(scope);
+            }
+        }
+    }
+
+    private void removeScope() {
+        int selectedIndex = scopeList.getSelectedIndex();
+        if (selectedIndex >= 0) {
+            scopeListModel.remove(selectedIndex);
+        }
+    }
+
+    private boolean containsScope(String scope) {
+        for (int i = 0; i < scopeListModel.size(); i++) {
+            if (scopeListModel.get(i).equalsIgnoreCase(scope)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void addPath() {
@@ -100,7 +143,7 @@ public class PascalSourcePathsConfigurable implements Configurable {
         for (VirtualFile file : files) {
             String path = file.getPath();
             if (!containsPath(path)) {
-                listModel.addElement(path);
+                pathListModel.addElement(path);
             }
         }
     }
@@ -108,13 +151,13 @@ public class PascalSourcePathsConfigurable implements Configurable {
     private void removePath() {
         int selectedIndex = pathList.getSelectedIndex();
         if (selectedIndex >= 0) {
-            listModel.remove(selectedIndex);
+            pathListModel.remove(selectedIndex);
         }
     }
 
     private boolean containsPath(String path) {
-        for (int i = 0; i < listModel.size(); i++) {
-            if (listModel.get(i).equals(path)) {
+        for (int i = 0; i < pathListModel.size(); i++) {
+            if (pathListModel.get(i).equals(path)) {
                 return true;
             }
         }
@@ -124,38 +167,52 @@ public class PascalSourcePathsConfigurable implements Configurable {
     @Override
     public boolean isModified() {
         PascalSourcePathsSettings settings = PascalSourcePathsSettings.getInstance(project);
-        List<String> currentPaths = settings.getSourcePaths();
-        List<String> uiPaths = getPathsFromUI();
-        return !currentPaths.equals(uiPaths);
+        return !settings.getSourcePaths().equals(getPathsFromUI()) ||
+               !settings.getUnitScopeNames().equals(getScopesFromUI());
     }
 
     @Override
     public void apply() throws ConfigurationException {
         PascalSourcePathsSettings settings = PascalSourcePathsSettings.getInstance(project);
         settings.setSourcePaths(getPathsFromUI());
+        settings.setUnitScopeNames(getScopesFromUI());
     }
 
     @Override
     public void reset() {
-        listModel.clear();
+        pathListModel.clear();
+        scopeListModel.clear();
         PascalSourcePathsSettings settings = PascalSourcePathsSettings.getInstance(project);
         for (String path : settings.getSourcePaths()) {
-            listModel.addElement(path);
+            pathListModel.addElement(path);
+        }
+        for (String scope : settings.getUnitScopeNames()) {
+            scopeListModel.addElement(scope);
         }
     }
 
     private List<String> getPathsFromUI() {
         List<String> paths = new ArrayList<>();
-        for (int i = 0; i < listModel.size(); i++) {
-            paths.add(listModel.get(i));
+        for (int i = 0; i < pathListModel.size(); i++) {
+            paths.add(pathListModel.get(i));
         }
         return paths;
+    }
+
+    private List<String> getScopesFromUI() {
+        List<String> scopes = new ArrayList<>();
+        for (int i = 0; i < scopeListModel.size(); i++) {
+            scopes.add(scopeListModel.get(i));
+        }
+        return scopes;
     }
 
     @Override
     public void disposeUIResources() {
         mainPanel = null;
         pathList = null;
-        listModel = null;
+        pathListModel = null;
+        scopeList = null;
+        scopeListModel = null;
     }
 }

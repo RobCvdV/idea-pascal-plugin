@@ -10,6 +10,7 @@ import nl.akiar.pascal.PascalLanguage;
 import nl.akiar.pascal.PascalTokenTypes;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
 import nl.akiar.pascal.stubs.PascalTypeIndex;
+import nl.akiar.pascal.uses.PascalUsesClauseUtil;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -65,6 +66,20 @@ public class PascalUsesClauseAnnotator implements Annotator {
             return;
         }
 
+        // Heuristic: If followed by a colon, it's likely a field/variable name, not a type reference.
+        // TInterfaceEntry = record IID: TGUID; end;
+        // Here IID is followed by colon, TGUID is not.
+        PsiElement nextSibling = element.getNextSibling();
+        while (nextSibling != null && (nextSibling.getNode().getElementType() == PascalTokenTypes.WHITE_SPACE ||
+                nextSibling.getNode().getElementType() == PascalTokenTypes.LINE_COMMENT ||
+                nextSibling.getNode().getElementType() == PascalTokenTypes.BLOCK_COMMENT ||
+                nextSibling.getNode().getElementType() == PascalTokenTypes.COMPILER_DIRECTIVE)) {
+            nextSibling = nextSibling.getNextSibling();
+        }
+        if (nextSibling != null && nextSibling.getNode().getElementType() == PascalTokenTypes.COLON) {
+            return;
+        }
+
         // Look up the type with uses clause validation
         PsiFile file = element.getContainingFile();
         if (file == null) {
@@ -75,8 +90,18 @@ public class PascalUsesClauseAnnotator implements Annotator {
         PascalTypeIndex.TypeLookupResult result =
                 PascalTypeIndex.findTypesWithUsesValidation(text, file, offset);
 
-        // If we found in-scope types, everything is OK
+        // If we found in-scope types, everything is OK (but check for scope name warnings)
         if (!result.getInScopeTypes().isEmpty()) {
+            if (!result.getInScopeViaScopeNames().isEmpty()) {
+                // If ANY of the in-scope types were found via scope names, show a warning
+                PascalTypeDefinition first = result.getInScopeViaScopeNames().get(0);
+                String fullUnitName = PascalUsesClauseUtil.getUnitName(first.getContainingFile());
+                holder.newAnnotation(HighlightSeverity.WARNING,
+                                "Unit '" + fullUnitName + "' is included via unit scope names. " +
+                                "Using short unit names is considered bad practice.")
+                        .range(element)
+                        .create();
+            }
             return;
         }
 

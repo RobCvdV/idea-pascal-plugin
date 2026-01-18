@@ -56,6 +56,7 @@ public class PascalLexer implements FlexLexer {
         KEYWORDS.put("constructor", PascalTokenTypes.KW_CONSTRUCTOR);
         KEYWORDS.put("destructor", PascalTokenTypes.KW_DESTRUCTOR);
         KEYWORDS.put("property", PascalTokenTypes.KW_PROPERTY);
+        KEYWORDS.put("operator", PascalTokenTypes.KW_OPERATOR);
 
         // Blocks
         KEYWORDS.put("begin", PascalTokenTypes.KW_BEGIN);

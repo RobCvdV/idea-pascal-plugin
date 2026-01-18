@@ -73,6 +73,11 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
                     child = child.getTreeNext();
                     continue;
                 }
+                if (type == PascalTokenTypes.KW_TYPE || type == PascalTokenTypes.KW_PACKED || type == PascalTokenTypes.COMPILER_DIRECTIVE) {
+                    // Skip 'type' modifier, 'packed' keyword, and compiler directives
+                    child = child.getTreeNext();
+                    continue;
+                }
                 if (type == PascalTokenTypes.KW_CLASS) {
                     return TypeKind.CLASS;
                 } else if (type == PascalTokenTypes.KW_RECORD) {

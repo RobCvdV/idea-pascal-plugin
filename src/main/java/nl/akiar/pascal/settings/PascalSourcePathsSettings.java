@@ -27,6 +27,7 @@ public final class PascalSourcePathsSettings implements PersistentStateComponent
      */
     public static class State {
         public List<String> sourcePaths = new ArrayList<>();
+        public List<String> unitScopeNames = new ArrayList<>();
     }
 
     private State state = new State();
@@ -51,6 +52,21 @@ public final class PascalSourcePathsSettings implements PersistentStateComponent
      */
     public void setSourcePaths(@NotNull List<String> paths) {
         state.sourcePaths = new ArrayList<>(paths);
+    }
+
+    /**
+     * Get the list of configured unit scope names.
+     */
+    @NotNull
+    public List<String> getUnitScopeNames() {
+        return new ArrayList<>(state.unitScopeNames);
+    }
+
+    /**
+     * Set the list of unit scope names.
+     */
+    public void setUnitScopeNames(@NotNull List<String> scopes) {
+        state.unitScopeNames = new ArrayList<>(scopes);
     }
 
     /**

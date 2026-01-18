@@ -11,6 +11,7 @@ import com.intellij.psi.stubs.StubIndex;
 import com.intellij.psi.stubs.StubIndexKey;
 import nl.akiar.pascal.dpr.DprProjectService;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
+import nl.akiar.pascal.settings.PascalSourcePathsSettings;
 import nl.akiar.pascal.uses.PascalUsesClauseUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -90,6 +91,9 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
 
         List<PascalTypeDefinition> inScope = new ArrayList<>();
         List<PascalTypeDefinition> outOfScope = new ArrayList<>();
+        List<PascalTypeDefinition> viaScopeNames = new ArrayList<>();
+
+        List<String> scopes = PascalSourcePathsSettings.getInstance(fromFile.getProject()).getUnitScopeNames();
 
         for (PascalTypeDefinition typeDef : allTypes) {
             PsiFile targetFile = typeDef.getContainingFile();
@@ -102,14 +106,18 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
             }
 
             String targetUnit = PascalUsesClauseUtil.getUnitName(targetFile);
-            if (usesInfo.isUnitAvailable(targetUnit, offset)) {
+            String unitInUses = usesInfo.findUnitInUses(targetUnit, offset, scopes);
+            if (unitInUses != null) {
                 inScope.add(typeDef);
+                if (!unitInUses.equalsIgnoreCase(targetUnit)) {
+                    viaScopeNames.add(typeDef);
+                }
             } else {
                 outOfScope.add(typeDef);
             }
         }
 
-        return new TypeLookupResult(inScope, outOfScope, usesInfo, offset);
+        return new TypeLookupResult(inScope, outOfScope, viaScopeNames, usesInfo, offset, scopes);
     }
 
     /**
@@ -118,20 +126,36 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
     public static class TypeLookupResult {
         private final List<PascalTypeDefinition> inScopeTypes;
         private final List<PascalTypeDefinition> outOfScopeTypes;
+        private final List<PascalTypeDefinition> inScopeViaScopeNames; // New field
         private final PascalUsesClauseUtil.UsesClauseInfo usesInfo;
         private final int referenceOffset;
+        private final List<String> scopes;
 
         public TypeLookupResult(List<PascalTypeDefinition> inScope, List<PascalTypeDefinition> outOfScope,
                                PascalUsesClauseUtil.UsesClauseInfo usesInfo, int referenceOffset) {
+            this(inScope, outOfScope, new ArrayList<>(), usesInfo, referenceOffset, new ArrayList<>());
+        }
+
+        public TypeLookupResult(List<PascalTypeDefinition> inScope, List<PascalTypeDefinition> outOfScope,
+                                List<PascalTypeDefinition> viaScopeNames,
+                                PascalUsesClauseUtil.UsesClauseInfo usesInfo, int referenceOffset,
+                                List<String> scopes) {
             this.inScopeTypes = inScope;
             this.outOfScopeTypes = outOfScope;
+            this.inScopeViaScopeNames = viaScopeNames;
             this.usesInfo = usesInfo;
             this.referenceOffset = referenceOffset;
+            this.scopes = scopes;
         }
 
         /** Types that are properly in scope (unit is in uses clause) */
         public List<PascalTypeDefinition> getInScopeTypes() {
             return inScopeTypes;
+        }
+
+        /** Types found in scope but using a short unit name resolved via unit scope names */
+        public List<PascalTypeDefinition> getInScopeViaScopeNames() {
+            return inScopeViaScopeNames;
         }
 
         /** Types that exist but their unit is not in the uses clause */

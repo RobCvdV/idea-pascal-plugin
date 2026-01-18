@@ -46,6 +46,7 @@ public interface PascalTokenTypes {
     IElementType KW_CONSTRUCTOR = new PascalTokenType("CONSTRUCTOR");
     IElementType KW_DESTRUCTOR = new PascalTokenType("DESTRUCTOR");
     IElementType KW_PROPERTY = new PascalTokenType("PROPERTY");
+    IElementType KW_OPERATOR = new PascalTokenType("OPERATOR");
 
     // Block keywords
     IElementType KW_BEGIN = new PascalTokenType("BEGIN");

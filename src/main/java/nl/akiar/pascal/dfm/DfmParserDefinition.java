@@ -74,7 +74,7 @@ public class DfmParserDefinition implements ParserDefinition {
 
     @Override
     public PsiFile createFile(FileViewProvider viewProvider) {
-        LOG.info("DFM-PLUGIN: createFile called for " + viewProvider.getVirtualFile().getName());
+//         LOG.info("DFM-PLUGIN: createFile called for " + viewProvider.getVirtualFile().getName());
         try {
             return new DfmFile(viewProvider);
         } catch (Exception e) {

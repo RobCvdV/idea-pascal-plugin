@@ -10,7 +10,9 @@ import nl.akiar.pascal.PascalSyntaxHighlighter;
 import nl.akiar.pascal.PascalTokenTypes;
 import nl.akiar.pascal.psi.PascalElementTypes;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
+import nl.akiar.pascal.psi.PascalVariableDefinition;
 import nl.akiar.pascal.psi.TypeKind;
+import nl.akiar.pascal.psi.VariableKind;
 import nl.akiar.pascal.stubs.PascalTypeIndex;
 import org.jetbrains.annotations.NotNull;
 
@@ -89,6 +91,12 @@ public class PascalSemanticAnnotator implements Annotator {
             annotateTypeDefinition((PascalTypeDefinition) element, holder);
             // Also process all identifier tokens inside the type definition
             processIdentifiersInNode(element.getNode(), element, holder);
+            return;
+        }
+
+        // Color variable definitions
+        if (element instanceof PascalVariableDefinition) {
+            annotateVariableDefinition((PascalVariableDefinition) element, holder);
             return;
         }
 
@@ -234,6 +242,40 @@ public class PascalSemanticAnnotator implements Annotator {
                 return PascalSyntaxHighlighter.TYPE_ENUM;
             case ALIAS:
                 return PascalSyntaxHighlighter.TYPE_SIMPLE;
+            default:
+                return null;
+        }
+    }
+
+    private void annotateVariableDefinition(PascalVariableDefinition varDef, AnnotationHolder holder) {
+        TextAttributesKey key = getColorForVariableKind(varDef.getVariableKind());
+        PsiElement nameElement = varDef.getNameIdentifier();
+
+        if (nameElement != null && key != null) {
+            holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
+                    .range(nameElement)
+                    .textAttributes(key)
+                    .create();
+        }
+    }
+
+    private TextAttributesKey getColorForVariableKind(VariableKind kind) {
+        if (kind == null) return null;
+        switch (kind) {
+            case GLOBAL:
+                return PascalSyntaxHighlighter.VAR_GLOBAL;
+            case LOCAL:
+                return PascalSyntaxHighlighter.VAR_LOCAL;
+            case PARAMETER:
+                return PascalSyntaxHighlighter.VAR_PARAMETER;
+            case FIELD:
+                return PascalSyntaxHighlighter.VAR_FIELD;
+            case CONSTANT:
+                return PascalSyntaxHighlighter.VAR_CONSTANT;
+            case THREADVAR:
+                return PascalSyntaxHighlighter.VAR_THREADVAR;
+            case LOOP_VAR:
+                return PascalSyntaxHighlighter.VAR_LOCAL;
             default:
                 return null;
         }

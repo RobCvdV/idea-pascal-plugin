@@ -65,7 +65,7 @@ public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
             return Collections.emptyList();
         }
 
-        LOG.info("[PascalLibraryRoots] Adding " + roots.size() + " directories as library roots");
+//         LOG.info("[PascalLibraryRoots] Adding " + roots.size() + " directories as library roots");
 
         // Create a single synthetic library containing all source directories
         SyntheticLibrary library = new PascalSyntheticLibrary(roots);

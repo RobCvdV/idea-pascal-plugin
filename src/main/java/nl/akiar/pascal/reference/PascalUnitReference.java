@@ -33,7 +33,7 @@ public class PascalUnitReference extends PsiReferenceBase<PsiElement> {
     @Override
     public PsiElement resolve() {
         Project project = myElement.getProject();
-        LOG.info("[PascalNav] Resolving unit reference: " + unitName);
+//         LOG.info("[PascalNav] Resolving unit reference: " + unitName);
 
         // 1. Direct resolution
         VirtualFile unitFile = PascalProjectService.getInstance(project).resolveUnit(unitName, false);

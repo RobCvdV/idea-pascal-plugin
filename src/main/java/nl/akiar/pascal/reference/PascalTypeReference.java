@@ -32,7 +32,7 @@ public class PascalTypeReference extends PsiReferenceBase<PsiElement> implements
         LOG.info("[PascalNav] Found " + types.size() + " types for name: " + name);
         List<ResolveResult> results = new ArrayList<>();
         for (PascalTypeDefinition type : types) {
-            LOG.info("[PascalNav]  -> Match: " + type.getName() + " in " + type.getContainingFile().getName());
+//             LOG.info("[PascalNav]  -> Match: " + type.getName() + " in " + type.getContainingFile().getName());
             results.add(new PsiElementResolveResult(type));
         }
         return results.toArray(new ResolveResult[0]);

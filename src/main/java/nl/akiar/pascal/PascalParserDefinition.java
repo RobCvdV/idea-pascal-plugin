@@ -15,6 +15,7 @@ import com.intellij.psi.tree.TokenSet;
 import nl.akiar.pascal.parser.PascalStructuredParser;
 import nl.akiar.pascal.psi.PascalElementTypes;
 import nl.akiar.pascal.psi.impl.PascalTypeDefinitionImpl;
+import nl.akiar.pascal.psi.impl.PascalVariableDefinitionImpl;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -76,6 +77,9 @@ public class PascalParserDefinition implements ParserDefinition {
     public PsiElement createElement(ASTNode node) {
         if (node.getElementType() == PascalElementTypes.TYPE_DEFINITION) {
             return new PascalTypeDefinitionImpl(node);
+        }
+        if (node.getElementType() == PascalElementTypes.VARIABLE_DEFINITION) {
+            return new PascalVariableDefinitionImpl(node);
         }
         return new PascalPsiElement(node);
     }

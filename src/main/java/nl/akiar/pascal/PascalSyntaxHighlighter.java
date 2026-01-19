@@ -75,6 +75,25 @@ public class PascalSyntaxHighlighter extends SyntaxHighlighterBase {
     public static final TextAttributesKey TYPE_SIMPLE =
             createTextAttributesKey("PASCAL_TYPE_SIMPLE", DefaultLanguageHighlighterColors.PREDEFINED_SYMBOL);
 
+    // Variable definition colors for semantic highlighting
+    public static final TextAttributesKey VAR_GLOBAL =
+            createTextAttributesKey("PASCAL_VAR_GLOBAL", DefaultLanguageHighlighterColors.GLOBAL_VARIABLE);
+
+    public static final TextAttributesKey VAR_LOCAL =
+            createTextAttributesKey("PASCAL_VAR_LOCAL", DefaultLanguageHighlighterColors.LOCAL_VARIABLE);
+
+    public static final TextAttributesKey VAR_PARAMETER =
+            createTextAttributesKey("PASCAL_VAR_PARAMETER", DefaultLanguageHighlighterColors.PARAMETER);
+
+    public static final TextAttributesKey VAR_FIELD =
+            createTextAttributesKey("PASCAL_VAR_FIELD", DefaultLanguageHighlighterColors.INSTANCE_FIELD);
+
+    public static final TextAttributesKey VAR_CONSTANT =
+            createTextAttributesKey("PASCAL_VAR_CONSTANT", DefaultLanguageHighlighterColors.CONSTANT);
+
+    public static final TextAttributesKey VAR_THREADVAR =
+            createTextAttributesKey("PASCAL_VAR_THREADVAR", DefaultLanguageHighlighterColors.GLOBAL_VARIABLE);
+
     private static final TextAttributesKey[] KEYWORD_KEYS = new TextAttributesKey[]{KEYWORD};
     private static final TextAttributesKey[] STRING_KEYS = new TextAttributesKey[]{STRING};
     private static final TextAttributesKey[] NUMBER_KEYS = new TextAttributesKey[]{NUMBER};

@@ -13,8 +13,11 @@ import nl.akiar.pascal.PascalSyntaxHighlighter;
 import nl.akiar.pascal.PascalTokenType;
 import nl.akiar.pascal.PascalTokenTypes;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
+import nl.akiar.pascal.psi.PascalVariableDefinition;
 import nl.akiar.pascal.psi.TypeKind;
+import nl.akiar.pascal.psi.VariableKind;
 import nl.akiar.pascal.stubs.PascalTypeIndex;
+import nl.akiar.pascal.stubs.PascalVariableIndex;
 import com.intellij.lang.ASTNode;
 import com.intellij.psi.tree.IElementType;
 import org.jetbrains.annotations.NotNull;
@@ -42,14 +45,24 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             }
 
             // Look up the type directly in the index (bypass reference system)
-            String typeName = contextElement.getText();
-            Collection<PascalTypeDefinition> types = PascalTypeIndex.findTypes(typeName, contextElement.getProject());
+            String name = contextElement.getText();
+            Collection<PascalTypeDefinition> types = PascalTypeIndex.findTypes(name, contextElement.getProject());
             if (!types.isEmpty()) {
                 PascalTypeDefinition found = types.iterator().next();
                 LOG.info("[PascalDoc]  -> Found type in index: " + found.getName() + " in " + found.getContainingFile().getName());
                 return found;
             }
-            LOG.info("[PascalDoc]  -> Type not found in index: " + typeName);
+
+            // Also try looking up as a variable - use scoped lookup
+            PsiFile currentFile = contextElement.getContainingFile();
+            int offset = contextElement.getTextOffset();
+            PascalVariableDefinition found = PascalVariableIndex.findVariableAtPosition(name, currentFile, offset);
+            if (found != null) {
+                LOG.info("[PascalDoc]  -> Found variable in index: " + found.getName() + " (" + found.getVariableKind() + ") in " + found.getContainingFile().getName());
+                return found;
+            }
+
+            LOG.info("[PascalDoc]  -> Not found in index: " + name);
         }
         return super.getCustomDocumentationElement(editor, file, contextElement, targetOffset);
     }
@@ -107,7 +120,161 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
 
             return sb.toString();
         }
+
+        // Generate documentation for variable definitions
+        if (element instanceof PascalVariableDefinition) {
+            PascalVariableDefinition varDef = (PascalVariableDefinition) element;
+            LOG.info("[PascalDoc] Generating doc for variable definition: " + varDef.getName());
+            return generateVariableDoc(varDef);
+        }
+
         return null;
+    }
+
+    private String generateVariableDoc(PascalVariableDefinition varDef) {
+        StringBuilder sb = new StringBuilder();
+
+        EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
+        Color bgColor = scheme.getDefaultBackground();
+        Color fgColor = scheme.getDefaultForeground();
+        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
+        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
+
+        // Variable signature (header)
+        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
+          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
+        appendVariableHeader(sb, varDef, scheme);
+        sb.append("</div>");
+
+        // Variable kind and visibility
+        VariableKind kind = varDef.getVariableKind();
+        String kindLabel = getVariableKindLabel(kind);
+        String visibility = varDef.getVisibility();
+        if (visibility != null && !visibility.isEmpty()) {
+            sb.append("<br/>Kind: <b>").append(visibility).append(" ").append(kindLabel.toLowerCase()).append("</b>");
+        } else {
+            sb.append("<br/>Kind: <b>").append(kindLabel).append("</b>");
+        }
+
+        // Type name
+        String typeName = varDef.getTypeName();
+        if (typeName != null && !typeName.isEmpty()) {
+            sb.append("<br/>Type: <code>").append(escapeHtml(typeName)).append("</code>");
+        }
+
+        // Owner information based on kind
+        switch (kind) {
+            case FIELD:
+                String className = varDef.getContainingClassName();
+                if (className != null && !className.isEmpty()) {
+                    sb.append("<br/>Class: <b>").append(escapeHtml(className)).append("</b>");
+                }
+                break;
+
+            case LOCAL:
+            case LOOP_VAR:
+                String funcName = varDef.getContainingFunctionName();
+                if (funcName != null && !funcName.isEmpty()) {
+                    sb.append("<br/>Function: <b>").append(escapeHtml(funcName)).append("</b>");
+                }
+                break;
+
+            case PARAMETER:
+                String paramFunc = varDef.getContainingScopeName();
+                if (paramFunc != null && !paramFunc.isEmpty()) {
+                    sb.append("<br/>Parameter of: <b>").append(escapeHtml(paramFunc)).append("</b>");
+                }
+                break;
+
+            default:
+                // Global, constant, threadvar - show scope if available
+                String scopeName = varDef.getContainingScopeName();
+                if (scopeName != null && !scopeName.isEmpty()) {
+                    sb.append("<br/>Scope: <i>").append(escapeHtml(scopeName)).append("</i>");
+                }
+                break;
+        }
+
+        // Unit and file location
+        String unitName = varDef.getUnitName();
+        String fileName = varDef.getContainingFile().getName();
+        sb.append("<br/>Unit: <b>").append(escapeHtml(unitName)).append("</b>");
+        sb.append("<br/>File: <i>").append(escapeHtml(fileName)).append("</i>");
+
+        // Documentation comment (if present)
+        String docComment = varDef.getDocComment();
+        if (docComment != null && !docComment.isEmpty()) {
+            sb.append("<hr/>");
+            String formattedDoc = escapeHtml(docComment).replace("\n", "<br/>");
+            sb.append(formattedDoc);
+        }
+
+        // Add padding at bottom
+        sb.append("<br/>&nbsp;");
+
+        return sb.toString();
+    }
+
+    private void appendVariableHeader(StringBuilder sb, PascalVariableDefinition varDef, EditorColorsScheme scheme) {
+        VariableKind kind = varDef.getVariableKind();
+        TextAttributesKey colorKey = getColorForVariableKind(kind);
+
+        // Variable name
+        String name = varDef.getName();
+        if (name != null) {
+            appendStyled(sb, name, colorKey != null ? colorKey : PascalSyntaxHighlighter.IDENTIFIER, scheme, true);
+        }
+
+        // Type annotation
+        String typeName = varDef.getTypeName();
+        if (typeName != null && !typeName.isEmpty()) {
+            sb.append(": ");
+            appendStyled(sb, typeName, PascalSyntaxHighlighter.IDENTIFIER, scheme, false);
+        }
+    }
+
+    private String getVariableKindLabel(VariableKind kind) {
+        if (kind == null) return "Variable";
+        switch (kind) {
+            case GLOBAL:
+                return "Global Variable";
+            case LOCAL:
+                return "Local Variable";
+            case PARAMETER:
+                return "Parameter";
+            case FIELD:
+                return "Field";
+            case CONSTANT:
+                return "Constant";
+            case THREADVAR:
+                return "Thread Variable";
+            case LOOP_VAR:
+                return "Loop Variable";
+            default:
+                return "Variable";
+        }
+    }
+
+    private TextAttributesKey getColorForVariableKind(VariableKind kind) {
+        if (kind == null) return null;
+        switch (kind) {
+            case GLOBAL:
+                return PascalSyntaxHighlighter.VAR_GLOBAL;
+            case LOCAL:
+                return PascalSyntaxHighlighter.VAR_LOCAL;
+            case PARAMETER:
+                return PascalSyntaxHighlighter.VAR_PARAMETER;
+            case FIELD:
+                return PascalSyntaxHighlighter.VAR_FIELD;
+            case CONSTANT:
+                return PascalSyntaxHighlighter.VAR_CONSTANT;
+            case THREADVAR:
+                return PascalSyntaxHighlighter.VAR_THREADVAR;
+            case LOOP_VAR:
+                return PascalSyntaxHighlighter.VAR_LOCAL;
+            default:
+                return null;
+        }
     }
 
     private void appendHighlightedHeader(StringBuilder sb, PascalTypeDefinition typeDef, EditorColorsScheme scheme) {
@@ -260,6 +427,15 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         if (element instanceof PascalTypeDefinition) {
             PascalTypeDefinition typeDef = (PascalTypeDefinition) element;
             return typeDef.getTypeKind().name().toLowerCase() + " " + typeDef.getName();
+        }
+        if (element instanceof PascalVariableDefinition) {
+            PascalVariableDefinition varDef = (PascalVariableDefinition) element;
+            String typeName = varDef.getTypeName();
+            String kindLabel = getVariableKindLabel(varDef.getVariableKind()).toLowerCase();
+            if (typeName != null && !typeName.isEmpty()) {
+                return kindLabel + " " + varDef.getName() + ": " + typeName;
+            }
+            return kindLabel + " " + varDef.getName();
         }
         return null;
     }

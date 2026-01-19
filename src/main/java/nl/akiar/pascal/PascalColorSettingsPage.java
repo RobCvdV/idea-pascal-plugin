@@ -39,6 +39,13 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
             new AttributesDescriptor("Type//Generic parameter", PascalSyntaxHighlighter.TYPE_PARAMETER),
             new AttributesDescriptor("Type//Procedural type", PascalSyntaxHighlighter.TYPE_PROCEDURAL),
             new AttributesDescriptor("Type//Simple type", PascalSyntaxHighlighter.TYPE_SIMPLE),
+            // Semantic variable colors
+            new AttributesDescriptor("Variable//Global variable", PascalSyntaxHighlighter.VAR_GLOBAL),
+            new AttributesDescriptor("Variable//Local variable", PascalSyntaxHighlighter.VAR_LOCAL),
+            new AttributesDescriptor("Variable//Parameter", PascalSyntaxHighlighter.VAR_PARAMETER),
+            new AttributesDescriptor("Variable//Field", PascalSyntaxHighlighter.VAR_FIELD),
+            new AttributesDescriptor("Variable//Constant", PascalSyntaxHighlighter.VAR_CONSTANT),
+            new AttributesDescriptor("Variable//Thread variable", PascalSyntaxHighlighter.VAR_THREADVAR),
     };
 
     @Nullable

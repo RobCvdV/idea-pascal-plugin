@@ -31,6 +31,11 @@ public class PascalStructuredParser implements PsiParser {
                 parseTypeSection(builder);
             } else if (tokenType == PascalTokenTypes.KW_USES) {
                 parseUsesSection(builder);
+            } else if (tokenType == PascalTokenTypes.KW_VAR
+                    || tokenType == PascalTokenTypes.KW_THREADVAR) {
+                parseVarSection(builder, false);
+            } else if (tokenType == PascalTokenTypes.KW_CONST) {
+                parseVarSection(builder, true);
             } else {
                 builder.advanceLexer();
             }
@@ -576,6 +581,286 @@ public class PascalStructuredParser implements PsiParser {
         if (builder.getTokenType() == PascalTokenTypes.SEMI) {
             builder.advanceLexer();
         }
+    }
+
+    /**
+     * Parse a var/const/threadvar section.
+     * var
+     *   MyVar: Integer;
+     *   A, B, C: String;
+     *   Initialized: Integer = 42;
+     */
+    private void parseVarSection(PsiBuilder builder, boolean isConst) {
+        // Consume 'var', 'const', or 'threadvar' keyword
+        builder.advanceLexer();
+        skipWhitespaceAndComments(builder);
+
+        // Parse variable declarations until we hit another section keyword
+        while (!builder.eof() && !isSectionKeyword(builder.getTokenType())) {
+            IElementType tokenType = builder.getTokenType();
+
+            if (tokenType == PascalTokenTypes.IDENTIFIER) {
+                // Check if this is a variable declaration (IDENTIFIER [,IDENTIFIER]* : Type)
+                if (isVariableDeclarationStart(builder)) {
+                    parseVariableDeclaration(builder);
+                } else {
+                    // Not a variable declaration, skip
+                    builder.advanceLexer();
+                }
+            } else if (tokenType == PascalTokenTypes.LBRACKET) {
+                // Attribute like [Volatile] - skip it
+                skipBrackets(builder);
+            } else {
+                builder.advanceLexer();
+            }
+            skipWhitespaceAndComments(builder);
+        }
+    }
+
+    /**
+     * Check if current position is the start of a variable declaration.
+     * Pattern: IDENTIFIER [, IDENTIFIER]* :
+     */
+    private boolean isVariableDeclarationStart(PsiBuilder builder) {
+        if (builder.getTokenType() != PascalTokenTypes.IDENTIFIER) {
+            return false;
+        }
+
+        PsiBuilder.Marker lookAhead = builder.mark();
+
+        // Skip identifiers and commas
+        while (!builder.eof()) {
+            builder.advanceLexer(); // consume identifier
+            skipWhitespaceAndComments(builder);
+
+            if (builder.getTokenType() == PascalTokenTypes.COMMA) {
+                builder.advanceLexer();
+                skipWhitespaceAndComments(builder);
+                if (builder.getTokenType() != PascalTokenTypes.IDENTIFIER) {
+                    lookAhead.rollbackTo();
+                    return false;
+                }
+            } else if (builder.getTokenType() == PascalTokenTypes.COLON) {
+                lookAhead.rollbackTo();
+                return true;
+            } else if (builder.getTokenType() == PascalTokenTypes.EQ) {
+                // Typed constant: Name = Value (without colon)
+                lookAhead.rollbackTo();
+                return true;
+            } else {
+                break;
+            }
+        }
+
+        lookAhead.rollbackTo();
+        return false;
+    }
+
+    /**
+     * Parse a variable declaration: IDENTIFIER [, IDENTIFIER]* : Type [= Value] ;
+     * Creates a VARIABLE_DEFINITION node for each variable name.
+     */
+    private void parseVariableDeclaration(PsiBuilder builder) {
+        // First, collect all variable names
+        java.util.List<PsiBuilder.Marker> varMarkers = new java.util.ArrayList<>();
+
+        while (!builder.eof()) {
+            if (builder.getTokenType() != PascalTokenTypes.IDENTIFIER) {
+                break;
+            }
+
+            // Mark start of this variable
+            PsiBuilder.Marker varMarker = builder.mark();
+            varMarkers.add(varMarker);
+
+            builder.advanceLexer(); // consume identifier
+            skipWhitespaceAndComments(builder);
+
+            if (builder.getTokenType() == PascalTokenTypes.COMMA) {
+                // End this marker here - we'll reparse for type info
+                varMarker.done(PascalElementTypes.VARIABLE_DEFINITION);
+                varMarkers.remove(varMarkers.size() - 1); // Remove from list since it's done
+
+                builder.advanceLexer(); // consume comma
+                skipWhitespaceAndComments(builder);
+            } else {
+                break;
+            }
+        }
+
+        // Now we should be at colon or equals
+        if (builder.getTokenType() == PascalTokenTypes.COLON) {
+            builder.advanceLexer(); // consume ':'
+            skipWhitespaceAndComments(builder);
+
+            // Consume the type specification
+            parseTypeSpecification(builder);
+        }
+
+        // Handle initialization: = value
+        if (builder.getTokenType() == PascalTokenTypes.EQ) {
+            builder.advanceLexer(); // consume '='
+            skipWhitespaceAndComments(builder);
+
+            // Consume the value until semicolon
+            parseInitializerValue(builder);
+        }
+
+        // Consume the semicolon
+        if (builder.getTokenType() == PascalTokenTypes.SEMI) {
+            builder.advanceLexer();
+        }
+
+        // Complete the last variable marker (it includes the type)
+        for (PsiBuilder.Marker marker : varMarkers) {
+            marker.done(PascalElementTypes.VARIABLE_DEFINITION);
+        }
+    }
+
+    /**
+     * Parse a type specification (after the colon in a variable declaration).
+     * Handles: Integer, string, TMyClass, array of ..., record ... end, etc.
+     */
+    private void parseTypeSpecification(PsiBuilder builder) {
+        // Handle array types
+        if (builder.getTokenType() == PascalTokenTypes.KW_ARRAY) {
+            builder.advanceLexer(); // consume 'array'
+            skipWhitespaceAndComments(builder);
+
+            // Handle array bounds [...]
+            if (builder.getTokenType() == PascalTokenTypes.LBRACKET) {
+                skipBrackets(builder);
+                skipWhitespaceAndComments(builder);
+            }
+
+            // 'of' keyword
+            if (builder.getTokenType() == PascalTokenTypes.KW_OF) {
+                builder.advanceLexer();
+                skipWhitespaceAndComments(builder);
+                parseTypeSpecification(builder); // recursive for element type
+            }
+            return;
+        }
+
+        // Handle set types
+        if (builder.getTokenType() == PascalTokenTypes.KW_SET) {
+            builder.advanceLexer();
+            skipWhitespaceAndComments(builder);
+            if (builder.getTokenType() == PascalTokenTypes.KW_OF) {
+                builder.advanceLexer();
+                skipWhitespaceAndComments(builder);
+                parseTypeSpecification(builder);
+            }
+            return;
+        }
+
+        // Handle record types (inline)
+        if (builder.getTokenType() == PascalTokenTypes.KW_RECORD) {
+            int depth = 1;
+            builder.advanceLexer();
+            while (!builder.eof() && depth > 0) {
+                if (builder.getTokenType() == PascalTokenTypes.KW_RECORD ||
+                    builder.getTokenType() == PascalTokenTypes.KW_CLASS ||
+                    builder.getTokenType() == PascalTokenTypes.KW_BEGIN) {
+                    depth++;
+                } else if (builder.getTokenType() == PascalTokenTypes.KW_END) {
+                    depth--;
+                }
+                builder.advanceLexer();
+            }
+            skipWhitespaceAndComments(builder);
+            return;
+        }
+
+        // Handle reference/pointer types: ^Type
+        if (builder.getTokenType() == PascalTokenTypes.CARET) {
+            builder.advanceLexer();
+            skipWhitespaceAndComments(builder);
+        }
+
+        // Simple type (identifier or keyword like string)
+        if (builder.getTokenType() == PascalTokenTypes.IDENTIFIER ||
+            builder.getTokenType() == PascalTokenTypes.KW_STRING ||
+            builder.getTokenType() == PascalTokenTypes.KW_FILE) {
+            builder.advanceLexer();
+            skipWhitespaceAndComments(builder);
+
+            // Handle qualified names: System.Integer
+            while (builder.getTokenType() == PascalTokenTypes.DOT) {
+                builder.advanceLexer();
+                skipWhitespaceAndComments(builder);
+                if (builder.getTokenType() == PascalTokenTypes.IDENTIFIER) {
+                    builder.advanceLexer();
+                    skipWhitespaceAndComments(builder);
+                }
+            }
+
+            // Handle generic parameters: TList<Integer>
+            if (builder.getTokenType() == PascalTokenTypes.LT) {
+                int depth = 1;
+                builder.advanceLexer();
+                while (!builder.eof() && depth > 0) {
+                    if (builder.getTokenType() == PascalTokenTypes.LT) depth++;
+                    else if (builder.getTokenType() == PascalTokenTypes.GT) depth--;
+                    builder.advanceLexer();
+                }
+                skipWhitespaceAndComments(builder);
+            }
+        }
+    }
+
+    /**
+     * Parse an initializer value (after = in variable declaration).
+     * Handles expressions, arrays, records, etc.
+     */
+    private void parseInitializerValue(PsiBuilder builder) {
+        int parenDepth = 0;
+        int bracketDepth = 0;
+
+        while (!builder.eof()) {
+            IElementType type = builder.getTokenType();
+
+            // Track parentheses depth for array/record literals
+            if (type == PascalTokenTypes.LPAREN) {
+                parenDepth++;
+            } else if (type == PascalTokenTypes.RPAREN) {
+                parenDepth--;
+            } else if (type == PascalTokenTypes.LBRACKET) {
+                bracketDepth++;
+            } else if (type == PascalTokenTypes.RBRACKET) {
+                bracketDepth--;
+            }
+
+            // Stop at semicolon when not nested
+            if (type == PascalTokenTypes.SEMI && parenDepth == 0 && bracketDepth == 0) {
+                break;
+            }
+
+            // Stop at section keywords when not nested
+            if (parenDepth == 0 && bracketDepth == 0 && isSectionKeyword(type)) {
+                break;
+            }
+
+            builder.advanceLexer();
+        }
+    }
+
+    /**
+     * Skip bracket content [...].
+     */
+    private void skipBrackets(PsiBuilder builder) {
+        if (builder.getTokenType() != PascalTokenTypes.LBRACKET) {
+            return;
+        }
+
+        int depth = 1;
+        builder.advanceLexer();
+        while (!builder.eof() && depth > 0) {
+            if (builder.getTokenType() == PascalTokenTypes.LBRACKET) depth++;
+            else if (builder.getTokenType() == PascalTokenTypes.RBRACKET) depth--;
+            builder.advanceLexer();
+        }
+        skipWhitespaceAndComments(builder);
     }
 
     private void skipWhitespaceAndComments(PsiBuilder builder) {

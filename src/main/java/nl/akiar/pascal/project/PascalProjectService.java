@@ -136,7 +136,7 @@ public class PascalProjectService implements Disposable {
                 String normalizedRef = ref.replace('\\', '/');
                 VirtualFile refFile = dprojDir.findFileByRelativePath(normalizedRef);
                 if (refFile != null && refFile.isValid()) {
-                    LOG.info("[PascalProject] Adding DCCReference: " + normalizedRef + " (resolved to: " + refFile.getPath() + ")");
+//                     LOG.info("[PascalProject] Adding DCCReference: " + normalizedRef + " (resolved to: " + refFile.getPath() + ")");
                     if (refFile.isDirectory()) {
                         collectPasFiles(refFile, sourceFiles);
                     } else {
@@ -157,9 +157,9 @@ public class PascalProjectService implements Disposable {
                 String normalizedOptset = optset.replace('\\', '/');
                 VirtualFile optsetFile = dprojDir.findFileByRelativePath(normalizedOptset);
                 if (optsetFile != null && optsetFile.isValid()) {
-                    LOG.info("[PascalProject] Parsing optset file: " + optsetFile.getPath());
+//                     LOG.info("[PascalProject] Parsing optset file: " + optsetFile.getPath());
                     List<String> searchPaths = OptsetParser.parseSearchPaths(optsetFile);
-                    LOG.info("[PascalProject] Found " + searchPaths.size() + " search paths in optset " + optsetFile.getName());
+//                     LOG.info("[PascalProject] Found " + searchPaths.size() + " search paths in optset " + optsetFile.getName());
                     for (String sp : searchPaths) {
                         // sp can contain macros like $(PROJECTDIR)
                         String path = sp.replace("$(PROJECTDIR)", ".");
@@ -176,10 +176,10 @@ public class PascalProjectService implements Disposable {
                         }
 
                         if (searchDir != null && searchDir.isDirectory()) {
-                            LOG.info("[PascalProject] Indexing search path from optset: " + normalizedPath + " (resolved to: " + searchDir.getPath() + ")");
+//                             LOG.info("[PascalProject] Indexing search path from optset: " + normalizedPath + " (resolved to: " + searchDir.getPath() + ")");
                             collectPasFiles(searchDir, sourceFiles);
                         } else {
-                            LOG.warn("[PascalProject] Could not find search path: " + sp + " (resolved to: " + normalizedPath + ") from " + optsetFile.getPath());
+//                             LOG.warn("[PascalProject] Could not find search path: " + sp + " (resolved to: " + normalizedPath + ") from " + optsetFile.getPath());
                         }
                     }
                 }
@@ -207,7 +207,7 @@ public class PascalProjectService implements Disposable {
                 collectPasFiles(child, result);
             } else if ("pas".equalsIgnoreCase(child.getExtension())) {
                 if (child.getName().equalsIgnoreCase("UEoKeyBase.pas") || child.getName().equalsIgnoreCase("UEoBase.pas")) {
-                    LOG.info("[PascalProject] DEBUG: collectPasFiles found " + child.getName() + " in " + dir.getPath());
+//                     LOG.info("[PascalProject] DEBUG: collectPasFiles found " + child.getName() + " in " + dir.getPath());
                 }
                 result.add(child);
             }
@@ -229,9 +229,6 @@ public class PascalProjectService implements Disposable {
         if (!"pas".equalsIgnoreCase(file.getExtension())) {
             return;
         }
-        if (file.getName().equalsIgnoreCase("UEoKeyBase.pas")) {
-            LOG.info("[PascalProject] DEBUG: indexFile called for UEoKeyBase.pas at " + file.getPath());
-        }
         try (BufferedReader reader = Files.newBufferedReader(Paths.get(file.getPath()), StandardCharsets.UTF_8)) {
             String line;
             // Usually the unit name is on the first non-comment line
@@ -244,9 +241,6 @@ public class PascalProjectService implements Disposable {
                 if (matcher.find()) {
                     String unitName = matcher.group(1).toLowerCase();
                     // LOG.info("[PascalProject] Indexed unit: " + unitName + " from " + file.getPath());
-                    if (unitName.equalsIgnoreCase("ueobase") || unitName.equalsIgnoreCase("ueokeybase")) {
-                        LOG.info("[PascalProject] DEBUG: Found unit " + unitName + " in file " + file.getPath());
-                    }
                     unitToFileMap.put(unitName, file.getPath());
                     break;
                 }
@@ -263,9 +257,6 @@ public class PascalProjectService implements Disposable {
         String fileName = file.getNameWithoutExtension().toLowerCase();
         if (!unitToFileMap.containsKey(fileName)) {
             // LOG.info("[PascalProject] Indexed unit (fallback to filename): " + fileName + " from " + file.getPath());
-            if (fileName.equalsIgnoreCase("ueobase") || fileName.equalsIgnoreCase("ueokeybase")) {
-                LOG.info("[PascalProject] DEBUG: Found unit (fallback) " + fileName + " in file " + file.getPath());
-            }
             unitToFileMap.put(fileName, file.getPath());
         }
     }

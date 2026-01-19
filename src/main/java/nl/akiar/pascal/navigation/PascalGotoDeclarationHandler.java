@@ -9,7 +9,11 @@ import com.intellij.psi.PsiFile;
 import nl.akiar.pascal.PascalLanguage;
 import nl.akiar.pascal.PascalTokenTypes;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
+import nl.akiar.pascal.psi.PascalVariableDefinition;
 import nl.akiar.pascal.stubs.PascalTypeIndex;
+import nl.akiar.pascal.stubs.PascalVariableIndex;
+
+import java.util.Collection;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -57,7 +61,15 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
         // Skip if this identifier IS a type definition name
         if (parent instanceof PascalTypeDefinition) {
             if (((PascalTypeDefinition) parent).getNameIdentifier() == sourceElement) {
-                LOG.info("[PascalNav]  -> Skipping: this is the definition name itself");
+                LOG.info("[PascalNav]  -> Skipping: this is the type definition name itself");
+                return null;
+            }
+        }
+
+        // Skip if this identifier IS a variable definition name
+        if (parent instanceof PascalVariableDefinition) {
+            if (((PascalVariableDefinition) parent).getNameIdentifier() == sourceElement) {
+                LOG.info("[PascalNav]  -> Skipping: this is the variable definition name itself");
                 return null;
             }
         }
@@ -83,7 +95,15 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
             return outOfScope.toArray(new PsiElement[0]);
         }
 
-        LOG.info("[PascalNav]  -> Type not found in index: " + typeName);
+        // Also try looking up as a variable - use scoped lookup
+        String varName = sourceElement.getText();
+        PascalVariableDefinition var = PascalVariableIndex.findVariableAtPosition(varName, file, offset);
+        if (var != null) {
+            LOG.info("[PascalNav]  -> Found variable definition: " + var.getName() + " (" + var.getVariableKind() + ") in " + var.getContainingFile().getName());
+            return new PsiElement[]{var};
+        }
+
+        LOG.info("[PascalNav]  -> Not found in index: " + typeName);
         return null;
     }
 

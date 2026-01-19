@@ -174,8 +174,36 @@ public class PascalSourcePathsConfigurable implements Configurable {
     @Override
     public void apply() throws ConfigurationException {
         PascalSourcePathsSettings settings = PascalSourcePathsSettings.getInstance(project);
-        settings.setSourcePaths(getPathsFromUI());
-        settings.setUnitScopeNames(getScopesFromUI());
+        List<String> newPaths = getPathsFromUI();
+        List<String> newScopes = getScopesFromUI();
+        settings.setSourcePaths(newPaths);
+        settings.setUnitScopeNames(newScopes);
+
+        // Trigger reindexing for all configured source directories
+        // Walk each directory and request reindex for all files underneath
+        try {
+            com.intellij.openapi.vfs.LocalFileSystem lfs = com.intellij.openapi.vfs.LocalFileSystem.getInstance();
+            for (String path : newPaths) {
+                com.intellij.openapi.vfs.VirtualFile vf = lfs.findFileByPath(path);
+                if (vf != null) {
+                    // Request reindex on the directory itself
+                    com.intellij.util.indexing.FileBasedIndex.getInstance().requestReindex(vf);
+                    // And recursively on children
+                    com.intellij.openapi.vfs.VfsUtilCore.iterateChildrenRecursively(
+                            vf,
+                            file -> true,
+                            file -> {
+                                try {
+                                    com.intellij.util.indexing.FileBasedIndex.getInstance().requestReindex(file);
+                                } catch (Throwable ignored) {}
+                                return true;
+                            }
+                    );
+                }
+            }
+        } catch (Throwable ignored) {
+            // If API differs across platform versions, silently ignore.
+        }
     }
 
     @Override

@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>nl.akiar.pascal-support</id>
     <name>Delphi Pascal Support</name>
-    <version>0.0.2</version>
+    <version>0.0.3</version>
     <vendor>Akiar</vendor>
 
     <description><![CDATA[
@@ -24,6 +24,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    Version 0.0.3:
+    - Settings: when Pascal source paths or unit scope names change, the plugin triggers a reindex of configured directories so type/variable indices and semantic features update immediately.
+    - Object Pascal: syntax highlighting (keywords/operators/compiler directives), code folding (begin/end, class, record, try..except/finally, case, repeat..until, interface/implementation sections), configurable colors, semantic annotator, uses clause annotator, documentation provider, go to declaration, reference contributor, stub indices for types and variables.
+    - DFM: syntax highlighting (keywords/properties/object names/class names), literals and comments, code folding for object/item blocks, configurable colors.
+
     Version 0.0.2:
     - Object Pascal (.pas, .dpr, .dpk): syntax highlighting, compiler directive highlighting, code folding for major block types, interface/implementation folding, configurable colors
     - DFM (.dfm): syntax highlighting for keywords/properties/object and class names, literals and comments, code folding for object/item blocks, configurable colors

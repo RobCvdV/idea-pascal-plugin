@@ -1,10 +1,11 @@
 plugins {
     id("java")
+    id("org.jetbrains.kotlin.jvm") version "1.9.22"
     id("org.jetbrains.intellij.platform") version "2.10.5"
 }
 
 group = "nl.akiar"
-version = "0.0.2"
+version = "0.0.3"
 
 repositories {
     mavenCentral()
@@ -17,6 +18,7 @@ dependencies {
     intellijPlatform {
         intellijIdeaCommunity("2024.3.1")
     }
+    implementation("org.sonarsource.delphi:sonar-delphi-plugin:1.1.0.2111")
 }
 
 intellijPlatform {
@@ -54,4 +56,3 @@ sourceSets {
         }
     }
 }
-

@@ -51,6 +51,8 @@ public class OptsetParser {
                     }
                 }
             }
+        } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
+            throw e;
         } catch (Exception e) {
             LOG.warn("Failed to parse .optset file: " + optsetFile.getPath(), e);
         }

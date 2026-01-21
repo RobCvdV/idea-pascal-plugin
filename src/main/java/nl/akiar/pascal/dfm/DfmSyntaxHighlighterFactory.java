@@ -20,6 +20,8 @@ public class DfmSyntaxHighlighterFactory extends SyntaxHighlighterFactory {
         LOG.info("DFM-PLUGIN: getSyntaxHighlighter called for " + (virtualFile != null ? virtualFile.getName() : "null"));
         try {
             return new DfmSyntaxHighlighter();
+        } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
+            throw e;
         } catch (Exception e) {
             LOG.error("DFM-PLUGIN: Error creating syntax highlighter", e);
             throw e;

@@ -12,7 +12,7 @@ import com.intellij.psi.stubs.PsiFileStub;
 import com.intellij.psi.tree.IFileElementType;
 import com.intellij.psi.tree.IStubFileElementType;
 import com.intellij.psi.tree.TokenSet;
-import nl.akiar.pascal.parser.PascalStructuredParser;
+import nl.akiar.pascal.parser.PascalSonarParser;
 import nl.akiar.pascal.psi.PascalElementTypes;
 import nl.akiar.pascal.psi.impl.PascalTypeDefinitionImpl;
 import nl.akiar.pascal.psi.impl.PascalVariableDefinitionImpl;
@@ -45,7 +45,7 @@ public class PascalParserDefinition implements ParserDefinition {
     @NotNull
     @Override
     public PsiParser createParser(Project project) {
-        return new PascalStructuredParser();
+        return new PascalSonarParser();
     }
 
     @NotNull

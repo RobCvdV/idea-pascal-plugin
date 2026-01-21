@@ -224,6 +224,8 @@ public class PascalFoldingBuilder extends FoldingBuilderEx {
                             if (node == null) node = root.getNode();
                             FoldingGroup group = FoldingGroup.newGroup("pascal-comment-" + foldIndex++);
                             descriptors.add(new FoldingDescriptor(node, range, group));
+                        } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
+                            throw e;
                         } catch (Exception ignored) {
                         }
                     }
@@ -251,6 +253,8 @@ public class PascalFoldingBuilder extends FoldingBuilderEx {
                         if (node == null) node = root.getNode();
                         FoldingGroup group = FoldingGroup.newGroup("pascal-comment-" + foldIndex++);
                         descriptors.add(new FoldingDescriptor(node, range, group));
+                    } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
+                        throw e;
                     } catch (Exception ignored) {
                     }
                 }
@@ -275,6 +279,8 @@ public class PascalFoldingBuilder extends FoldingBuilderEx {
                     if (node == null) node = root.getNode();
                     FoldingGroup group = FoldingGroup.newGroup("pascal-fold-" + foldIndex);
                     descriptors.add(new FoldingDescriptor(node, range, group));
+                } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
+                    throw e;
                 } catch (Exception ignored) {
                 }
             }

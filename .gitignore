@@ -18,6 +18,7 @@ lib/
 
 # macOS
 .DS_Store
+._*
 
 # Build output
 *.zip
@@ -27,3 +28,7 @@ lib/
 
 # Transient output logs
 .output.txt
+
+# external libraries
+libs/*.jar
+*.hprof

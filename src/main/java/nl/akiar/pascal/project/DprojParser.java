@@ -74,6 +74,8 @@ public class DprojParser {
                     }
                 }
             }
+        } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
+            throw e;
         } catch (Exception e) {
             LOG.warn("Failed to parse .dproj file: " + dprojFile.getPath(), e);
         }

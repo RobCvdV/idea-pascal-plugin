@@ -31,6 +31,8 @@ public class DfmParserDefinition implements ParserDefinition {
         LOG.info("DFM-PLUGIN: createLexer called");
         try {
             return new DfmLexerAdapter();
+        } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
+            throw e;
         } catch (Exception e) {
             LOG.error("DFM-PLUGIN: Error creating lexer", e);
             throw e;
@@ -61,6 +63,8 @@ public class DfmParserDefinition implements ParserDefinition {
         LOG.info("DFM-PLUGIN: createParser called");
         try {
             return new DfmParser();
+        } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
+            throw e;
         } catch (Exception e) {
             LOG.error("DFM-PLUGIN: Error creating parser", e);
             throw e;
@@ -77,6 +81,8 @@ public class DfmParserDefinition implements ParserDefinition {
 //         LOG.info("DFM-PLUGIN: createFile called for " + viewProvider.getVirtualFile().getName());
         try {
             return new DfmFile(viewProvider);
+        } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
+            throw e;
         } catch (Exception e) {
             LOG.error("DFM-PLUGIN: Error creating file", e);
             throw e;

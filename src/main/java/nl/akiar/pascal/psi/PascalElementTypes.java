@@ -31,4 +31,49 @@ public interface PascalElementTypes {
      * Element type for unit references in uses clause.
      */
     com.intellij.psi.tree.IElementType UNIT_REFERENCE = new nl.akiar.pascal.PascalTokenType("UNIT_REFERENCE");
+
+    /**
+     * Element type for interface section.
+     */
+    com.intellij.psi.tree.IElementType INTERFACE_SECTION = new nl.akiar.pascal.PascalTokenType("INTERFACE_SECTION");
+
+    /**
+     * Element type for implementation section.
+     */
+    com.intellij.psi.tree.IElementType IMPLEMENTATION_SECTION = new nl.akiar.pascal.PascalTokenType("IMPLEMENTATION_SECTION");
+
+    /**
+     * Element type for unit declaration.
+     */
+    com.intellij.psi.tree.IElementType UNIT_DECL_SECTION = new nl.akiar.pascal.PascalTokenType("UNIT_DECL_SECTION");
+
+    /**
+     * Element type for program declaration.
+     */
+    com.intellij.psi.tree.IElementType PROGRAM_DECL_SECTION = new nl.akiar.pascal.PascalTokenType("PROGRAM_DECL_SECTION");
+
+    /**
+     * Element type for library declaration.
+     */
+    com.intellij.psi.tree.IElementType LIBRARY_DECL_SECTION = new nl.akiar.pascal.PascalTokenType("LIBRARY_DECL_SECTION");
+
+    /**
+     * Element type for variable section (var, const, etc.).
+     */
+    com.intellij.psi.tree.IElementType VARIABLE_SECTION = new nl.akiar.pascal.PascalTokenType("VARIABLE_SECTION");
+
+    /**
+     * Element type for type section.
+     */
+    com.intellij.psi.tree.IElementType TYPE_SECTION = new nl.akiar.pascal.PascalTokenType("TYPE_SECTION");
+
+    /**
+     * Element type for routine declarations (procedures, functions).
+     */
+    com.intellij.psi.tree.IElementType ROUTINE_DECLARATION = new nl.akiar.pascal.PascalTokenType("ROUTINE_DECLARATION");
+
+    /**
+     * Element type for formal parameters.
+     */
+    com.intellij.psi.tree.IElementType FORMAL_PARAMETER = new nl.akiar.pascal.PascalTokenType("FORMAL_PARAMETER");
 }

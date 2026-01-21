@@ -58,45 +58,30 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
             return stub.getTypeKind();
         }
 
-        // Parse from AST - look for class, record, or interface keyword after =
+        // Parse from AST - look for class, record, or interface keyword
         ASTNode node = getNode();
-        ASTNode child = node.getFirstChildNode();
-        boolean foundEquals = false;
-
-        while (child != null) {
-            if (child.getElementType() == PascalTokenTypes.EQ) {
-                foundEquals = true;
-            } else if (foundEquals) {
-                IElementType type = child.getElementType();
-                if (type == PascalTokenTypes.WHITE_SPACE || type == PascalTokenTypes.LINE_COMMENT || type == PascalTokenTypes.BLOCK_COMMENT) {
-                    child = child.getTreeNext();
-                    continue;
-                }
-                if (type == PascalTokenTypes.KW_TYPE || type == PascalTokenTypes.KW_PACKED || type == PascalTokenTypes.COMPILER_DIRECTIVE) {
-                    // Skip 'type' modifier, 'packed' keyword, and compiler directives
-                    child = child.getTreeNext();
-                    continue;
-                }
-                if (type == PascalTokenTypes.KW_CLASS) {
-                    return TypeKind.CLASS;
-                } else if (type == PascalTokenTypes.KW_RECORD) {
-                    return TypeKind.RECORD;
-                } else if (type == PascalTokenTypes.KW_INTERFACE) {
-                    return TypeKind.INTERFACE;
-                } else if (type == PascalTokenTypes.KW_REFERENCE || type == PascalTokenTypes.KW_PROCEDURE || type == PascalTokenTypes.KW_FUNCTION) {
-                    return TypeKind.PROCEDURAL;
-                } else if (type == PascalTokenTypes.LPAREN) {
-                    return TypeKind.ENUM;
-                } else if (type == PascalTokenTypes.IDENTIFIER || type == PascalTokenTypes.KW_STRING || type == PascalTokenTypes.KW_ARRAY || type == PascalTokenTypes.KW_SET || type == PascalTokenTypes.KW_FILE) {
-                    return TypeKind.ALIAS;
-                } else {
-                    // If we found something else after equals, it's not one of our main kinds
-                    // but we should keep looking just in case (though unlikely in valid Pascal)
-                }
+        
+        // With Sonar parser, we should check children.
+        // Usually it's: IDENTIFIER = [packed] class/record/interface ...
+        
+        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            IElementType type = child.getElementType();
+            if (type == PascalTokenTypes.KW_CLASS) {
+                return TypeKind.CLASS;
+            } else if (type == PascalTokenTypes.KW_RECORD) {
+                return TypeKind.RECORD;
+            } else if (type == PascalTokenTypes.KW_INTERFACE || type == PascalTokenTypes.KW_DISPINTERFACE) {
+                return TypeKind.INTERFACE;
+            } else if (type == PascalTokenTypes.KW_REFERENCE || type == PascalTokenTypes.KW_PROCEDURE || type == PascalTokenTypes.KW_FUNCTION) {
+                return TypeKind.PROCEDURAL;
+            } else if (type == PascalTokenTypes.LPAREN) {
+                return TypeKind.ENUM;
+            } else if (type == PascalTokenTypes.KW_ARRAY) {
+                return TypeKind.ALIAS; // or specific ARRAY kind if we had it
             }
-            child = child.getTreeNext();
         }
-        return TypeKind.UNKNOWN;
+        
+        return TypeKind.ALIAS; // Default for type T = ExistingType;
     }
 
     @Override
@@ -107,33 +92,29 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
             return stub.getTypeParameters();
         }
 
-        // Parse from AST: TMyClass<T, K> = class
-        // Generic parameters MUST appear immediately after the type name, before '='
+        // With Sonar parser, generic parameters are mapped to GENERIC_PARAMETER element type
         List<String> results = new ArrayList<>();
         ASTNode node = getNode();
         for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
             if (child.getElementType() == nl.akiar.pascal.psi.PascalElementTypes.GENERIC_PARAMETER) {
-                ASTNode identifierNode = child.findChildByType(PascalTokenTypes.IDENTIFIER);
-                if (identifierNode != null) {
-                    results.add(identifierNode.getText());
-                }
+                // Collect all identifiers within the generic parameter node
+                // (It might contain multiple names like <T, K>)
+                collectIdentifiers(child, results);
             } else if (child.getElementType() == PascalTokenTypes.EQ) {
                 // Generic parameters must appear before '='
                 break;
             }
         }
 
-        // Fallback: look for <...> ONLY between the type name and '='
+        // Legacy fallback
         if (results.isEmpty()) {
             ASTNode nameNode = node.findChildByType(PascalTokenTypes.IDENTIFIER);
             if (nameNode != null) {
                 ASTNode current = nameNode.getTreeNext();
-                // Look for '<' immediately after the name (skipping whitespace)
                 while (current != null && current.getElementType() == PascalTokenTypes.WHITE_SPACE) {
                     current = current.getTreeNext();
                 }
                 if (current != null && current.getElementType() == PascalTokenTypes.LT) {
-                    // Found '<' right after name - collect identifiers until '>' or '='
                     current = current.getTreeNext();
                     while (current != null) {
                         IElementType type = current.getElementType();
@@ -149,6 +130,15 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
             }
         }
         return results;
+    }
+
+    private void collectIdentifiers(ASTNode node, List<String> results) {
+        if (node.getElementType() == PascalTokenTypes.IDENTIFIER) {
+            results.add(node.getText());
+        }
+        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            collectIdentifiers(child, results);
+        }
     }
 
     @Override

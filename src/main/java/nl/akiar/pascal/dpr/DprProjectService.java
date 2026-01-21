@@ -1,6 +1,7 @@
 package nl.akiar.pascal.dpr;
 
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.components.Service;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
@@ -21,7 +22,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * Project-level service that manages Delphi project (.dpr) file references.
  * Scans for .dpr files and maintains a list of all referenced Pascal source files.
  */
-public class DprProjectService implements Disposable {
+@Service(Service.Level.PROJECT)
+public final class DprProjectService implements Disposable {
     private static final Logger LOG = Logger.getInstance(DprProjectService.class);
 
     private final Project project;

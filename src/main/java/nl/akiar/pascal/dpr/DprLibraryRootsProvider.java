@@ -1,5 +1,6 @@
 package nl.akiar.pascal.dpr;
 
+import com.intellij.diagnostic.LoadingState;
 import com.intellij.navigation.ItemPresentation;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -27,6 +28,10 @@ public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
     @Override
     @NotNull
     public Collection<SyntheticLibrary> getAdditionalProjectLibraries(@NotNull Project project) {
+        if (project.isDefault() || !project.isInitialized() || !LoadingState.COMPONENTS_LOADED.isOccurred()) {
+            return Collections.emptyList();
+        }
+
         Set<String> allDirectories = new HashSet<>();
 
         // 1. Add DPR-referenced directories

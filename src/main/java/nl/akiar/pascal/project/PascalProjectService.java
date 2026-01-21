@@ -1,7 +1,9 @@
 package nl.akiar.pascal.project;
 
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.components.Service;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
@@ -24,7 +26,8 @@ import java.util.regex.Pattern;
  * Project-level service that manages Pascal project structure.
  * Handles .dproj and .optset discovery and unit resolution.
  */
-public class PascalProjectService implements Disposable {
+@Service(Service.Level.PROJECT)
+public final class PascalProjectService implements Disposable {
     private static final Logger LOG = Logger.getInstance(PascalProjectService.class);
     private final Project project;
 
@@ -62,9 +65,9 @@ public class PascalProjectService implements Disposable {
         String lowerUnit = unitName.toLowerCase();
         
         // 1. Direct match
-        String path = unitToFileMap.get(lowerUnit);
-        if (path != null) {
-            return LocalFileSystem.getInstance().findFileByPath(path);
+        String url = unitToFileMap.get(lowerUnit);
+        if (url != null) {
+            return com.intellij.openapi.vfs.VirtualFileManager.getInstance().findFileByUrl(url);
         }
 
         // 2. Try scope names if requested
@@ -72,9 +75,9 @@ public class PascalProjectService implements Disposable {
             List<String> scopes = PascalSourcePathsSettings.getInstance(project).getUnitScopeNames();
             for (String scope : scopes) {
                 String scopedName = (scope + "." + unitName).toLowerCase();
-                path = unitToFileMap.get(scopedName);
-                if (path != null) {
-                    return LocalFileSystem.getInstance().findFileByPath(path);
+                url = unitToFileMap.get(scopedName);
+                if (url != null) {
+                    return com.intellij.openapi.vfs.VirtualFileManager.getInstance().findFileByUrl(url);
                 }
             }
         }
@@ -189,9 +192,12 @@ public class PascalProjectService implements Disposable {
         // 2. Settings source paths
         List<String> settingsPaths = PascalSourcePathsSettings.getInstance(project).getSourcePaths();
         for (String sp : settingsPaths) {
-            VirtualFile dir = LocalFileSystem.getInstance().findFileByPath(sp);
+            VirtualFile dir = com.intellij.openapi.vfs.VirtualFileManager.getInstance().findFileByUrl(sp);
+            if (dir == null) {
+                dir = LocalFileSystem.getInstance().findFileByPath(sp);
+            }
+            
             if (dir != null && dir.isDirectory()) {
-                LOG.info("[PascalProject] Indexing search path from settings: " + sp);
                 collectPasFiles(dir, sourceFiles);
             }
         }
@@ -206,9 +212,6 @@ public class PascalProjectService implements Disposable {
             if (child.isDirectory()) {
                 collectPasFiles(child, result);
             } else if ("pas".equalsIgnoreCase(child.getExtension())) {
-                if (child.getName().equalsIgnoreCase("UEoKeyBase.pas") || child.getName().equalsIgnoreCase("UEoBase.pas")) {
-//                     LOG.info("[PascalProject] DEBUG: collectPasFiles found " + child.getName() + " in " + dir.getPath());
-                }
                 result.add(child);
             }
         }
@@ -229,10 +232,27 @@ public class PascalProjectService implements Disposable {
         if (!"pas".equalsIgnoreCase(file.getExtension())) {
             return;
         }
-        try (BufferedReader reader = Files.newBufferedReader(Paths.get(file.getPath()), StandardCharsets.UTF_8)) {
-            String line;
-            // Usually the unit name is on the first non-comment line
-            while ((line = reader.readLine()) != null) {
+        try {
+            // Using VirtualFile.contentsToByteArray() for better integration with test file systems
+            byte[] bytes = file.contentsToByteArray();
+            // Try UTF-8 first
+            String content;
+            try {
+                content = new String(bytes, StandardCharsets.UTF_8);
+                // If it contains replacement chars, check if it's really UTF-8
+                if (content.contains("\uFFFD")) {
+                     // Potential decoding error, try Latin-1
+                     content = new String(bytes, StandardCharsets.ISO_8859_1);
+                }
+            } catch (ProcessCanceledException e) {
+                throw e;
+            } catch (Exception e) {
+                // Fallback to ISO-8859-1 (Latin1) which accepts all byte sequences
+                content = new String(bytes, StandardCharsets.ISO_8859_1);
+            }
+
+            String[] lines = content.split("\\r?\\n");
+            for (String line : lines) {
                 line = line.trim();
                 if (line.isEmpty() || line.startsWith("//") || line.startsWith("{") || line.startsWith("(*")) {
                     continue;
@@ -240,15 +260,17 @@ public class PascalProjectService implements Disposable {
                 Matcher matcher = UNIT_NAME_PATTERN.matcher(line);
                 if (matcher.find()) {
                     String unitName = matcher.group(1).toLowerCase();
-                    // LOG.info("[PascalProject] Indexed unit: " + unitName + " from " + file.getPath());
-                    unitToFileMap.put(unitName, file.getPath());
+                    unitToFileMap.put(unitName, file.getUrl());
                     break;
                 }
                 // If we hit implementation or interface without unit name, it might not have one (program)
-                if (line.toLowerCase().startsWith("interface") || line.toLowerCase().startsWith("implementation") || line.toLowerCase().startsWith("program")) {
+                String lowerLine = line.toLowerCase();
+                if (lowerLine.startsWith("interface") || lowerLine.startsWith("implementation") || lowerLine.startsWith("program")) {
                     break;
                 }
             }
+        } catch (ProcessCanceledException e) {
+            throw e;
         } catch (Exception e) {
             LOG.warn("Failed to index unit name from " + file.getPath(), e);
         }
@@ -257,7 +279,7 @@ public class PascalProjectService implements Disposable {
         String fileName = file.getNameWithoutExtension().toLowerCase();
         if (!unitToFileMap.containsKey(fileName)) {
             // LOG.info("[PascalProject] Indexed unit (fallback to filename): " + fileName + " from " + file.getPath());
-            unitToFileMap.put(fileName, file.getPath());
+            unitToFileMap.put(fileName, file.getUrl());
         }
     }
 

@@ -51,6 +51,8 @@ public class DfmFoldingBuilder extends FoldingBuilderEx {
 
             LOG.info("DFM-PLUGIN: buildFoldRegions found " + descriptors.size() + " regions");
             return descriptors.toArray(new FoldingDescriptor[0]);
+        } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
+            throw e;
         } catch (Exception e) {
             LOG.error("DFM-PLUGIN: Error building fold regions", e);
             throw e;
@@ -100,6 +102,8 @@ public class DfmFoldingBuilder extends FoldingBuilderEx {
                             // Use FoldingGroup to allow nested folds with same node
                             FoldingGroup group = FoldingGroup.newGroup("dfm-fold-" + foldIndex++);
                             descriptors.add(new FoldingDescriptor(node, range, group));
+                        } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
+                            throw e;
                         } catch (Exception e) {
                             // Skip invalid ranges
                             LOG.warn("DFM-PLUGIN: Failed to create fold region", e);

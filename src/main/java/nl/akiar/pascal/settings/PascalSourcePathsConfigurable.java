@@ -179,7 +179,7 @@ public class PascalSourcePathsConfigurable implements Configurable {
         settings.setSourcePaths(newPaths);
         settings.setUnitScopeNames(newScopes);
 
-        // Trigger reindexing for all configured source directories
+        // Trigger reindexing for all configured sour      ce directories
         // Walk each directory and request reindex for all files underneath
         try {
             com.intellij.openapi.vfs.LocalFileSystem lfs = com.intellij.openapi.vfs.LocalFileSystem.getInstance();

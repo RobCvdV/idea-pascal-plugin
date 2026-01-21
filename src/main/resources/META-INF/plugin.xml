@@ -1,6 +1,6 @@
 <idea-plugin>
-    <id>nl.akiar.pascal-support</id>
-    <name>Delphi Pascal Support</name>
+    <id>nl.akiar.pascal</id>
+    <name>Delphi Pascal</name>
     <version>0.0.3</version>
     <vendor>Akiar</vendor>
 
@@ -38,7 +38,7 @@
     ]]></change-notes>
 
     <!-- IntelliJ Platform compatibility -->
-    <idea-version since-build="243.0"/>
+    <idea-version since-build="253"/>
 
     <!-- Plugin dependencies -->
     <depends>com.intellij.modules.platform</depends>
@@ -63,7 +63,7 @@
                             implementationClass="nl.akiar.pascal.dfm.DfmFoldingBuilder"/>
 
         <!-- DFM Color Settings Page -->
-        <colorSettingsPage implementationClass="nl.akiar.pascal.dfm.DfmColorSettingsPage"/>
+        <colorSettingsPage implementation="nl.akiar.pascal.dfm.DfmColorSettingsPage"/>
 
         <!-- ==================== Pascal Support ==================== -->
 
@@ -84,7 +84,7 @@
                             implementationClass="nl.akiar.pascal.PascalFoldingBuilder"/>
 
         <!-- Pascal Color Settings Page -->
-        <colorSettingsPage implementationClass="nl.akiar.pascal.PascalColorSettingsPage"/>
+        <colorSettingsPage implementation="nl.akiar.pascal.PascalColorSettingsPage"/>
 
         <!-- Pascal Stub Index for type definitions -->
         <stubIndex implementation="nl.akiar.pascal.stubs.PascalTypeIndex"/>
@@ -114,17 +114,8 @@
         <!-- Pascal Go to Declaration Handler (Cmd+Click navigation) -->
         <gotoDeclarationHandler implementation="nl.akiar.pascal.navigation.PascalGotoDeclarationHandler"/>
 
-        <!-- Pascal Project Service for .dproj and .optset support -->
-        <projectService serviceImplementation="nl.akiar.pascal.project.PascalProjectService"/>
-
-        <!-- DPR Project Service for monorepo support -->
-        <projectService serviceImplementation="nl.akiar.pascal.dpr.DprProjectService"/>
-
         <!-- DPR Library Roots Provider - indexes files referenced by .dpr files -->
         <additionalLibraryRootsProvider implementation="nl.akiar.pascal.dpr.DprLibraryRootsProvider"/>
-
-        <!-- Pascal Source Paths Settings Service -->
-        <projectService serviceImplementation="nl.akiar.pascal.settings.PascalSourcePathsSettings"/>
 
         <!-- Pascal Source Paths Settings Page -->
         <projectConfigurable

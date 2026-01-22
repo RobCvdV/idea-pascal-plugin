@@ -92,6 +92,9 @@
         <!-- Pascal Stub Index for variable definitions -->
         <stubIndex implementation="nl.akiar.pascal.stubs.PascalVariableIndex"/>
 
+        <!-- Pascal Stub Index for routine definitions -->
+        <stubIndex implementation="nl.akiar.pascal.stubs.PascalRoutineIndex"/>
+
         <!-- Pascal Stub Element Types Holder -->
         <stubElementTypeHolder class="nl.akiar.pascal.psi.PascalElementTypes"/>
 

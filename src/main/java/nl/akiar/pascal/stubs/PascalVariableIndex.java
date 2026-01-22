@@ -183,31 +183,66 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
             return null;
         }
 
-        // If only one match, return it
-        if (candidates.size() == 1) {
-            return candidates.iterator().next();
+        // 1. Try to find the one that actually contains this offset (declaration)
+        for (PascalVariableDefinition var : candidates) {
+            if (var.getTextRange().contains(offset)) {
+                return var;
+            }
         }
 
-        // Multiple matches - try to find the most specific one based on position
-        // Variables defined before the offset are candidates
-        PascalVariableDefinition bestMatch = null;
-        int bestDistance = Integer.MAX_VALUE;
+        // 2. Find the most specific one based on scope
+        PsiElement elementAtOffset = file.findElementAt(offset);
+        nl.akiar.pascal.psi.PascalRoutine containingRoutine =
+                com.intellij.psi.util.PsiTreeUtil.getParentOfType(elementAtOffset, nl.akiar.pascal.psi.PascalRoutine.class);
+        nl.akiar.pascal.psi.PascalTypeDefinition containingClass =
+                com.intellij.psi.util.PsiTreeUtil.getParentOfType(elementAtOffset, nl.akiar.pascal.psi.PascalTypeDefinition.class);
+
+        PascalVariableDefinition bestLocalMatch = null;
+        int bestLocalDistance = Integer.MAX_VALUE;
+        PascalVariableDefinition bestFieldMatch = null;
+        int bestFieldDistance = Integer.MAX_VALUE;
+        PascalVariableDefinition bestGlobalMatch = null;
+        int bestGlobalDistance = Integer.MAX_VALUE;
 
         for (PascalVariableDefinition var : candidates) {
             int varOffset = var.getTextOffset();
-            // Variable must be defined before the reference (or in same scope)
-            if (varOffset < offset) {
-                int distance = offset - varOffset;
-                // Prefer closer definitions (more local scope)
-                if (distance < bestDistance) {
-                    bestDistance = distance;
-                    bestMatch = var;
+            if (varOffset > offset) continue; // Defined after the offset
+
+            int distance = offset - varOffset;
+            VariableKind kind = var.getVariableKind();
+
+            if (kind == VariableKind.LOCAL || kind == VariableKind.PARAMETER || kind == VariableKind.LOOP_VAR) {
+                nl.akiar.pascal.psi.PascalRoutine varRoutine =
+                        com.intellij.psi.util.PsiTreeUtil.getParentOfType(var, nl.akiar.pascal.psi.PascalRoutine.class);
+                if (varRoutine != null && varRoutine.equals(containingRoutine)) {
+                    if (distance < bestLocalDistance) {
+                        bestLocalDistance = distance;
+                        bestLocalMatch = var;
+                    }
+                }
+            } else if (kind == VariableKind.FIELD) {
+                nl.akiar.pascal.psi.PascalTypeDefinition varClass =
+                        com.intellij.psi.util.PsiTreeUtil.getParentOfType(var, nl.akiar.pascal.psi.PascalTypeDefinition.class);
+                if (varClass != null && varClass.equals(containingClass)) {
+                    if (distance < bestFieldDistance) {
+                        bestFieldDistance = distance;
+                        bestFieldMatch = var;
+                    }
+                }
+            } else {
+                if (distance < bestGlobalDistance) {
+                    bestGlobalDistance = distance;
+                    bestGlobalMatch = var;
                 }
             }
         }
 
-        // If no match before offset, return the first one
-        return bestMatch != null ? bestMatch : candidates.iterator().next();
+        if (bestLocalMatch != null) return bestLocalMatch;
+        if (bestFieldMatch != null) return bestFieldMatch;
+        if (bestGlobalMatch != null) return bestGlobalMatch;
+
+        // If no match found before offset with proper scope, return the first candidate as a last resort
+        return candidates.iterator().next();
     }
 
     /**

@@ -36,7 +36,15 @@ class PascalSonarParser : PsiParser {
         private val THREAD_LOCAL_COMPONENTS = ThreadLocal.withInitial {
             val preprocessorFactory = DelphiPreprocessorFactory(compilerVersion, platform)
             val typeFactory = TypeFactoryImpl(toolchain, compilerVersion)
-            val searchPath = SearchPath.create(emptyList())
+            
+            // Create a dummy search path that doesn't look for anything.
+            // This avoids sonar-delphi's DefaultSearchPath which can cause freezes
+            // by recursively indexing directories (especially when files are in /tmp).
+            val searchPath = object : SearchPath {
+                override fun search(fileName: String, relativeTo: java.nio.file.Path?): java.nio.file.Path? = null
+                override fun getRootDirectories(): Set<java.nio.file.Path> = emptySet()
+            }
+
             val config = au.com.integradev.delphi.file.DelphiFile.createConfig(
                 StandardCharsets.UTF_8.name(),
                 preprocessorFactory,
@@ -44,8 +52,14 @@ class PascalSonarParser : PsiParser {
                 searchPath,
                 definitions
             )
-            val tempFile = File.createTempFile("pascal_parse_thread_", ".pas")
+            
+            // Create a private temp directory for this thread to isolate the temp file
+            // and avoid any potential directory scanning issues.
+            val tempDir = java.nio.file.Files.createTempDirectory("pascal_parse_").toFile()
+            tempDir.deleteOnExit()
+            val tempFile = File(tempDir, "input.pas")
             tempFile.deleteOnExit()
+            
             ParserComponents(preprocessorFactory, typeFactory, config, tempFile)
         }
     }
@@ -137,33 +151,6 @@ class PascalSonarParser : PsiParser {
         var nodeStartOffset = getOffset(firstToken.beginLine, firstToken.beginColumn, lineOffsets)
         var nodeEndOffset = getOffset(lastToken.endLine, lastToken.endColumn, lineOffsets) + 1
 
-        // Precise range adjustment for SimpleNameDeclarationNode to avoid wrapping punctuation
-        val isSimpleName = node.javaClass.simpleName.contains("SimpleNameDeclaration", ignoreCase = true) ||
-                          node is org.sonar.plugins.communitydelphi.api.ast.SimpleNameDeclarationNode
-        if (isSimpleName) {
-            val idNode = node.children.firstOrNull { it.javaClass.simpleName.contains("Identifier", ignoreCase = true) }
-            if (idNode != null) {
-                val first = idNode.firstToken
-                if (first != null) {
-                    nodeStartOffset = getOffset(first.beginLine, first.beginColumn, lineOffsets)
-                    nodeEndOffset = nodeStartOffset + first.image.length
-                }
-            }
-        } else {
-            // Precise range adjustment to avoid wrapping punctuation for other nodes
-            if (firstToken.image == "(" || firstToken.image == ";" || firstToken.image == ",") {
-                nodeStartOffset += firstToken.image.length
-            }
-            if (lastToken.image == ")" || lastToken.image == ";" || lastToken.image == ",") {
-                nodeEndOffset -= lastToken.image.length
-            }
-        }
-
-        // Skip nodes that end before current position
-        if (nodeEndOffset <= builder.currentOffset) {
-            return
-        }
-
         val markerType = when {
             node is org.sonar.plugins.communitydelphi.api.ast.InterfaceSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_SECTION
             node is org.sonar.plugins.communitydelphi.api.ast.ImplementationSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.IMPLEMENTATION_SECTION
@@ -185,7 +172,6 @@ class PascalSonarParser : PsiParser {
                 val parent = node.parent
                 val parentName = parent?.javaClass?.simpleName ?: ""
                 
-                // If it's inside a formal parameter list or variable list, it's a variable
                 val isVarOrParam = parentName.contains("FormalParameter", ignoreCase = true) ||
                                   parentName.contains("NameDeclarationList", ignoreCase = true) ||
                                   parentName.contains("VarDeclaration", ignoreCase = true) ||
@@ -204,6 +190,23 @@ class PascalSonarParser : PsiParser {
             else -> null
         }
 
+        if (markerType != null) {
+            // Global skip of leading punctuation for any mapped node
+            val text = builder.originalText
+            while (nodeStartOffset < text.length && (text[nodeStartOffset] == '(' || text[nodeStartOffset] == ',' || text[nodeStartOffset] == ';' || text[nodeStartOffset] == '<' || text[nodeStartOffset] == '>' || text[nodeStartOffset].isWhitespace())) {
+                nodeStartOffset++
+            }
+            
+            // Global strip of trailing punctuation
+            while (nodeEndOffset > nodeStartOffset && nodeEndOffset <= text.length && (text[nodeEndOffset - 1] == ')' || text[nodeEndOffset - 1] == ',' || text[nodeEndOffset - 1] == ';' || text[nodeEndOffset - 1] == '<' || text[nodeEndOffset - 1] == '>' || text[nodeEndOffset - 1].isWhitespace())) {
+                nodeEndOffset--
+            }
+        }
+
+        if (nodeEndOffset <= builder.currentOffset) {
+            return
+        }
+
         var marker: PsiBuilder.Marker? = null
         if (markerType != null) {
             while (!builder.eof() && builder.currentOffset < nodeStartOffset) {
@@ -212,13 +215,11 @@ class PascalSonarParser : PsiParser {
             marker = builder.mark()
         }
 
-        // Recursively map children
         for (child in node.children) {
             mapNode(child, builder, lineOffsets)
         }
 
         if (marker != null) {
-            // Ensure we advance to at least the end of this node's tokens
             while (!builder.eof() && builder.currentOffset < nodeEndOffset) {
                 builder.advanceLexer()
             }

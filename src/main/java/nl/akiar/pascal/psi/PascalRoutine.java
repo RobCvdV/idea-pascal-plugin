@@ -1,13 +1,14 @@
 package nl.akiar.pascal.psi;
 
 import com.intellij.psi.PsiNameIdentifierOwner;
-import nl.akiar.pascal.PascalPsiElement;
+import com.intellij.psi.StubBasedPsiElement;
+import nl.akiar.pascal.stubs.PascalRoutineStub;
 import org.jetbrains.annotations.Nullable;
 
 /**
  * Interface for Pascal routine definitions (procedures, functions, methods).
  */
-public interface PascalRoutine extends PsiNameIdentifierOwner {
+public interface PascalRoutine extends PsiNameIdentifierOwner, StubBasedPsiElement<PascalRoutineStub> {
     /**
      * Check if this is an implementation (has a body).
      */

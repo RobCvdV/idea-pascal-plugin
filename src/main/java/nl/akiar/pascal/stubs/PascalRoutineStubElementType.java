@@ -1,5 +1,7 @@
 package nl.akiar.pascal.stubs;
 
+import com.intellij.lang.ASTNode;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.stubs.*;
 import nl.akiar.pascal.PascalLanguage;
 import nl.akiar.pascal.psi.PascalElementTypes;
@@ -50,5 +52,11 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
         if (stub.getName() != null) {
             sink.occurrence(PascalRoutineIndex.KEY, stub.getName().toLowerCase());
         }
+    }
+
+    @Override
+    public boolean shouldCreateStub(ASTNode node) {
+        PsiElement psi = node.getPsi();
+        return psi instanceof nl.akiar.pascal.psi.PascalRoutine;
     }
 }

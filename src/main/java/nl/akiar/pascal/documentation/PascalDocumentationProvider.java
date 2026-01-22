@@ -43,6 +43,14 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                     return null;
                 }
             }
+            
+            // Skip if this identifier IS a variable definition name
+            if (parent instanceof PascalVariableDefinition) {
+                if (((PascalVariableDefinition) parent).getNameIdentifier() == contextElement) {
+                    LOG.info("[PascalDoc]  -> Skipping: this is the variable definition name itself");
+                    return null;
+                }
+            }
 
             // Look up the type directly in the index (bypass reference system)
             String name = contextElement.getText();

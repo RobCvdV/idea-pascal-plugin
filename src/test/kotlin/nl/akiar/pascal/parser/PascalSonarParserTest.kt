@@ -370,4 +370,134 @@ class PascalSonarParserTest : BasePlatformTestCase() {
             assertEquals("Integer", aOtherParam.typeName)
         }
     }
+
+    @Test
+    fun testMultipleProceduresParameterResolution() {
+        val text = """
+            unit UdlgRestore;
+            interface
+            procedure acNextUpdate(Sender: TObject);
+            procedure buDbFileDataClick(Sender: TObject);
+            procedure pcWzdChanging(Sender: TObject; var AllowChange: Boolean);
+            implementation
+            procedure acNextUpdate(Sender: TObject); begin end;
+            procedure buDbFileDataClick(Sender: TObject); begin end;
+            procedure pcWzdChanging(Sender: TObject; var AllowChange: Boolean); begin end;
+            end.
+        """.trimIndent()
+
+        val psiFile = myFixture.configureByText("UdlgRestore.pas", text)
+        
+        com.intellij.openapi.application.runReadAction {
+            val varDefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile, nl.akiar.pascal.psi.PascalVariableDefinition::class.java)
+            
+            // Check pcWzdChanging's AllowChange
+            val allowChangeParams = varDefs.filter { it.name == "AllowChange" }
+            assertEquals(2, allowChangeParams.size) // interface and implementation
+            
+            val senderParams = varDefs.filter { it.name == "Sender" }
+            assertEquals(6, senderParams.size) // 3 procedures * 2 (interface/impl)
+            
+            // Check the first parameter of acNextUpdate in interface
+            val firstSender = senderParams.first { 
+                val routine = com.intellij.psi.util.PsiTreeUtil.getParentOfType(it, nl.akiar.pascal.psi.PascalRoutine::class.java)
+                routine != null && routine.name == "acNextUpdate"
+            }
+            
+            val senderText = firstSender.text
+            assertFalse("Parameter text should NOT contain '(': ${"$"}{senderText}", senderText.contains("("))
+            assertEquals("Sender", senderText)
+
+            // Find AllowChange in interface
+            val allowChange = allowChangeParams.first { 
+                val routine = com.intellij.psi.util.PsiTreeUtil.getParentOfType(it, nl.akiar.pascal.psi.PascalRoutine::class.java)
+                routine != null && routine.name == "pcWzdChanging"
+            }
+                
+            val offset = allowChange.textOffset
+            val elementAtOffset = psiFile.findElementAt(offset)
+            assertNotNull(elementAtOffset)
+            
+            val varDefAtOffset = com.intellij.psi.util.PsiTreeUtil.getParentOfType(elementAtOffset, nl.akiar.pascal.psi.PascalVariableDefinition::class.java)
+            assertNotNull("Element at offset ${"$"}{offset} should be within a VARIABLE_DEFINITION", varDefAtOffset)
+            assertEquals("AllowChange", varDefAtOffset!!.name)
+            
+            // Verify ranges are correct - no "Sender" from buDbFileDataClick should cover pcWzdChanging
+            val buDbSender = senderParams.first { 
+                val routine = com.intellij.psi.util.PsiTreeUtil.getParentOfType(it, nl.akiar.pascal.psi.PascalRoutine::class.java)
+                routine?.name == "buDbFileDataClick"
+            }
+            
+            val range = buDbSender.textRange
+            assertFalse("Sender from buDbFileDataClick (${"$"}{range}) should NOT cover AllowChange offset (${"$"}{offset})", range.contains(offset))
+
+            // Check for any overlaps among all VARIABLE_DEFINITIONs
+            val varDefList = varDefs.toList()
+            for (i in varDefList.indices) {
+                for (j in i + 1 until varDefList.size) {
+                    val v1 = varDefList[i]
+                    val v2 = varDefList[j]
+                    val r1 = v1.textRange
+                    val r2 = v2.textRange
+                    if (r1.intersects(r2)) {
+                        // Nesting is okay (e.g. if one is inside another for some reason), but they shouldn't just overlap
+                        val v1InsideV2 = r2.contains(r1)
+                        val v2InsideV1 = r1.contains(r2)
+                        assertTrue("Overlapping but not nested VARIABLE_DEFINITIONs found: " +
+                                "${"$"}{v1.name} at ${"$"}{r1} and ${"$"}{v2.name} at ${"$"}{r2}",
+                                v1InsideV2 || v2InsideV1)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun testDocumentationProviderLookups() {
+        val text = """
+            unit UdlgRestore;
+            interface
+            procedure acNextUpdate(Sender: TObject);
+            procedure buDbFileDataClick(Sender: TObject);
+            procedure pcWzdChanging(Sender: TObject; var AllowChange: Boolean);
+            implementation
+            procedure acNextUpdate(Sender: TObject); begin end;
+            procedure buDbFileDataClick(Sender: TObject); begin end;
+            procedure pcWzdChanging(Sender: TObject; var AllowChange: Boolean); begin end;
+            end.
+        """.trimIndent()
+
+        val psiFile = myFixture.configureByText("UdlgRestore.pas", text)
+        
+        com.intellij.openapi.application.runReadAction {
+            val varDefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile, nl.akiar.pascal.psi.PascalVariableDefinition::class.java)
+            
+            // Find pcWzdChanging.Sender in interface
+            val pcWzdChangingSender = varDefs.first { 
+                val routine = com.intellij.psi.util.PsiTreeUtil.getParentOfType(it, nl.akiar.pascal.psi.PascalRoutine::class.java)
+                val inInterface = com.intellij.psi.util.PsiTreeUtil.getParentOfType(it, com.intellij.psi.PsiFile::class.java)?.let { _ ->
+                    val section = routine?.parent
+                    section?.node?.elementType == nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_SECTION
+                } ?: false
+                
+                routine?.name == "pcWzdChanging" && it.name == "Sender" && inInterface
+            }
+            
+            val offset = pcWzdChangingSender.textOffset
+            val name = pcWzdChangingSender.name!!
+            
+            // This is what PascalDocumentationProvider calls:
+            val found = nl.akiar.pascal.stubs.PascalVariableIndex.findVariableAtPosition(name, psiFile, offset)
+            
+            assertNotNull(found)
+            val foundRoutine = com.intellij.psi.util.PsiTreeUtil.getParentOfType(found, nl.akiar.pascal.psi.PascalRoutine::class.java)
+            val foundIsInterface = found?.let { com.intellij.psi.util.PsiTreeUtil.getParentOfType(it, com.intellij.psi.PsiFile::class.java)?.let { _ ->
+                val section = com.intellij.psi.util.PsiTreeUtil.getParentOfType(found, nl.akiar.pascal.psi.PascalRoutine::class.java)?.parent
+                section?.node?.elementType == nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_SECTION
+            }} ?: false
+
+            assertEquals("Found variable should belong to pcWzdChanging", "pcWzdChanging", foundRoutine?.name)
+            assertTrue("Found variable should be in interface section", foundIsInterface)
+        }
+    }
 }

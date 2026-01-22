@@ -70,7 +70,8 @@ public interface PascalElementTypes {
     /**
      * Element type for routine declarations (procedures, functions).
      */
-    com.intellij.psi.tree.IElementType ROUTINE_DECLARATION = new nl.akiar.pascal.PascalTokenType("ROUTINE_DECLARATION");
+    com.intellij.psi.stubs.IStubElementType<nl.akiar.pascal.stubs.PascalRoutineStub, nl.akiar.pascal.psi.PascalRoutine> ROUTINE_DECLARATION =
+            new nl.akiar.pascal.stubs.PascalRoutineStubElementType();
 
     /**
      * Element type for formal parameters.

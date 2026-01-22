@@ -51,8 +51,35 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
             return stub.getTypeName();
         }
 
-        // Parse from AST: look for IDENTIFIER after COLON
-        ASTNode node = getNode();
+        // 1. Try to parse from AST children (standard case: VarName: Type)
+        String typeNameFromChildren = parseTypeNameFromNode(getNode());
+        if (typeNameFromChildren != null) {
+            return typeNameFromChildren;
+        }
+
+        // 2. If no type found in children, check if we are in a combined declaration (A, B: Type)
+        // Look at following siblings within the same parent
+        PsiElement parent = getParent();
+        if (parent != null) {
+            // For parameters, parent is usually FORMAL_PARAMETER
+            // For variables, parent is usually NameDeclarationList or VarDeclaration
+            PsiElement current = getNextSibling();
+            while (current != null) {
+                if (current instanceof PascalVariableDefinition) {
+                    // Another variable definition in the list, skip
+                } else if (current.getNode().getElementType() == PascalTokenTypes.COLON) {
+                    // Found the colon, type should follow
+                    return parseTypeNameFromSiblings(current);
+                }
+                current = current.getNextSibling();
+            }
+        }
+
+        return null;
+    }
+
+    @Nullable
+    private String parseTypeNameFromNode(ASTNode node) {
         boolean foundColon = false;
 
         for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
@@ -68,46 +95,69 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
                     continue;
                 }
 
-                // Found the type - could be simple identifier or qualified name
-                if (type == PascalTokenTypes.IDENTIFIER ||
-                    type == PascalTokenTypes.KW_STRING ||
-                    type == PascalTokenTypes.KW_ARRAY ||
-                    type == PascalTokenTypes.KW_SET ||
-                    type == PascalTokenTypes.KW_FILE) {
-                    // Build the full type name (might be qualified like System.Integer)
-                    StringBuilder typeName = new StringBuilder(child.getText());
-                    ASTNode next = child.getTreeNext();
+                // Found the type
+                return buildTypeName(child);
+            }
+        }
+        return null;
+    }
 
-                    // Handle qualified names (Type.SubType) and generics (TList<T>)
-                    while (next != null) {
-                        IElementType nextType = next.getElementType();
-                        if (nextType == PascalTokenTypes.DOT) {
-                            typeName.append(".");
-                            next = next.getTreeNext();
-                            if (next != null && next.getElementType() == PascalTokenTypes.IDENTIFIER) {
-                                typeName.append(next.getText());
-                                next = next.getTreeNext();
-                            }
-                        } else if (nextType == PascalTokenTypes.LT) {
-                            // Generic type parameters - include them in type name
-                            int depth = 1;
-                            typeName.append("<");
-                            next = next.getTreeNext();
-                            while (next != null && depth > 0) {
-                                if (next.getElementType() == PascalTokenTypes.LT) depth++;
-                                else if (next.getElementType() == PascalTokenTypes.GT) depth--;
-                                typeName.append(next.getText());
-                                next = next.getTreeNext();
-                            }
-                        } else if (nextType == PascalTokenTypes.WHITE_SPACE) {
-                            next = next.getTreeNext();
-                        } else {
-                            break;
-                        }
+    @Nullable
+    private String parseTypeNameFromSiblings(PsiElement colonElement) {
+        PsiElement current = colonElement.getNextSibling();
+        while (current != null) {
+            IElementType type = current.getNode().getElementType();
+            if (type == PascalTokenTypes.WHITE_SPACE ||
+                type == PascalTokenTypes.LINE_COMMENT ||
+                type == PascalTokenTypes.BLOCK_COMMENT) {
+                current = current.getNextSibling();
+                continue;
+            }
+            return buildTypeName(current.getNode());
+        }
+        return null;
+    }
+
+    @Nullable
+    private String buildTypeName(ASTNode child) {
+        IElementType type = child.getElementType();
+        if (type == PascalTokenTypes.IDENTIFIER ||
+            type == PascalTokenTypes.KW_STRING ||
+            type == PascalTokenTypes.KW_ARRAY ||
+            type == PascalTokenTypes.KW_SET ||
+            type == PascalTokenTypes.KW_FILE) {
+            // Build the full type name (might be qualified like System.Integer)
+            StringBuilder typeName = new StringBuilder(child.getText());
+            ASTNode next = child.getTreeNext();
+
+            // Handle qualified names (Type.SubType) and generics (TList<T>)
+            while (next != null) {
+                IElementType nextType = next.getElementType();
+                if (nextType == PascalTokenTypes.DOT) {
+                    typeName.append(".");
+                    next = next.getTreeNext();
+                    if (next != null && next.getElementType() == PascalTokenTypes.IDENTIFIER) {
+                        typeName.append(next.getText());
+                        next = next.getTreeNext();
                     }
-                    return typeName.toString();
+                } else if (nextType == PascalTokenTypes.LT) {
+                    // Generic type parameters - include them in type name
+                    int depth = 1;
+                    typeName.append("<");
+                    next = next.getTreeNext();
+                    while (next != null && depth > 0) {
+                        if (next.getElementType() == PascalTokenTypes.LT) depth++;
+                        else if (next.getElementType() == PascalTokenTypes.GT) depth--;
+                        typeName.append(next.getText());
+                        next = next.getTreeNext();
+                    }
+                } else if (nextType == PascalTokenTypes.WHITE_SPACE) {
+                    next = next.getTreeNext();
+                } else {
+                    break;
                 }
             }
+            return typeName.toString();
         }
         return null;
     }
@@ -120,39 +170,40 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
             return stub.getVariableKind();
         }
 
-        PsiElement parent = getParent();
-        if (parent == null) return VariableKind.UNKNOWN;
-
-        // Parent should be a Section or a ListNode or FormalParameter
-        IElementType parentType = parent.getNode().getElementType();
-
-        // 1. Check if we are inside a TYPE_DEFINITION (class/record field)
-        if (isInsideTypeDefinition()) {
-            return VariableKind.FIELD;
-        }
-
-        // 2. Check if we are a parameter
+        // 1. Check if we are a parameter - Check this FIRST because parameters of methods are also inside TYPE_DEFINITION
         if (isInsideFormalParameter()) {
             return VariableKind.PARAMETER;
         }
 
-        // 3. Check containing section
+        // 2. Check if we are inside a TYPE_DEFINITION (class/record field)
+        if (isInsideTypeDefinition()) {
+            return VariableKind.FIELD;
+        }
+
+        // 3. Check for constant
+        if (isInsideConstDeclaration()) {
+            return VariableKind.CONSTANT;
+        }
+
+        // 4. Check containing section
+        PsiElement parent = getParent();
+        if (parent == null) return VariableKind.UNKNOWN;
+
         PsiElement section = parent;
         while (section != null) {
-            IElementType type = section.getNode().getElementType();
-            if (type == nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION) {
-                ASTNode node = section.getNode();
-                if (node.findChildByType(nl.akiar.pascal.PascalTokenTypes.KW_CONST) != null) {
-                    return VariableKind.CONSTANT;
-                }
-                if (node.findChildByType(nl.akiar.pascal.PascalTokenTypes.KW_THREADVAR) != null) {
-                    return VariableKind.THREADVAR;
-                }
+            ASTNode sectionNode = section.getNode();
+            if (sectionNode != null) {
+                IElementType type = sectionNode.getElementType();
+                if (type == nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION) {
+                    if (sectionNode.findChildByType(nl.akiar.pascal.PascalTokenTypes.KW_THREADVAR) != null) {
+                        return VariableKind.THREADVAR;
+                    }
 
-                if (isInsideRoutine()) {
-                    return VariableKind.LOCAL;
+                    if (isInsideRoutine()) {
+                        return VariableKind.LOCAL;
+                    }
+                    return VariableKind.GLOBAL;
                 }
-                return VariableKind.GLOBAL;
             }
             section = section.getParent();
         }
@@ -163,15 +214,18 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
     private boolean isInsideFormalParameter() {
         PsiElement parent = getParent();
         while (parent != null) {
-            if (parent.getNode() != null && parent.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER) {
+            ASTNode parentNode = parent.getNode();
+            if (parentNode != null && parentNode.getElementType() == nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER) {
                 return true;
             }
             // Stop at routine or variable section to avoid unnecessary traversal
-            IElementType type = parent.getNode().getElementType();
-            if (type == nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION ||
-                type == nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION ||
-                type == nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION) {
-                break;
+            if (parentNode != null) {
+                IElementType type = parentNode.getElementType();
+                if (type == nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION ||
+                        type == nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION ||
+                        type == nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION) {
+                    break;
+                }
             }
             parent = parent.getParent();
         }
@@ -183,6 +237,20 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
         while (parent != null) {
             if (parent.getNode() != null && parent.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION) {
                 return true;
+            }
+            parent = parent.getParent();
+        }
+        return false;
+    }
+
+    private boolean isInsideConstDeclaration() {
+        PsiElement parent = getParent();
+        while (parent != null) {
+            ASTNode node = parent.getNode();
+            if (node != null && node.getElementType() == nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION) {
+                if (node.findChildByType(nl.akiar.pascal.PascalTokenTypes.KW_CONST) != null) {
+                    return true;
+                }
             }
             parent = parent.getParent();
         }

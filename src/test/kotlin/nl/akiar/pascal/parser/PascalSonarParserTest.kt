@@ -220,6 +220,33 @@ class PascalSonarParserTest : BasePlatformTestCase() {
     }
 
     @Test
+    fun testConstantKindResolution() {
+        val text = """
+            unit TestUnit;
+            interface
+            const
+              GConst = 123;
+            implementation
+            procedure Test;
+            const
+              LConst = 'abc';
+            begin
+            end;
+            end.
+        """.trimIndent()
+
+        val psiFile = myFixture.configureByText("Test.pas", text)
+
+        com.intellij.openapi.application.runReadAction {
+            val varDefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile, nl.akiar.pascal.psi.PascalVariableDefinition::class.java)
+            val kinds = varDefs.associate { it.name to it.variableKind }
+
+            assertEquals(nl.akiar.pascal.psi.VariableKind.CONSTANT, kinds["GConst"])
+            assertEquals(nl.akiar.pascal.psi.VariableKind.CONSTANT, kinds["LConst"])
+        }
+    }
+
+    @Test
     fun testVisibilityResolution() {
         val text = """
             unit TestUnit;
@@ -276,6 +303,71 @@ class PascalSonarParserTest : BasePlatformTestCase() {
             assertEquals(2, params.size)
             assertEquals("T", params[0])
             assertEquals("K", params[1])
+        }
+    }
+
+    @Test
+    fun testFlawedRecognitionReproduction() {
+        val text = """
+            unit UdlgRestore;
+            interface
+            procedure AConExecuteComplete(const AConnection: TADOConnection; AError: Error);
+            implementation
+            procedure AConExecuteComplete(const AConnection: TADOConnection; AError: Error);
+            begin
+            end;
+            end.
+        """.trimIndent()
+
+        val psiFile = myFixture.configureByText("UdlgRestore.pas", text)
+        
+        com.intellij.openapi.application.runReadAction {
+            val varDefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile, nl.akiar.pascal.psi.PascalVariableDefinition::class.java)
+
+            val parameters = varDefs.filter { it.variableKind == nl.akiar.pascal.psi.VariableKind.PARAMETER }
+            assertEquals("Should have 4 parameters (2 in interface, 2 in implementation)", 4, parameters.size)
+
+            val aParam1 = parameters.first { it.name == "AConnection" }
+            assertEquals("TADOConnection", aParam1.typeName)
+
+            val aParam2 = parameters.first { it.name == "AError" }
+            assertEquals("Error", aParam2.typeName)
+        }
+    }
+    @Test
+    fun testCombinedParameterParsing() {
+        val text = """
+            unit TestUnit;
+            interface
+            procedure Action(const AParam1, AParam2, AParam3: string; var AOtherParam: Integer);
+            implementation
+            procedure Action(const AParam1, AParam2, AParam3: string; var AOtherParam: Integer);
+            begin
+            end;
+            end.
+        """.trimIndent()
+
+        val psiFile = myFixture.configureByText("Test.pas", text)
+        
+        com.intellij.openapi.application.runReadAction {
+            val varDefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile, nl.akiar.pascal.psi.PascalVariableDefinition::class.java)
+            val names = varDefs.map { it.name }
+            
+            // Should find all 4 parameters twice (once in interface, once in implementation)
+            // Total 8 VARIABLE_DEFINITIONs
+            assertTrue("Should contain AParam1", names.contains("AParam1"))
+            assertTrue("Should contain AParam2", names.contains("AParam2"))
+            assertTrue("Should contain AParam3", names.contains("AParam3"))
+            assertTrue("Should contain AOtherParam", names.contains("AOtherParam"))
+            
+            val parameters = varDefs.filter { it.variableKind == nl.akiar.pascal.psi.VariableKind.PARAMETER }
+            assertEquals("Should have 8 parameters (4 in interface, 4 in implementation)", 8, parameters.size)
+            
+            val aParam1 = parameters.first { it.name == "AParam1" }
+            assertEquals("string", aParam1.typeName)
+            
+            val aOtherParam = parameters.first { it.name == "AOtherParam" }
+            assertEquals("Integer", aOtherParam.typeName)
         }
     }
 }

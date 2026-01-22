@@ -127,86 +127,99 @@ class PascalSonarParser : PsiParser {
         val firstToken = node.firstToken
         val lastToken = node.lastToken
 
-        val markerType = when (node) {
-            is org.sonar.plugins.communitydelphi.api.ast.InterfaceSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_SECTION
-            is org.sonar.plugins.communitydelphi.api.ast.ImplementationSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.IMPLEMENTATION_SECTION
-            is org.sonar.plugins.communitydelphi.api.ast.UnitDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_DECL_SECTION
-            is org.sonar.plugins.communitydelphi.api.ast.ProgramDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.PROGRAM_DECL_SECTION
-            is org.sonar.plugins.communitydelphi.api.ast.LibraryDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.LIBRARY_DECL_SECTION
-            is org.sonar.plugins.communitydelphi.api.ast.TypeDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION
-            is org.sonar.plugins.communitydelphi.api.ast.TypeParameterNode -> nl.akiar.pascal.psi.PascalElementTypes.GENERIC_PARAMETER
-            is org.sonar.plugins.communitydelphi.api.ast.NameDeclarationNode -> {
+        if (firstToken == null || lastToken == null || firstToken.isImaginary || lastToken.isImaginary) {
+            for (child in node.children) {
+                mapNode(child, builder, lineOffsets)
+            }
+            return
+        }
+
+        var nodeStartOffset = getOffset(firstToken.beginLine, firstToken.beginColumn, lineOffsets)
+        var nodeEndOffset = getOffset(lastToken.endLine, lastToken.endColumn, lineOffsets) + 1
+
+        // Precise range adjustment for SimpleNameDeclarationNode to avoid wrapping punctuation
+        val isSimpleName = node.javaClass.simpleName.contains("SimpleNameDeclaration", ignoreCase = true) ||
+                          node is org.sonar.plugins.communitydelphi.api.ast.SimpleNameDeclarationNode
+        if (isSimpleName) {
+            val idNode = node.children.firstOrNull { it.javaClass.simpleName.contains("Identifier", ignoreCase = true) }
+            if (idNode != null) {
+                val first = idNode.firstToken
+                if (first != null) {
+                    nodeStartOffset = getOffset(first.beginLine, first.beginColumn, lineOffsets)
+                    nodeEndOffset = nodeStartOffset + first.image.length
+                }
+            }
+        } else {
+            // Precise range adjustment to avoid wrapping punctuation for other nodes
+            if (firstToken.image == "(" || firstToken.image == ";" || firstToken.image == ",") {
+                nodeStartOffset += firstToken.image.length
+            }
+            if (lastToken.image == ")" || lastToken.image == ";" || lastToken.image == ",") {
+                nodeEndOffset -= lastToken.image.length
+            }
+        }
+
+        // Skip nodes that end before current position
+        if (nodeEndOffset <= builder.currentOffset) {
+            return
+        }
+
+        val markerType = when {
+            node is org.sonar.plugins.communitydelphi.api.ast.InterfaceSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_SECTION
+            node is org.sonar.plugins.communitydelphi.api.ast.ImplementationSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.IMPLEMENTATION_SECTION
+            node is org.sonar.plugins.communitydelphi.api.ast.UnitDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_DECL_SECTION
+            node is org.sonar.plugins.communitydelphi.api.ast.ProgramDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.PROGRAM_DECL_SECTION
+            node is org.sonar.plugins.communitydelphi.api.ast.LibraryDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.LIBRARY_DECL_SECTION
+            node is org.sonar.plugins.communitydelphi.api.ast.TypeDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION
+            node is org.sonar.plugins.communitydelphi.api.ast.TypeParameterNode -> nl.akiar.pascal.psi.PascalElementTypes.GENERIC_PARAMETER
+            node.javaClass.simpleName.contains("FormalParameter", ignoreCase = true) && !node.javaClass.simpleName.contains("List", ignoreCase = true) -> {
+                nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER
+            }
+            node is org.sonar.plugins.communitydelphi.api.ast.VarSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION
+            node is org.sonar.plugins.communitydelphi.api.ast.ConstSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION
+            node is org.sonar.plugins.communitydelphi.api.ast.TypeSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.TYPE_SECTION
+            node is org.sonar.plugins.communitydelphi.api.ast.RoutineDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION
+            node is org.sonar.plugins.communitydelphi.api.ast.RoutineImplementationNode -> nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION
+            node is org.sonar.plugins.communitydelphi.api.ast.RoutineNode -> nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION
+            node is org.sonar.plugins.communitydelphi.api.ast.NameDeclarationNode -> {
                 val parent = node.parent
-                val isVariableOrField = parent is org.sonar.plugins.communitydelphi.api.ast.NameDeclarationListNode || 
-                                       parent is org.sonar.plugins.communitydelphi.api.ast.FormalParameterNode ||
-                                       parent is org.sonar.plugins.communitydelphi.api.ast.VarDeclarationNode ||
-                                       parent is org.sonar.plugins.communitydelphi.api.ast.FieldDeclarationNode ||
-                                       parent?.javaClass?.simpleName?.contains("FormalParameterData", ignoreCase = true) == true
-                if (isVariableOrField) {
+                val parentName = parent?.javaClass?.simpleName ?: ""
+                
+                // If it's inside a formal parameter list or variable list, it's a variable
+                val isVarOrParam = parentName.contains("FormalParameter", ignoreCase = true) ||
+                                  parentName.contains("NameDeclarationList", ignoreCase = true) ||
+                                  parentName.contains("VarDeclaration", ignoreCase = true) ||
+                                  parentName.contains("FieldDeclaration", ignoreCase = true) ||
+                                  parentName.contains("ConstDeclaration", ignoreCase = true)
+                
+                if (isVarOrParam) {
                     nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_DEFINITION
                 } else {
                     null
                 }
             }
-            // Add sections that contain declarations
-            is org.sonar.plugins.communitydelphi.api.ast.VarSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION
-            is org.sonar.plugins.communitydelphi.api.ast.ConstSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION
-            is org.sonar.plugins.communitydelphi.api.ast.TypeSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.TYPE_SECTION
-            is org.sonar.plugins.communitydelphi.api.ast.FormalParameterNode -> nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER
-            is org.sonar.plugins.communitydelphi.api.ast.RoutineDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION
-            is org.sonar.plugins.communitydelphi.api.ast.RoutineImplementationNode -> nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION
-            is org.sonar.plugins.communitydelphi.api.ast.RoutineNode -> nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION
-            else -> {
-                // Heuristic for Unit references: if parent is UsesClauseNode and it's not mapped yet
-                if (node.javaClass.simpleName.contains("UnitReference", ignoreCase = true) ||
-                    node.javaClass.simpleName.contains("UsesItem", ignoreCase = true) ||
-                    node.javaClass.simpleName.contains("Namespace", ignoreCase = true)) {
-                    nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
-                } else {
-                    null
-                }
-            }
-        }
-
-        if (firstToken == null || lastToken == null || firstToken.isImaginary || lastToken.isImaginary) {
-            var marker: PsiBuilder.Marker? = null
-            if (markerType != null) {
-                marker = builder.mark()
-            }
-
-            for (child in node.children) {
-                mapNode(child, builder, lineOffsets)
-            }
-
-            marker?.done(markerType!!)
-            return
-        }
-
-        val startOffset = getOffset(firstToken.beginLine, firstToken.beginColumn, lineOffsets)
-        val endOffset = getOffset(lastToken.endLine, lastToken.endColumn, lineOffsets) + lastToken.image.length
-
-        // Skip nodes that end before current position
-        if (endOffset <= builder.currentOffset) {
-            return
+            node.javaClass.simpleName.contains("UnitReference", ignoreCase = true) ||
+            node.javaClass.simpleName.contains("UsesItem", ignoreCase = true) ||
+            node.javaClass.simpleName.contains("Namespace", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
+            else -> null
         }
 
         var marker: PsiBuilder.Marker? = null
         if (markerType != null) {
-            while (!builder.eof() && builder.currentOffset < startOffset) {
+            while (!builder.eof() && builder.currentOffset < nodeStartOffset) {
                 builder.advanceLexer()
             }
             marker = builder.mark()
         }
 
-        // Recursively map children before closing the marker
-        // IMPORTANT: sonar-delphi children are usually already sorted by token position.
+        // Recursively map children
         for (child in node.children) {
             mapNode(child, builder, lineOffsets)
         }
 
         if (marker != null) {
             // Ensure we advance to at least the end of this node's tokens
-            while (!builder.eof() && builder.currentOffset < endOffset) {
+            while (!builder.eof() && builder.currentOffset < nodeEndOffset) {
                 builder.advanceLexer()
             }
             marker.done(markerType!!)

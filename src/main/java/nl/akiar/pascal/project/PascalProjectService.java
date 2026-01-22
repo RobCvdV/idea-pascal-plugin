@@ -187,7 +187,10 @@ public final class PascalProjectService implements Disposable {
         com.intellij.openapi.progress.ProgressManager.checkCanceled();
         for (VirtualFile child : dir.getChildren()) {
             if (child.isDirectory()) {
-                findFilesRecursively(child, extension, result, depth - 1);
+                String name = child.getName();
+                if (!name.startsWith(".") && !name.equals("node_modules") && !name.equals("build") && !name.equals("out")) {
+                    findFilesRecursively(child, extension, result, depth - 1);
+                }
             } else if (child.getName().toLowerCase().endsWith(extension)) {
                 result.add(child);
             }

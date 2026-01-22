@@ -159,7 +159,11 @@ public final class PascalDependencyService implements Disposable {
             LOG.info("[PascalDependency] Scan complete. Total active files: " + activeFiles.size());
             // Trigger re-index of newly active files
             if (!newActive.isEmpty()) {
-                com.intellij.util.FileContentUtilCore.reparseFiles(newActive);
+                com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
+                    if (!project.isDisposed()) {
+                        com.intellij.util.FileContentUtilCore.reparseFiles(newActive);
+                    }
+                }, com.intellij.openapi.application.ModalityState.nonModal());
             }
         }
     }
@@ -169,7 +173,10 @@ public final class PascalDependencyService implements Disposable {
         for (VirtualFile child : dir.getChildren()) {
             ProgressManager.checkCanceled();
             if (child.isDirectory()) {
-                collectProjectFiles(child, result);
+                String name = child.getName();
+                if (!name.startsWith(".") && !name.equals("node_modules") && !name.equals("build") && !name.equals("out")) {
+                    collectProjectFiles(child, result);
+                }
             } else if ("pas".equalsIgnoreCase(child.getExtension()) || "dpr".equalsIgnoreCase(child.getExtension())) {
                 result.add(child);
             }
@@ -179,10 +186,11 @@ public final class PascalDependencyService implements Disposable {
     private List<String> extractUsedUnits(VirtualFile file) {
         if (!file.isValid() || file.isDirectory()) return Collections.emptyList();
         
-        try {
-            // Fast read first 32KB
-            byte[] bytes = Files.readAllBytes(Paths.get(file.getPath()));
-            String text = new String(bytes, 0, Math.min(bytes.length, 32768), StandardCharsets.UTF_8);
+        try (java.io.InputStream is = java.nio.file.Files.newInputStream(java.nio.file.Paths.get(file.getPath()))) {
+            byte[] buffer = new byte[32768];
+            int read = is.read(buffer);
+            if (read <= 0) return Collections.emptyList();
+            String text = new String(buffer, 0, read, StandardCharsets.UTF_8);
             
             // Strip comments to avoid false matches
             text = text.replaceAll("//.*", "");

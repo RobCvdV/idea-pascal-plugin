@@ -81,6 +81,9 @@ public class PascalParserDefinition implements ParserDefinition {
         if (node.getElementType() == PascalElementTypes.VARIABLE_DEFINITION) {
             return new PascalVariableDefinitionImpl(node);
         }
+        if (node.getElementType() == PascalElementTypes.ROUTINE_DECLARATION) {
+            return new nl.akiar.pascal.psi.impl.PascalRoutineImpl(node);
+        }
         return new PascalPsiElement(node);
     }
 

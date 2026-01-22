@@ -26,18 +26,27 @@ class PascalSonarParser : PsiParser {
         private val toolchain = Toolchain.DCC32
         private val definitions = emptySet<String>()
 
-        private fun createDelphiFileConfig(): DelphiFileConfig {
+        private data class ParserComponents(
+            val preprocessorFactory: DelphiPreprocessorFactory,
+            val typeFactory: TypeFactoryImpl,
+            val config: DelphiFileConfig,
+            val tempFile: File
+        )
+
+        private val THREAD_LOCAL_COMPONENTS = ThreadLocal.withInitial {
             val preprocessorFactory = DelphiPreprocessorFactory(compilerVersion, platform)
             val typeFactory = TypeFactoryImpl(toolchain, compilerVersion)
             val searchPath = SearchPath.create(emptyList())
-
-            return DelphiFile.createConfig(
+            val config = au.com.integradev.delphi.file.DelphiFile.createConfig(
                 StandardCharsets.UTF_8.name(),
                 preprocessorFactory,
                 typeFactory,
                 searchPath,
                 definitions
             )
+            val tempFile = File.createTempFile("pascal_parse_thread_", ".pas")
+            tempFile.deleteOnExit()
+            ParserComponents(preprocessorFactory, typeFactory, config, tempFile)
         }
     }
 
@@ -47,42 +56,29 @@ class PascalSonarParser : PsiParser {
 
         if (text.isNotBlank()) {
             try {
-                // LOG.info("PascalSonarParser: Starting parse of ${text.length} characters")
-
-                val tempFile = File.createTempFile("pascal_parse", ".pas")
+                val components = THREAD_LOCAL_COMPONENTS.get()
+                val tempFile = components.tempFile
                 tempFile.writeText(text)
-                try {
-                    // Create a fresh config per parse to avoid thread-safety issues in shared preprocessor components
-                    val delphiFileConfig = createDelphiFileConfig()
-                    val delphiFile = DelphiFile.from(tempFile, delphiFileConfig)
-                    val ast = delphiFile.ast
+                
+                val delphiFile = au.com.integradev.delphi.file.DelphiFile.from(tempFile, components.config)
+                val ast = delphiFile.ast
 
-                    if (ast != null) {
-                        // LOG.info("PascalSonarParser: AST obtained successfully. Root class: ${ast.javaClass.name}")
-
-                        val lineOffsets = calculateLineOffsets(text)
-                        try {
-                            // println("START MAPPING")
-                            mapNode(ast, builder, lineOffsets)
-                            // println("END MAPPING")
-                        } catch (e: Exception) {
-                            handleException(e, "Error during mapNode")
-                        }
-                    } else {
-                        LOG.warn("PascalSonarParser: AST is null")
+                if (ast != null) {
+                    val lineOffsets = calculateLineOffsets(text)
+                    try {
+                        mapNode(ast, builder, lineOffsets)
+                    } catch (e: Exception) {
+                        handleException(e, "Error during mapNode")
                     }
-                } catch (e: Exception) {
-                    if (e.message?.contains("Empty files are not allowed") == true) {
-                        // This happens when the file only contains comments or whitespace that the preprocessor removes
-                        LOG.debug("PascalSonarParser: sonar-delphi reported empty file")
-                    } else {
-                        handleException(e, "Error parsing with sonar-delphi")
-                    }
-                } finally {
-                    tempFile.delete()
+                } else {
+                    LOG.warn("PascalSonarParser: AST is null")
                 }
             } catch (e: Exception) {
-                handleException(e, "Error in PascalSonarParser")
+                if (e.message?.contains("Empty files are not allowed") == true) {
+                    LOG.debug("PascalSonarParser: sonar-delphi reported empty file")
+                } else {
+                    handleException(e, "Error parsing with sonar-delphi", true)
+                }
             }
         }
 
@@ -93,21 +89,31 @@ class PascalSonarParser : PsiParser {
         return builder.getTreeBuilt()
     }
 
-    private fun handleException(e: Exception, message: String) {
+    private fun handleException(e: Exception, message: String, isParsingError: Boolean = false) {
         if (e is com.intellij.openapi.diagnostic.ControlFlowException || e is com.intellij.openapi.application.ReadAction.CannotReadException) {
             throw e
         }
-        LOG.error(message, e)
+        if (isParsingError) {
+            LOG.warn("$message: ${e.message}")
+        } else {
+            LOG.error(message, e)
+        }
     }
 
     private fun calculateLineOffsets(text: String): IntArray {
-        val offsets = mutableListOf(0)
+        var count = 1
+        for (c in text) {
+            if (c == '\n') count++
+        }
+        val offsets = IntArray(count)
+        offsets[0] = 0
+        var idx = 1
         for (i in text.indices) {
             if (text[i] == '\n') {
-                offsets.add(i + 1)
+                offsets[idx++] = i + 1
             }
         }
-        return offsets.toIntArray()
+        return offsets
     }
 
     private fun getOffset(line: Int, column: Int, lineOffsets: IntArray): Int {
@@ -117,6 +123,7 @@ class PascalSonarParser : PsiParser {
     }
 
     private fun mapNode(node: org.sonar.plugins.communitydelphi.api.ast.DelphiNode, builder: PsiBuilder, lineOffsets: IntArray) {
+        com.intellij.openapi.progress.ProgressManager.checkCanceled()
         val firstToken = node.firstToken
         val lastToken = node.lastToken
 
@@ -167,10 +174,7 @@ class PascalSonarParser : PsiParser {
                 marker = builder.mark()
             }
 
-            val sortedChildren = node.children.sortedBy { 
-                it.firstToken?.let { t -> getOffset(t.beginLine, t.beginColumn, lineOffsets) } ?: Int.MAX_VALUE
-            }
-            for (child in sortedChildren) {
+            for (child in node.children) {
                 mapNode(child, builder, lineOffsets)
             }
 
@@ -195,12 +199,8 @@ class PascalSonarParser : PsiParser {
         }
 
         // Recursively map children before closing the marker
-        // IMPORTANT: We must sort children by start offset to avoid backtracking the builder
-        val sortedChildren = node.children.sortedBy { 
-            it.firstToken?.let { t -> getOffset(t.beginLine, t.beginColumn, lineOffsets) } ?: Int.MAX_VALUE
-        }
-
-        for (child in sortedChildren) {
+        // IMPORTANT: sonar-delphi children are usually already sorted by token position.
+        for (child in node.children) {
             mapNode(child, builder, lineOffsets)
         }
 

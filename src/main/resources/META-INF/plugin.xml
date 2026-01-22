@@ -95,6 +95,9 @@
         <!-- Pascal Stub Element Types Holder -->
         <stubElementTypeHolder class="nl.akiar.pascal.psi.PascalElementTypes"/>
 
+        <!-- Pascal Unit Name Index -->
+        <fileBasedIndex implementation="nl.akiar.pascal.index.PascalUnitIndex"/>
+
         <!-- Pascal Semantic Annotator for type coloring -->
         <annotator language="ObjectPascal"
                    implementationClass="nl.akiar.pascal.annotator.PascalSemanticAnnotator"/>
@@ -124,4 +127,9 @@
             displayName="Pascal Source Paths"
             instance="nl.akiar.pascal.settings.PascalSourcePathsConfigurable"/>
     </extensions>
+
+    <projectListeners>
+        <listener class="nl.akiar.pascal.project.PascalFileEditorListener"
+                  topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
+    </projectListeners>
 </idea-plugin>

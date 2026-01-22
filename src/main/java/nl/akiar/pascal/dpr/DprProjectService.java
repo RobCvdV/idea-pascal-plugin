@@ -52,12 +52,7 @@ public final class DprProjectService implements Disposable {
     @NotNull
     public Set<String> getReferencedFiles() {
         if (!initialized) {
-            synchronized (this) {
-                if (!initialized) {
-                    scanDprFiles();
-                    initialized = true;
-                }
-            }
+            rescan();
         }
         return allReferencedFiles;
     }
@@ -67,8 +62,23 @@ public final class DprProjectService implements Disposable {
      * Call this after project structure changes.
      */
     public void rescan() {
-        LOG.info("[DprProjectService] Rescanning .dpr files");
-        scanDprFiles();
+        if (project.isDisposed()) return;
+        LOG.info("[DprProjectService] Starting .dpr rescan");
+        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            synchronized (this) {
+                scanDprFiles();
+                initialized = true;
+            }
+            // Notify platform that library roots might have changed
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
+                if (!project.isDisposed()) {
+                    com.intellij.openapi.application.WriteAction.run(() -> {
+                        com.intellij.openapi.roots.ex.ProjectRootManagerEx.getInstanceEx(project)
+                                .makeRootsChange(com.intellij.openapi.util.EmptyRunnable.INSTANCE, false, true);
+                    });
+                }
+            }, com.intellij.openapi.application.ModalityState.nonModal());
+        });
     }
 
     /**
@@ -119,6 +129,7 @@ public final class DprProjectService implements Disposable {
         if (maxDepth <= 0 || dir == null || !dir.isValid() || !dir.isDirectory()) {
             return;
         }
+        com.intellij.openapi.progress.ProgressManager.checkCanceled();
 
         for (VirtualFile child : dir.getChildren()) {
             if (child.isDirectory()) {

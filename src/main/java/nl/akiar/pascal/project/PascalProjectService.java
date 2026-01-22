@@ -8,19 +8,15 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.util.indexing.FileBasedIndex;
+import nl.akiar.pascal.index.PascalUnitIndex;
 import nl.akiar.pascal.settings.PascalSourcePathsSettings;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Project-level service that manages Pascal project structure.
@@ -31,14 +27,9 @@ public final class PascalProjectService implements Disposable {
     private static final Logger LOG = Logger.getInstance(PascalProjectService.class);
     private final Project project;
 
-    // Unit Name -> File Path mapping
-    private final Map<String, String> unitToFileMap = new ConcurrentHashMap<>();
     // Discovered source directories
     private final Set<String> discoveredDirectories = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private volatile boolean initialized = false;
-
-    // Regex for 'unit UnitName;'
-    private static final Pattern UNIT_NAME_PATTERN = Pattern.compile("^\\s*unit\\s+([\\w.]+)\\s*;", Pattern.CASE_INSENSITIVE);
 
     public PascalProjectService(@NotNull Project project) {
         this.project = project;
@@ -61,28 +52,35 @@ public final class PascalProjectService implements Disposable {
      */
     @Nullable
     public VirtualFile resolveUnit(@NotNull String unitName, boolean useScopeNames) {
-        ensureInitialized();
         String lowerUnit = unitName.toLowerCase();
         
         // 1. Direct match
-        String url = unitToFileMap.get(lowerUnit);
-        if (url != null) {
-            return com.intellij.openapi.vfs.VirtualFileManager.getInstance().findFileByUrl(url);
-        }
+        VirtualFile file = findFileByUnitName(lowerUnit);
+        if (file != null) return file;
 
         // 2. Try scope names if requested
         if (useScopeNames) {
             List<String> scopes = PascalSourcePathsSettings.getInstance(project).getUnitScopeNames();
             for (String scope : scopes) {
                 String scopedName = (scope + "." + unitName).toLowerCase();
-                url = unitToFileMap.get(scopedName);
-                if (url != null) {
-                    return com.intellij.openapi.vfs.VirtualFileManager.getInstance().findFileByUrl(url);
-                }
+                file = findFileByUnitName(scopedName);
+                if (file != null) return file;
             }
         }
         
         return null;
+    }
+
+    @Nullable
+    private VirtualFile findFileByUnitName(@NotNull String unitName) {
+        return com.intellij.openapi.application.ReadAction.compute(() -> {
+            Collection<VirtualFile> files = FileBasedIndex.getInstance().getContainingFiles(
+                    PascalUnitIndex.INDEX_ID,
+                    unitName,
+                    GlobalSearchScope.allScope(project)
+            );
+            return files.isEmpty() ? null : files.iterator().next();
+        });
     }
 
     /**
@@ -90,38 +88,37 @@ public final class PascalProjectService implements Disposable {
      */
     @NotNull
     public Set<String> getDiscoveredDirectories() {
-        ensureInitialized();
+        if (!initialized) {
+            rescan();
+        }
         return Collections.unmodifiableSet(discoveredDirectories);
     }
 
     public void rescan() {
+        if (project.isDisposed()) return;
         LOG.info("[PascalProject] Starting project rescan");
-        synchronized (this) {
-            unitToFileMap.clear();
-            discoveredDirectories.clear();
-            Set<VirtualFile> sourceFiles = discoverSourceFiles();
-            for (VirtualFile file : sourceFiles) {
-                indexFile(file);
-            }
-            initialized = true;
-        }
-        LOG.info("[PascalProject] Rescan complete. Indexed " + unitToFileMap.size() + " units. Discovered " + discoveredDirectories.size() + " directories.");
-    }
-
-    private void ensureInitialized() {
-        if (!initialized) {
+        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
             synchronized (this) {
-                if (!initialized) {
-                    rescan();
-                }
+                discoveredDirectories.clear();
+                discoverSourceFiles();
+                initialized = true;
             }
-        }
+            LOG.info("[PascalProject] Rescan complete. Discovered " + discoveredDirectories.size() + " directories.");
+            // Notify platform that library roots might have changed
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
+                if (!project.isDisposed()) {
+                    com.intellij.openapi.application.WriteAction.run(() -> {
+                        com.intellij.openapi.roots.ex.ProjectRootManagerEx.getInstanceEx(project)
+                                .makeRootsChange(com.intellij.openapi.util.EmptyRunnable.INSTANCE, false, true);
+                    });
+                }
+            }, com.intellij.openapi.application.ModalityState.nonModal());
+        });
     }
 
-    private Set<VirtualFile> discoverSourceFiles() {
-        Set<VirtualFile> sourceFiles = new HashSet<>();
+    private void discoverSourceFiles() {
         VirtualFile baseDir = ProjectUtil.guessProjectDir(project);
-        if (baseDir == null) return sourceFiles;
+        if (baseDir == null) return;
 
         // 1. Find .dproj files
         List<VirtualFile> dprojFiles = new ArrayList<>();
@@ -135,15 +132,14 @@ public final class PascalProjectService implements Disposable {
 
             // DCCReference
             for (String ref : info.references) {
+                com.intellij.openapi.progress.ProgressManager.checkCanceled();
                 // Handle both \ and /
                 String normalizedRef = ref.replace('\\', '/');
                 VirtualFile refFile = dprojDir.findFileByRelativePath(normalizedRef);
                 if (refFile != null && refFile.isValid()) {
-//                     LOG.info("[PascalProject] Adding DCCReference: " + normalizedRef + " (resolved to: " + refFile.getPath() + ")");
                     if (refFile.isDirectory()) {
-                        collectPasFiles(refFile, sourceFiles);
+                        discoveredDirectories.add(refFile.getPath());
                     } else {
-                        sourceFiles.add(refFile);
                         if (refFile.getParent() != null) {
                             discoveredDirectories.add(refFile.getParent().getPath());
                         }
@@ -156,13 +152,12 @@ public final class PascalProjectService implements Disposable {
             // Optsets
             LOG.info("[PascalProject] Processing " + info.optsets.size() + " optset references from dproj.");
             for (String optset : info.optsets) {
+                com.intellij.openapi.progress.ProgressManager.checkCanceled();
                 // Handle both \ and /
                 String normalizedOptset = optset.replace('\\', '/');
                 VirtualFile optsetFile = dprojDir.findFileByRelativePath(normalizedOptset);
                 if (optsetFile != null && optsetFile.isValid()) {
-//                     LOG.info("[PascalProject] Parsing optset file: " + optsetFile.getPath());
                     List<String> searchPaths = OptsetParser.parseSearchPaths(optsetFile);
-//                     LOG.info("[PascalProject] Found " + searchPaths.size() + " search paths in optset " + optsetFile.getName());
                     for (String sp : searchPaths) {
                         // sp can contain macros like $(PROJECTDIR)
                         String path = sp.replace("$(PROJECTDIR)", ".");
@@ -179,46 +174,17 @@ public final class PascalProjectService implements Disposable {
                         }
 
                         if (searchDir != null && searchDir.isDirectory()) {
-//                             LOG.info("[PascalProject] Indexing search path from optset: " + normalizedPath + " (resolved to: " + searchDir.getPath() + ")");
-                            collectPasFiles(searchDir, sourceFiles);
-                        } else {
-//                             LOG.warn("[PascalProject] Could not find search path: " + sp + " (resolved to: " + normalizedPath + ") from " + optsetFile.getPath());
+                            discoveredDirectories.add(searchDir.getPath());
                         }
                     }
                 }
             }
         }
-
-        // 2. Settings source paths
-        List<String> settingsPaths = PascalSourcePathsSettings.getInstance(project).getSourcePaths();
-        for (String sp : settingsPaths) {
-            VirtualFile dir = com.intellij.openapi.vfs.VirtualFileManager.getInstance().findFileByUrl(sp);
-            if (dir == null) {
-                dir = LocalFileSystem.getInstance().findFileByPath(sp);
-            }
-            
-            if (dir != null && dir.isDirectory()) {
-                collectPasFiles(dir, sourceFiles);
-            }
-        }
-
-        return sourceFiles;
-    }
-
-    private void collectPasFiles(VirtualFile dir, Set<VirtualFile> result) {
-        if (dir == null || !dir.isValid() || !dir.isDirectory()) return;
-        discoveredDirectories.add(dir.getPath());
-        for (VirtualFile child : dir.getChildren()) {
-            if (child.isDirectory()) {
-                collectPasFiles(child, result);
-            } else if ("pas".equalsIgnoreCase(child.getExtension())) {
-                result.add(child);
-            }
-        }
     }
 
     private void findFilesRecursively(VirtualFile dir, String extension, List<VirtualFile> result, int depth) {
-        if (depth <= 0) return;
+        if (depth <= 0 || dir == null || !dir.isValid() || !dir.isDirectory()) return;
+        com.intellij.openapi.progress.ProgressManager.checkCanceled();
         for (VirtualFile child : dir.getChildren()) {
             if (child.isDirectory()) {
                 findFilesRecursively(child, extension, result, depth - 1);
@@ -228,63 +194,8 @@ public final class PascalProjectService implements Disposable {
         }
     }
 
-    private void indexFile(VirtualFile file) {
-        if (!"pas".equalsIgnoreCase(file.getExtension())) {
-            return;
-        }
-        try {
-            // Using VirtualFile.contentsToByteArray() for better integration with test file systems
-            byte[] bytes = file.contentsToByteArray();
-            // Try UTF-8 first
-            String content;
-            try {
-                content = new String(bytes, StandardCharsets.UTF_8);
-                // If it contains replacement chars, check if it's really UTF-8
-                if (content.contains("\uFFFD")) {
-                     // Potential decoding error, try Latin-1
-                     content = new String(bytes, StandardCharsets.ISO_8859_1);
-                }
-            } catch (ProcessCanceledException e) {
-                throw e;
-            } catch (Exception e) {
-                // Fallback to ISO-8859-1 (Latin1) which accepts all byte sequences
-                content = new String(bytes, StandardCharsets.ISO_8859_1);
-            }
-
-            String[] lines = content.split("\\r?\\n");
-            for (String line : lines) {
-                line = line.trim();
-                if (line.isEmpty() || line.startsWith("//") || line.startsWith("{") || line.startsWith("(*")) {
-                    continue;
-                }
-                Matcher matcher = UNIT_NAME_PATTERN.matcher(line);
-                if (matcher.find()) {
-                    String unitName = matcher.group(1).toLowerCase();
-                    unitToFileMap.put(unitName, file.getUrl());
-                    break;
-                }
-                // If we hit implementation or interface without unit name, it might not have one (program)
-                String lowerLine = line.toLowerCase();
-                if (lowerLine.startsWith("interface") || lowerLine.startsWith("implementation") || lowerLine.startsWith("program")) {
-                    break;
-                }
-            }
-        } catch (ProcessCanceledException e) {
-            throw e;
-        } catch (Exception e) {
-            LOG.warn("Failed to index unit name from " + file.getPath(), e);
-        }
-        
-        // Fallback: use filename if no unit name found
-        String fileName = file.getNameWithoutExtension().toLowerCase();
-        if (!unitToFileMap.containsKey(fileName)) {
-            // LOG.info("[PascalProject] Indexed unit (fallback to filename): " + fileName + " from " + file.getPath());
-            unitToFileMap.put(fileName, file.getUrl());
-        }
-    }
-
     @Override
     public void dispose() {
-        unitToFileMap.clear();
+        discoveredDirectories.clear();
     }
 }

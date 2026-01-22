@@ -22,7 +22,7 @@ public class PascalProjectServiceTest extends BasePlatformTestCase {
         PascalProjectService service = PascalProjectService.getInstance(getProject());
 
         String unitName = "EncodingTest";
-        String content = "unit " + unitName + "; // Special char: \u00E9";
+        String content = "unit " + unitName + ";\ninterface\nimplementation\nend. // Special char: \u00E9";
         byte[] bytes = content.getBytes(StandardCharsets.ISO_8859_1);
 
         // Wrap everything that modifies the project/VFS in a single WriteCommandAction

@@ -23,7 +23,7 @@ import org.jetbrains.annotations.NotNull;
  */
 public class PascalParserDefinition implements ParserDefinition {
     public static final IStubFileElementType<PsiFileStub<PascalFile>> FILE =
-            new IStubFileElementType<>("PASCAL_FILE", PascalLanguage.INSTANCE);
+            new PascalStubFileElementType();
 
     private static final TokenSet WHITE_SPACES = TokenSet.create(PascalTokenTypes.WHITE_SPACE);
     private static final TokenSet COMMENTS = TokenSet.create(

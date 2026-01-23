@@ -500,4 +500,69 @@ class PascalSonarParserTest : BasePlatformTestCase() {
             assertTrue("Found variable should be in interface section", foundIsInterface)
         }
     }
+    @Test
+    fun testClassMemberParsing() {
+        val text = """
+            unit TestUnit;
+            interface
+            type
+              TMyClass = class
+              private
+                FField: Integer;
+                procedure MyMethod(AValue: Integer);
+              public
+                property Value: Integer read FField write MyMethod;
+              end;
+            implementation
+            procedure TMyClass.MyMethod(AValue: Integer);
+            begin
+            end;
+            end.
+        """.trimIndent()
+
+        val psiFile = myFixture.configureByText("Test.pas", text)
+        assertNotNull(psiFile)
+        val debugInfo = com.intellij.openapi.application.runReadAction {
+            com.intellij.psi.impl.DebugUtil.psiToString(psiFile, false)
+        }
+        println("DEBUG TREE:\n" + debugInfo)
+        
+        assertTrue("Should contain PascalProperty", debugInfo.contains("PascalProperty"))
+        assertTrue("Should contain MyMethod in interface", debugInfo.contains("PascalRoutine(MyMethod)"))
+        
+        val varDefs = com.intellij.openapi.application.runReadAction {
+            com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile, nl.akiar.pascal.psi.PascalVariableDefinition::class.java)
+        }
+        assertTrue("Should find FField", varDefs.any { com.intellij.openapi.application.runReadAction { it.name } == "FField" })
+        
+        val routines = com.intellij.openapi.application.runReadAction {
+            com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile, nl.akiar.pascal.psi.PascalRoutine::class.java)
+        }
+        val routineNames = com.intellij.openapi.application.runReadAction { routines.map { it.name } }
+        assertTrue("Should contain MyMethod", routineNames.contains("MyMethod"))
+    }
+
+    @Test
+    fun testMemberAccessParsing() {
+        val text = """
+            unit TestUnit;
+            interface
+            implementation
+            procedure Test;
+            var
+              MyObj: TMyClass;
+            begin
+              MyObj.MyMethod(123);
+              MyObj.Value := 456;
+            end;
+            end.
+        """.trimIndent()
+
+        val psiFile = myFixture.configureByText("Test.pas", text)
+        assertNotNull(psiFile)
+        val debugInfo = com.intellij.openapi.application.runReadAction {
+            com.intellij.psi.impl.DebugUtil.psiToString(psiFile, false)
+        }
+        println("DEBUG TREE:\n" + debugInfo)
+    }
 }

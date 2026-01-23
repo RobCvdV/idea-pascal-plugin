@@ -27,4 +27,28 @@ public interface PascalRoutine extends PsiNameIdentifierOwner, StubBasedPsiEleme
      */
     @Nullable
     PascalRoutine getImplementation();
+
+    /**
+     * Returns true if this routine is a class method.
+     */
+    boolean isMethod();
+
+    /**
+     * Returns the class that contains this method, or null if it's a global routine.
+     */
+    @Nullable
+    PascalTypeDefinition getContainingClass();
+
+    /**
+     * Returns the visibility of the routine (e.g., "private", "protected", "public", "published").
+     * For global routines, this is usually null or an empty string.
+     */
+    @Nullable
+    String getVisibility();
+
+    /**
+     * Get the documentation comment preceding this routine definition.
+     */
+    @Nullable
+    String getDocComment();
 }

@@ -4,26 +4,18 @@ import com.intellij.lang.annotation.AnnotationHolder;
 import com.intellij.lang.annotation.Annotator;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
-import com.intellij.lang.ASTNode;
 import com.intellij.psi.PsiElement;
 import nl.akiar.pascal.PascalSyntaxHighlighter;
 import nl.akiar.pascal.PascalTokenTypes;
-import nl.akiar.pascal.psi.PascalElementTypes;
-import nl.akiar.pascal.psi.PascalTypeDefinition;
-import nl.akiar.pascal.psi.PascalVariableDefinition;
-import nl.akiar.pascal.psi.TypeKind;
-import nl.akiar.pascal.psi.VariableKind;
-import nl.akiar.pascal.stubs.PascalTypeIndex;
+import nl.akiar.pascal.psi.*;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.Collection;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 /**
  * Semantic annotator for Pascal files.
- * Colors type definitions (class, record, interface) with different colors.
+ * Provides advanced highlighting for type definitions, variables, and usages (calls, types, parameters).
  */
 public class PascalSemanticAnnotator implements Annotator {
     private static final Set<String> SIMPLE_TYPES = new HashSet<>();
@@ -63,12 +55,6 @@ public class PascalSemanticAnnotator implements Annotator {
         SIMPLE_TYPES.add("NativeUInt");
     }
 
-    private static final Set<String> BASE_CLASSES = new HashSet<>();
-    static {
-        BASE_CLASSES.add("TObject");
-        BASE_CLASSES.add("Exception");
-    }
-
     @Override
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
         // Color generic parameters
@@ -79,18 +65,13 @@ public class PascalSemanticAnnotator implements Annotator {
 
         // Color unit references in uses clause
         if (element.getNode() != null && element.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
-            holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                    .range(element)
-                    .textAttributes(PascalSyntaxHighlighter.UNIT_REFERENCE)
-                    .create();
+            applyHighlight(element, holder, PascalSyntaxHighlighter.UNIT_REFERENCE);
             return;
         }
 
         // Color type definition names
         if (element instanceof PascalTypeDefinition) {
             annotateTypeDefinition((PascalTypeDefinition) element, holder);
-            // Also process all identifier tokens inside the type definition
-            processIdentifiersInNode(element.getNode(), element, holder);
             return;
         }
 
@@ -100,26 +81,115 @@ public class PascalSemanticAnnotator implements Annotator {
             return;
         }
 
-        // Color type references (identifiers that match known types)
+        // Color routine definitions
+        if (element instanceof PascalRoutine) {
+            annotateRoutine((PascalRoutine) element, holder);
+            return;
+        }
+
+        // Color property definitions
+        if (element instanceof PascalProperty) {
+            annotateProperty((PascalProperty) element, holder);
+            return;
+        }
+
+        // Handle identifiers (usages)
         if (element.getNode() != null && element.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
-            annotateTypeReference(element, holder);
+            annotateUsage(element, holder);
         }
     }
 
-    private void processIdentifiersInNode(ASTNode node, PsiElement context, AnnotationHolder holder) {
-        if (node == null) return;
+    private void annotateUsage(PsiElement element, AnnotationHolder holder) {
+        // Skip if it's the name identifier of a definition (handled by specific annotate methods)
+        PsiElement parent = element.getParent();
+        if (parent instanceof PascalTypeDefinition && ((PascalTypeDefinition) parent).getNameIdentifier() == element) return;
+        if (parent instanceof PascalVariableDefinition && ((PascalVariableDefinition) parent).getNameIdentifier() == element) return;
+        if (parent instanceof PascalRoutine && ((PascalRoutine) parent).getNameIdentifier() == element) return;
+        if (parent instanceof PascalProperty && ((PascalProperty) parent).getNameIdentifier() == element) return;
 
-        if (node.getElementType() == PascalTokenTypes.IDENTIFIER) {
-            PsiElement psi = node.getPsi();
-            if (psi != null) {
-                annotateTypeReference(psi, holder);
+        // Heuristic fallback for performance and if resolution fails
+        String text = element.getText();
+        if (SIMPLE_TYPES.stream().anyMatch(t -> t.equalsIgnoreCase(text))) {
+            applyHighlight(element, holder, PascalSyntaxHighlighter.TYPE_SIMPLE);
+            return;
+        } else if ("TObject".equalsIgnoreCase(text)) {
+            applyHighlight(element, holder, PascalSyntaxHighlighter.TYPE_CLASS);
+            return;
+        }
+
+        // Use references to resolve usage
+        com.intellij.psi.PsiReference[] refs = element.getReferences();
+        if (refs.length == 0) {
+            // Fallback for tests or if not picked up by platform
+            refs = com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry.getReferencesFromProviders(element);
+        }
+        for (com.intellij.psi.PsiReference ref : refs) {
+            PsiElement resolved = ref.resolve();
+            if (resolved != null) {
+                if (resolved instanceof PascalRoutine) {
+                    PascalRoutine routine = (PascalRoutine) resolved;
+                    TextAttributesKey key = routine.isMethod() ? 
+                            PascalSyntaxHighlighter.METHOD_CALL : 
+                            PascalSyntaxHighlighter.ROUTINE_CALL;
+                    applyHighlight(element, holder, key);
+                    return;
+                } else if (resolved instanceof PascalTypeDefinition) {
+                    PascalTypeDefinition typeDef = (PascalTypeDefinition) resolved;
+                    applyHighlight(element, holder, getColorForTypeKind(typeDef.getTypeKind()));
+                    return;
+                } else if (resolved instanceof PascalVariableDefinition) {
+                    PascalVariableDefinition varDef = (PascalVariableDefinition) resolved;
+                    applyHighlight(element, holder, getColorForVariableKind(varDef.getVariableKind()));
+                    return;
+                } else if (resolved instanceof PascalProperty) {
+                    applyHighlight(element, holder, PascalSyntaxHighlighter.METHOD_CALL);
+                    return;
+                }
             }
         }
 
-        // Recurse into children
-        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
-            processIdentifiersInNode(child, context, holder);
+        // Second fallback: simple type-like name check (T* or I*)
+        if (text.length() > 1 && Character.isUpperCase(text.charAt(0))) {
+            if (text.startsWith("T")) {
+                applyHighlight(element, holder, PascalSyntaxHighlighter.TYPE_CLASS);
+            } else if (text.startsWith("I")) {
+                applyHighlight(element, holder, PascalSyntaxHighlighter.TYPE_INTERFACE);
+            }
         }
+    }
+
+    private void applyHighlight(PsiElement element, AnnotationHolder holder, TextAttributesKey key) {
+        if (key == null) return;
+        holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
+                .range(element)
+                .textAttributes(key)
+                .create();
+    }
+
+    private void annotateVariableDefinition(PascalVariableDefinition varDef, AnnotationHolder holder) {
+        PsiElement nameElement = varDef.getNameIdentifier();
+        if (nameElement == null) return;
+
+        TextAttributesKey key = getColorForVariableKind(varDef.getVariableKind());
+        applyHighlight(nameElement, holder, key);
+    }
+
+    private void annotateRoutine(PascalRoutine routine, AnnotationHolder holder) {
+        PsiElement nameElement = routine.getNameIdentifier();
+        if (nameElement == null) return;
+
+        TextAttributesKey key = routine.isMethod() ? 
+                PascalSyntaxHighlighter.METHOD_DECLARATION : 
+                PascalSyntaxHighlighter.ROUTINE_DECLARATION;
+
+        applyHighlight(nameElement, holder, key);
+    }
+
+    private void annotateProperty(PascalProperty property, AnnotationHolder holder) {
+        PsiElement nameElement = property.getNameIdentifier();
+        if (nameElement == null) return;
+
+        applyHighlight(nameElement, holder, PascalSyntaxHighlighter.PROPERTY_DECLARATION);
     }
 
     private void annotateTypeDefinition(PascalTypeDefinition typeDef, AnnotationHolder holder) {
@@ -127,157 +197,41 @@ public class PascalSemanticAnnotator implements Annotator {
         PsiElement nameElement = typeDef.getNameIdentifier();
 
         if (nameElement != null && key != null) {
-            holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                    .range(nameElement)
-                    .textAttributes(key)
-                    .create();
+            applyHighlight(nameElement, holder, key);
         }
     }
 
     private void annotateGenericParameter(PsiElement element, AnnotationHolder holder) {
         PsiElement id = element.getFirstChild();
         if (id != null && id.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
-            holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                    .range(id)
-                    .textAttributes(PascalSyntaxHighlighter.TYPE_PARAMETER)
-                    .create();
+            applyHighlight(id, holder, PascalSyntaxHighlighter.TYPE_PARAMETER);
         }
-    }
-
-    private void annotateTypeReference(PsiElement element, AnnotationHolder holder) {
-        // Skip if inside a unit reference in uses clause
-        PsiElement parent = element.getParent();
-        if (parent != null && parent.getNode() != null && parent.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
-            return;
-        }
-
-        String text = element.getText();
-
-        // Check for TObject - specifically requested to be class color
-        if ("TObject".equalsIgnoreCase(text)) {
-            holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                    .range(element)
-                    .textAttributes(PascalSyntaxHighlighter.TYPE_CLASS)
-                    .create();
-            return;
-        }
-
-        // Check for simple types
-        if (SIMPLE_TYPES.stream().anyMatch(t -> t.equalsIgnoreCase(text))) {
-            holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                    .range(element)
-                    .textAttributes(PascalSyntaxHighlighter.TYPE_SIMPLE)
-                    .create();
-            return;
-        }
-
-        // Check if it's a generic parameter of the current class/interface/type first
-        PsiElement context = element;
-        while (context != null) {
-            if (context instanceof PascalTypeDefinition) {
-                if (isGenericParameterOf((PascalTypeDefinition) context, text)) {
-                    holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                            .range(element)
-                            .textAttributes(PascalSyntaxHighlighter.TYPE_PARAMETER)
-                            .create();
-                    return;
-                }
-            }
-            context = context.getParent();
-        }
-
-        // Only check type-like identifiers (start with T or I, or are known patterns)
-        // If it's already identified as a generic parameter (above), we don't reach here.
-        // But for other types, we still want the T/I prefix check for performance.
-        if (!text.startsWith("T") && !text.startsWith("I") && !text.startsWith("E")) {
-            return;
-        }
-
-        // Skip the name identifier of a type definition (already colored by annotateTypeDefinition)
-        if (parent instanceof PascalTypeDefinition) {
-            PascalTypeDefinition typeDef = (PascalTypeDefinition) parent;
-            if (element.equals(typeDef.getNameIdentifier())) {
-                return; // Skip the type's own name
-            }
-        }
-
-        // Look up this identifier in the type index
-        Collection<PascalTypeDefinition> types = PascalTypeIndex.findTypes(text, element.getProject());
-
-        if (!types.isEmpty()) {
-            PascalTypeDefinition typeDef = types.iterator().next();
-            TextAttributesKey key = getColorForTypeKind(typeDef.getTypeKind());
-
-            if (key != null) {
-                holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                        .range(element)
-                        .textAttributes(key)
-                        .create();
-            }
-        }
-    }
-
-    private boolean isGenericParameterOf(PascalTypeDefinition typeDef, String name) {
-        List<String> params = typeDef.getTypeParameters();
-        for (String param : params) {
-            if (name.equalsIgnoreCase(param)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private TextAttributesKey getColorForTypeKind(TypeKind kind) {
         if (kind == null) return null;
         switch (kind) {
-            case CLASS:
-                return PascalSyntaxHighlighter.TYPE_CLASS;
-            case RECORD:
-                return PascalSyntaxHighlighter.TYPE_RECORD;
-            case INTERFACE:
-                return PascalSyntaxHighlighter.TYPE_INTERFACE;
-            case PROCEDURAL:
-                return PascalSyntaxHighlighter.TYPE_PROCEDURAL;
-            case ENUM:
-                return PascalSyntaxHighlighter.TYPE_ENUM;
-            case ALIAS:
-                return PascalSyntaxHighlighter.TYPE_SIMPLE;
-            default:
-                return null;
-        }
-    }
-
-    private void annotateVariableDefinition(PascalVariableDefinition varDef, AnnotationHolder holder) {
-        TextAttributesKey key = getColorForVariableKind(varDef.getVariableKind());
-        PsiElement nameElement = varDef.getNameIdentifier();
-
-        if (nameElement != null && key != null) {
-            holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                    .range(nameElement)
-                    .textAttributes(key)
-                    .create();
+            case CLASS: return PascalSyntaxHighlighter.TYPE_CLASS;
+            case RECORD: return PascalSyntaxHighlighter.TYPE_RECORD;
+            case INTERFACE: return PascalSyntaxHighlighter.TYPE_INTERFACE;
+            case PROCEDURAL: return PascalSyntaxHighlighter.TYPE_PROCEDURAL;
+            case ENUM: return PascalSyntaxHighlighter.TYPE_ENUM;
+            case ALIAS: return PascalSyntaxHighlighter.TYPE_SIMPLE;
+            default: return null;
         }
     }
 
     private TextAttributesKey getColorForVariableKind(VariableKind kind) {
         if (kind == null) return null;
         switch (kind) {
-            case GLOBAL:
-                return PascalSyntaxHighlighter.VAR_GLOBAL;
-            case LOCAL:
-                return PascalSyntaxHighlighter.VAR_LOCAL;
-            case PARAMETER:
-                return PascalSyntaxHighlighter.VAR_PARAMETER;
-            case FIELD:
-                return PascalSyntaxHighlighter.VAR_FIELD;
-            case CONSTANT:
-                return PascalSyntaxHighlighter.VAR_CONSTANT;
-            case THREADVAR:
-                return PascalSyntaxHighlighter.VAR_THREADVAR;
-            case LOOP_VAR:
-                return PascalSyntaxHighlighter.VAR_LOCAL;
-            default:
-                return null;
+            case GLOBAL: return PascalSyntaxHighlighter.VAR_GLOBAL;
+            case LOCAL: return PascalSyntaxHighlighter.VAR_LOCAL;
+            case PARAMETER: return PascalSyntaxHighlighter.VAR_PARAMETER;
+            case FIELD: return PascalSyntaxHighlighter.VAR_FIELD;
+            case CONSTANT: return PascalSyntaxHighlighter.VAR_CONSTANT;
+            case THREADVAR: return PascalSyntaxHighlighter.VAR_THREADVAR;
+            case LOOP_VAR: return PascalSyntaxHighlighter.VAR_LOCAL;
+            default: return null;
         }
     }
 }

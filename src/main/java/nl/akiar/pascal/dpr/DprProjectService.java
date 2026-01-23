@@ -51,9 +51,6 @@ public final class DprProjectService implements Disposable {
      */
     @NotNull
     public Set<String> getReferencedFiles() {
-        if (!initialized) {
-            rescan();
-        }
         return allReferencedFiles;
     }
 

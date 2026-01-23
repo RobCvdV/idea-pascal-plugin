@@ -76,4 +76,10 @@ public interface PascalVariableDefinition extends PsiNameIdentifierOwner, StubBa
      */
     @NotNull
     String getUnitName();
+
+    /**
+     * Returns the class that contains this variable if it's a field.
+     */
+    @Nullable
+    PascalTypeDefinition getContainingClass();
 }

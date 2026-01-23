@@ -46,6 +46,12 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
             new AttributesDescriptor("Variable//Field", PascalSyntaxHighlighter.VAR_FIELD),
             new AttributesDescriptor("Variable//Constant", PascalSyntaxHighlighter.VAR_CONSTANT),
             new AttributesDescriptor("Variable//Thread variable", PascalSyntaxHighlighter.VAR_THREADVAR),
+            // Routines and Methods
+            new AttributesDescriptor("Routine//Routine declaration", PascalSyntaxHighlighter.ROUTINE_DECLARATION),
+            new AttributesDescriptor("Routine//Method declaration", PascalSyntaxHighlighter.METHOD_DECLARATION),
+            new AttributesDescriptor("Routine//Routine call", PascalSyntaxHighlighter.ROUTINE_CALL),
+            new AttributesDescriptor("Routine//Method call", PascalSyntaxHighlighter.METHOD_CALL),
+            new AttributesDescriptor("Routine//Property declaration", PascalSyntaxHighlighter.PROPERTY_DECLARATION),
     };
 
     @Nullable

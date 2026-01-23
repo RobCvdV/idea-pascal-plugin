@@ -95,6 +95,9 @@
         <!-- Pascal Stub Index for routine definitions -->
         <stubIndex implementation="nl.akiar.pascal.stubs.PascalRoutineIndex"/>
 
+        <!-- Pascal Stub Index for property definitions -->
+        <stubIndex implementation="nl.akiar.pascal.stubs.PascalPropertyIndex"/>
+
         <!-- Pascal Stub Element Types Holder -->
         <stubElementTypeHolder class="nl.akiar.pascal.psi.PascalElementTypes"/>
 
@@ -129,6 +132,8 @@
             parentId="language"
             displayName="Pascal Source Paths"
             instance="nl.akiar.pascal.settings.PascalSourcePathsConfigurable"/>
+
+        <postStartupActivity implementation="nl.akiar.pascal.project.PascalProjectInitializationActivity"/>
     </extensions>
 
     <projectListeners>

@@ -7,6 +7,7 @@ import com.intellij.psi.stubs.IStubElementType;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.util.IncorrectOperationException;
 import nl.akiar.pascal.PascalTokenTypes;
+import nl.akiar.pascal.psi.PascalTypeDefinition;
 import nl.akiar.pascal.psi.PascalVariableDefinition;
 import nl.akiar.pascal.psi.VariableKind;
 import nl.akiar.pascal.stubs.PascalVariableStub;
@@ -247,9 +248,15 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
         PsiElement parent = getParent();
         while (parent != null) {
             ASTNode node = parent.getNode();
-            if (node != null && node.getElementType() == nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION) {
-                if (node.findChildByType(nl.akiar.pascal.PascalTokenTypes.KW_CONST) != null) {
+            if (node != null) {
+                IElementType type = node.getElementType();
+                if (type == nl.akiar.pascal.psi.PascalElementTypes.CONST_SECTION) {
                     return true;
+                }
+                if (type == nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION) {
+                    if (node.findChildByType(nl.akiar.pascal.PascalTokenTypes.KW_CONST) != null) {
+                        return true;
+                    }
                 }
             }
             parent = parent.getParent();
@@ -278,65 +285,10 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
         return getNode().findChildByType(PascalTokenTypes.LPAREN) != null;
     }
 
-    /**
-     * Get the visibility modifier for this variable (private, protected, public, published).
-     */
     @Nullable
     public String getVisibility() {
         if (getVariableKind() != VariableKind.FIELD) return null;
-
-        // Find the containing TYPE_DEFINITION
-        PsiElement parent = getParent();
-        while (parent != null && parent.getNode().getElementType() != nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION) {
-            parent = parent.getParent();
-        }
-
-        if (parent == null) return null;
-
-        // Traverse children of TYPE_DEFINITION to find the last visibility keyword before this element
-        String lastVisibility = "public"; // default
-        ASTNode node = parent.getNode();
-        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
-            if (isAncestor(child.getPsi(), this)) break;
-
-            IElementType type = child.getElementType();
-            if (type == PascalTokenTypes.KW_PRIVATE) {
-                // Check if preceded by STRICT
-                ASTNode prev = child.getTreePrev();
-                while (prev != null && (prev.getElementType() == PascalTokenTypes.WHITE_SPACE)) {
-                    prev = prev.getTreePrev();
-                }
-                if (prev != null && prev.getElementType() == PascalTokenTypes.KW_STRICT) {
-                    lastVisibility = "strict private";
-                } else {
-                    lastVisibility = "private";
-                }
-            } else if (type == PascalTokenTypes.KW_PROTECTED) {
-                // Check if preceded by STRICT
-                ASTNode prev = child.getTreePrev();
-                while (prev != null && (prev.getElementType() == PascalTokenTypes.WHITE_SPACE)) {
-                    prev = prev.getTreePrev();
-                }
-                if (prev != null && prev.getElementType() == PascalTokenTypes.KW_STRICT) {
-                    lastVisibility = "strict protected";
-                } else {
-                    lastVisibility = "protected";
-                }
-            } else if (type == PascalTokenTypes.KW_PUBLIC) lastVisibility = "public";
-            else if (type == PascalTokenTypes.KW_PUBLISHED) lastVisibility = "published";
-            // Ignore KW_STRICT here, we handle it when we see PRIVATE/PROTECTED
-        }
-        return lastVisibility;
-    }
-
-    private boolean isAncestor(PsiElement ancestor, PsiElement element) {
-        if (ancestor == element) return true;
-        PsiElement parent = element.getParent();
-        while (parent != null) {
-            if (parent == ancestor) return true;
-            parent = parent.getParent();
-        }
-        return false;
+        return nl.akiar.pascal.psi.PsiUtil.getVisibility(this);
     }
 
     @Override
@@ -450,9 +402,8 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
     @Override
     @Nullable
     public PsiElement getNameIdentifier() {
-        // The first IDENTIFIER token in the node is the variable name
-        ASTNode node = getNode();
-        ASTNode identifierNode = node.findChildByType(PascalTokenTypes.IDENTIFIER);
+        // Use recursive search because Sonar nests identifiers under IdentifierNodeImpl
+        ASTNode identifierNode = nl.akiar.pascal.psi.PsiUtil.findFirstRecursive(getNode(), nl.akiar.pascal.PascalTokenTypes.IDENTIFIER);
         if (identifierNode != null) {
             return identifierNode.getPsi();
         }
@@ -534,6 +485,20 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
         }
 
         return sb.toString().trim();
+    }
+
+    @Override
+    @Nullable
+    public PascalTypeDefinition getContainingClass() {
+        if (getVariableKind() != VariableKind.FIELD) return null;
+        PsiElement parent = getParent();
+        while (parent != null) {
+            if (parent instanceof PascalTypeDefinition) {
+                return (PascalTypeDefinition) parent;
+            }
+            parent = parent.getParent();
+        }
+        return null;
     }
 
     @Override

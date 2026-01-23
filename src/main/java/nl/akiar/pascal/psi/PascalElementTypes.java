@@ -77,4 +77,15 @@ public interface PascalElementTypes {
      * Element type for formal parameters.
      */
     com.intellij.psi.tree.IElementType FORMAL_PARAMETER = new nl.akiar.pascal.PascalTokenType("FORMAL_PARAMETER");
+
+    /**
+     * Element type for constant section.
+     */
+    com.intellij.psi.tree.IElementType CONST_SECTION = new nl.akiar.pascal.PascalTokenType("CONST_SECTION");
+
+    /**
+     * Element type for Pascal property definitions.
+     */
+    IStubElementType<nl.akiar.pascal.stubs.PascalPropertyStub, PascalProperty> PROPERTY_DEFINITION =
+            new nl.akiar.pascal.stubs.PascalPropertyStubElementType();
 }

@@ -8,10 +8,15 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import nl.akiar.pascal.PascalLanguage;
 import nl.akiar.pascal.PascalTokenTypes;
+import nl.akiar.pascal.psi.PascalProperty;
+import nl.akiar.pascal.psi.PascalRoutine;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
 import nl.akiar.pascal.psi.PascalVariableDefinition;
+import nl.akiar.pascal.reference.PascalMemberReference;
 import nl.akiar.pascal.stubs.PascalTypeIndex;
 import nl.akiar.pascal.stubs.PascalVariableIndex;
+import com.intellij.openapi.util.TextRange;
+import com.intellij.psi.util.PsiTreeUtil;
 
 import java.util.Collection;
 import org.jetbrains.annotations.NotNull;
@@ -27,6 +32,10 @@ import java.util.List;
 public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
     private static final Logger LOG = Logger.getInstance(PascalGotoDeclarationHandler.class);
 
+    public PascalGotoDeclarationHandler() {
+        System.out.println("[DEBUG_LOG] [PascalNav] PascalGotoDeclarationHandler instantiated");
+    }
+
     @Override
     @Nullable
     public PsiElement[] getGotoDeclarationTargets(@Nullable PsiElement sourceElement, int offset, Editor editor) {
@@ -39,13 +48,54 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
             return null;
         }
 
+        // Try to resolve using references first (handles Member access, unit references, etc)
+        com.intellij.psi.PsiReference[] refs = sourceElement.getReferences();
+        if (refs.length > 0) {
+            for (com.intellij.psi.PsiReference ref : refs) {
+                PsiElement resolved = ref.resolve();
+                if (resolved != null) {
+                    LOG.info("[PascalNav]  -> Resolved via reference to: " + resolved);
+                    return new PsiElement[]{resolved};
+                }
+            }
+        }
+
         // Only handle identifiers
         if (sourceElement.getNode().getElementType() != PascalTokenTypes.IDENTIFIER) {
             return null;
         }
 
+        // Fallback for member access if ReferenceContributor didn't kick in
+        PsiElement leaf = PsiTreeUtil.prevLeaf(sourceElement);
+        while (leaf != null && leaf instanceof com.intellij.psi.PsiWhiteSpace) {
+            leaf = PsiTreeUtil.prevLeaf(leaf);
+        }
+        if (leaf != null && leaf.getNode().getElementType() == PascalTokenTypes.DOT) {
+            LOG.info("[PascalNav] Detected dot before identifier, attempting manual member resolution");
+            PascalMemberReference memberRef = new PascalMemberReference(sourceElement, new TextRange(0, sourceElement.getTextLength()));
+            PsiElement resolved = memberRef.resolve();
+            if (resolved != null) {
+                return new PsiElement[]{resolved};
+            }
+        }
+
         // Handle unit references in uses clause
         PsiElement parent = sourceElement.getParent();
+        
+        // Handle routine declaration/implementation navigation
+        if (parent instanceof PascalRoutine) {
+            PascalRoutine routine = (PascalRoutine) parent;
+            if (routine.getNameIdentifier() == sourceElement) {
+                if (routine.isImplementation()) {
+                    PascalRoutine decl = routine.getDeclaration();
+                    if (decl != null) return new PsiElement[]{decl};
+                } else {
+                    PascalRoutine impl = routine.getImplementation();
+                    if (impl != null) return new PsiElement[]{impl};
+                }
+            }
+        }
+
         if (parent != null && parent.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE) {
             nl.akiar.pascal.reference.PascalUnitReference ref = new nl.akiar.pascal.reference.PascalUnitReference(sourceElement);
             PsiElement resolved = ref.resolve();

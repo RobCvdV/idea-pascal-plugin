@@ -5,10 +5,15 @@ import com.intellij.lang.ASTNode;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.stubs.IStubElementType;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
 import nl.akiar.pascal.PascalTokenTypes;
+import nl.akiar.pascal.psi.PascalProperty;
+import nl.akiar.pascal.psi.PascalRoutine;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
+import nl.akiar.pascal.psi.PascalVariableDefinition;
 import nl.akiar.pascal.psi.TypeKind;
+import nl.akiar.pascal.psi.VariableKind;
 import nl.akiar.pascal.stubs.PascalTypeStub;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiReference;
@@ -17,6 +22,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
@@ -58,30 +64,32 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
             return stub.getTypeKind();
         }
 
-        // Parse from AST - look for class, record, or interface keyword
-        ASTNode node = getNode();
-        
-        // With Sonar parser, we should check children.
-        // Usually it's: IDENTIFIER = [packed] class/record/interface ...
-        
+        // Parse from AST - look for class, record, or interface keyword recursively
+        return findTypeKindInNode(getNode());
+    }
+
+    private TypeKind findTypeKindInNode(ASTNode node) {
+        IElementType nodeType = node.getElementType();
+        if (nodeType == PascalTokenTypes.KW_CLASS) return TypeKind.CLASS;
+        if (nodeType == PascalTokenTypes.KW_RECORD) return TypeKind.RECORD;
+        if (nodeType == PascalTokenTypes.KW_INTERFACE || nodeType == PascalTokenTypes.KW_DISPINTERFACE) return TypeKind.INTERFACE;
+        if (nodeType == PascalTokenTypes.KW_REFERENCE || nodeType == PascalTokenTypes.KW_PROCEDURE || nodeType == PascalTokenTypes.KW_FUNCTION) return TypeKind.PROCEDURAL;
+        if (nodeType == PascalTokenTypes.LPAREN) return TypeKind.ENUM;
+        if (nodeType == PascalTokenTypes.KW_ARRAY) return TypeKind.ALIAS;
+
         for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
-            IElementType type = child.getElementType();
-            if (type == PascalTokenTypes.KW_CLASS) {
-                return TypeKind.CLASS;
-            } else if (type == PascalTokenTypes.KW_RECORD) {
-                return TypeKind.RECORD;
-            } else if (type == PascalTokenTypes.KW_INTERFACE || type == PascalTokenTypes.KW_DISPINTERFACE) {
-                return TypeKind.INTERFACE;
-            } else if (type == PascalTokenTypes.KW_REFERENCE || type == PascalTokenTypes.KW_PROCEDURE || type == PascalTokenTypes.KW_FUNCTION) {
-                return TypeKind.PROCEDURAL;
-            } else if (type == PascalTokenTypes.LPAREN) {
-                return TypeKind.ENUM;
-            } else if (type == PascalTokenTypes.KW_ARRAY) {
-                return TypeKind.ALIAS; // or specific ARRAY kind if we had it
+            TypeKind kind = findTypeKindInNode(child);
+            if (kind != TypeKind.UNKNOWN && kind != TypeKind.ALIAS) {
+                return kind;
+            }
+            // If we found an ALIAS (like TMyArray = array of...), keep looking in case there's something more specific
+            // (though usually array is specific enough)
+            if (kind == TypeKind.ALIAS && nodeType != nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION) {
+                 return kind;
             }
         }
         
-        return TypeKind.ALIAS; // Default for type T = ExistingType;
+        return node.getElementType() == nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION ? TypeKind.ALIAS : TypeKind.UNKNOWN;
     }
 
     @Override
@@ -145,8 +153,8 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
     @Nullable
     public PsiElement getNameIdentifier() {
         // The name identifier is the first IDENTIFIER token in the node
-        ASTNode node = getNode();
-        ASTNode identifierNode = node.findChildByType(PascalTokenTypes.IDENTIFIER);
+        // Use recursive search because Sonar nests identifiers
+        ASTNode identifierNode = nl.akiar.pascal.psi.PsiUtil.findFirstRecursive(getNode(), nl.akiar.pascal.PascalTokenTypes.IDENTIFIER);
         if (identifierNode != null) {
             return identifierNode.getPsi();
         }
@@ -269,6 +277,82 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
                 || type == PascalTokenTypes.KW_PROPERTY
                 || type == PascalTokenTypes.KW_OPERATOR
                 || type == PascalTokenTypes.KW_BEGIN;
+    }
+
+    @Override
+    @NotNull
+    public List<PascalRoutine> getMethods() {
+        return new ArrayList<>(PsiTreeUtil.findChildrenOfType(this, PascalRoutine.class));
+    }
+
+    @Override
+    @NotNull
+    public List<PascalProperty> getProperties() {
+        return new ArrayList<>(PsiTreeUtil.findChildrenOfType(this, PascalProperty.class));
+    }
+
+    @Override
+    @NotNull
+    public List<PascalVariableDefinition> getFields() {
+        List<PascalVariableDefinition> fields = new ArrayList<>();
+        Collection<PascalVariableDefinition> vars = PsiTreeUtil.findChildrenOfType(this, PascalVariableDefinition.class);
+        for (PascalVariableDefinition var : vars) {
+            if (var.getVariableKind() == VariableKind.FIELD) {
+                fields.add(var);
+            }
+        }
+        return fields;
+    }
+
+    @Override
+    @Nullable
+    public PascalTypeDefinition getSuperClass() {
+        // Look for TBase in class(TBase)
+        ASTNode node = getNode();
+        ASTNode lparen = node.findChildByType(PascalTokenTypes.LPAREN);
+        if (lparen != null) {
+            ASTNode next = lparen.getTreeNext();
+            while (next != null && next.getElementType() == PascalTokenTypes.WHITE_SPACE) {
+                next = next.getTreeNext();
+            }
+            if (next != null) {
+                // Should be a type reference. For now, try to resolve it.
+                PsiElement psi = next.getPsi();
+                PsiReference[] refs = psi.getReferences();
+                for (PsiReference ref : refs) {
+                    PsiElement resolved = ref.resolve();
+                    if (resolved instanceof PascalTypeDefinition) {
+                        return (PascalTypeDefinition) resolved;
+                    }
+                }
+                
+                // Manual fallback
+                String typeName = psi.getText();
+                nl.akiar.pascal.stubs.PascalTypeIndex.TypeLookupResult result =
+                        nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(typeName, psi.getContainingFile(), psi.getTextOffset());
+                if (!result.getInScopeTypes().isEmpty()) {
+                    return result.getInScopeTypes().get(0);
+                }
+            }
+        }
+        return null;
+    }
+
+    @Override
+    @NotNull
+    public List<PsiElement> getMembers(boolean includeAncestors) {
+        List<PsiElement> members = new ArrayList<>();
+        members.addAll(getMethods());
+        members.addAll(getProperties());
+        members.addAll(getFields());
+
+        if (includeAncestors) {
+            PascalTypeDefinition superClass = getSuperClass();
+            if (superClass != null) {
+                members.addAll(superClass.getMembers(true));
+            }
+        }
+        return members;
     }
 
     @Override

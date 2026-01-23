@@ -88,9 +88,6 @@ public final class PascalProjectService implements Disposable {
      */
     @NotNull
     public Set<String> getDiscoveredDirectories() {
-        if (!initialized) {
-            rescan();
-        }
         return Collections.unmodifiableSet(discoveredDirectories);
     }
 

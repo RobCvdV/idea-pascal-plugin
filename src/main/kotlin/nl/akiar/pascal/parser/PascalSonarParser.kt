@@ -138,6 +138,8 @@ class PascalSonarParser : PsiParser {
 
     private fun mapNode(node: org.sonar.plugins.communitydelphi.api.ast.DelphiNode, builder: PsiBuilder, lineOffsets: IntArray) {
         com.intellij.openapi.progress.ProgressManager.checkCanceled()
+        val nodeName = node.javaClass.simpleName
+        
         val firstToken = node.firstToken
         val lastToken = node.lastToken
 
@@ -163,8 +165,9 @@ class PascalSonarParser : PsiParser {
                 nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER
             }
             node is org.sonar.plugins.communitydelphi.api.ast.VarSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION
-            node is org.sonar.plugins.communitydelphi.api.ast.ConstSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION
+            node is org.sonar.plugins.communitydelphi.api.ast.ConstSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.CONST_SECTION
             node is org.sonar.plugins.communitydelphi.api.ast.TypeSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.TYPE_SECTION
+            node is org.sonar.plugins.communitydelphi.api.ast.PropertyNode -> nl.akiar.pascal.psi.PascalElementTypes.PROPERTY_DEFINITION
             node is org.sonar.plugins.communitydelphi.api.ast.RoutineDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION
             node is org.sonar.plugins.communitydelphi.api.ast.RoutineImplementationNode -> nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION
             node is org.sonar.plugins.communitydelphi.api.ast.RoutineNode -> nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION

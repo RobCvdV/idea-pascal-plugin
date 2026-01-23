@@ -94,6 +94,22 @@ public class PascalSyntaxHighlighter extends SyntaxHighlighterBase {
     public static final TextAttributesKey VAR_THREADVAR =
             createTextAttributesKey("PASCAL_VAR_THREADVAR", DefaultLanguageHighlighterColors.GLOBAL_VARIABLE);
 
+    // Routine and method colors
+    public static final TextAttributesKey ROUTINE_DECLARATION =
+            createTextAttributesKey("PASCAL_ROUTINE_DECLARATION", DefaultLanguageHighlighterColors.FUNCTION_DECLARATION);
+
+    public static final TextAttributesKey METHOD_DECLARATION =
+            createTextAttributesKey("PASCAL_METHOD_DECLARATION", DefaultLanguageHighlighterColors.FUNCTION_DECLARATION);
+
+    public static final TextAttributesKey ROUTINE_CALL =
+            createTextAttributesKey("PASCAL_ROUTINE_CALL", DefaultLanguageHighlighterColors.FUNCTION_CALL);
+
+    public static final TextAttributesKey METHOD_CALL =
+            createTextAttributesKey("PASCAL_METHOD_CALL", DefaultLanguageHighlighterColors.FUNCTION_CALL);
+
+    public static final TextAttributesKey PROPERTY_DECLARATION =
+            createTextAttributesKey("PASCAL_PROPERTY_DECLARATION", DefaultLanguageHighlighterColors.INSTANCE_FIELD);
+
     private static final TextAttributesKey[] KEYWORD_KEYS = new TextAttributesKey[]{KEYWORD};
     private static final TextAttributesKey[] STRING_KEYS = new TextAttributesKey[]{STRING};
     private static final TextAttributesKey[] NUMBER_KEYS = new TextAttributesKey[]{NUMBER};

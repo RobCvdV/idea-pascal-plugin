@@ -42,6 +42,19 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         if (contextElement != null && contextElement.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
             String name = contextElement.getText();
             
+            // 0. Check if the context element itself is a name identifier of a declaration
+            PsiElement parent = contextElement.getParent();
+            if (parent instanceof nl.akiar.pascal.psi.PascalVariableDefinition ||
+                parent instanceof nl.akiar.pascal.psi.PascalTypeDefinition ||
+                parent instanceof nl.akiar.pascal.psi.PascalRoutine ||
+                parent instanceof nl.akiar.pascal.psi.PascalProperty) {
+                
+                // If the identifier is the name identifier of its parent, return the parent
+                if (((com.intellij.psi.PsiNameIdentifierOwner) parent).getNameIdentifier() == contextElement) {
+                    return parent;
+                }
+            }
+
             // 1. Check if it resolves via reference (handles local vars, parameters, members)
             PsiReference[] refs = contextElement.getReferences();
             for (PsiReference ref : refs) {

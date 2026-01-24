@@ -48,6 +48,18 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
             return null;
         }
 
+        PsiElement parent = sourceElement.getParent();
+
+        // Handle unit references in uses clause
+        if (parent != null && parent.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE) {
+            nl.akiar.pascal.reference.PascalUnitReference ref = new nl.akiar.pascal.reference.PascalUnitReference(sourceElement);
+            PsiElement resolved = ref.resolve();
+            if (resolved != null) {
+                LOG.info("[PascalNav]  -> Resolved to unit file: " + ((PsiFile)resolved).getName());
+                return new PsiElement[]{resolved};
+            }
+        }
+
         // Try to resolve using references first (handles Member access, unit references, etc)
         com.intellij.psi.PsiReference[] refs = sourceElement.getReferences();
         if (refs.length > 0) {
@@ -78,9 +90,6 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
                 return new PsiElement[]{resolved};
             }
         }
-
-        // Handle unit references in uses clause
-        PsiElement parent = sourceElement.getParent();
         
         // Handle routine declaration/implementation navigation
         if (parent instanceof PascalRoutine) {

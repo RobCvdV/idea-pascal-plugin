@@ -2,6 +2,7 @@ package nl.akiar.pascal.psi.impl;
 
 import com.intellij.extapi.psi.StubBasedPsiElementBase;
 import com.intellij.lang.ASTNode;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.stubs.IStubElementType;
 import com.intellij.psi.tree.IElementType;
@@ -24,13 +25,16 @@ import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Implementation of PascalTypeDefinition PSI element.
  * Represents type definitions like: TMyClass = class, TMyRecord = record, IMyInterface = interface
  */
 public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalTypeStub> implements PascalTypeDefinition {
+    private static final Logger LOG = Logger.getInstance(PascalTypeDefinitionImpl.class);
 
     public PascalTypeDefinitionImpl(@NotNull ASTNode node) {
         super(node);
@@ -325,11 +329,14 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
                         return (PascalTypeDefinition) resolved;
                     }
                 }
-                
-                // Manual fallback
+
+                // Manual fallback - use transitive dependency resolution
+                // This uses this type's containing file's transitive deps, which is correct
+                // because the superclass must be visible from where the class is defined
                 String typeName = psi.getText();
                 nl.akiar.pascal.stubs.PascalTypeIndex.TypeLookupResult result =
-                        nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(typeName, psi.getContainingFile(), psi.getTextOffset());
+                        nl.akiar.pascal.stubs.PascalTypeIndex.findTypeWithTransitiveDeps(
+                                typeName, getContainingFile(), psi.getTextOffset());
                 if (!result.getInScopeTypes().isEmpty()) {
                     return result.getInScopeTypes().get(0);
                 }
@@ -341,17 +348,43 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
     @Override
     @NotNull
     public List<PsiElement> getMembers(boolean includeAncestors) {
+        if (!includeAncestors) {
+            List<PsiElement> members = new ArrayList<>();
+            members.addAll(getMethods());
+            members.addAll(getProperties());
+            members.addAll(getFields());
+            return members;
+        }
+        // Use visited set to detect circular references in inheritance
+        return getMembersWithCircularDetection(new HashSet<>());
+    }
+
+    /**
+     * Internal method that tracks visited types to prevent infinite loops
+     * in case of circular inheritance (which shouldn't happen, but we handle it gracefully).
+     */
+    private List<PsiElement> getMembersWithCircularDetection(Set<String> visited) {
         List<PsiElement> members = new ArrayList<>();
         members.addAll(getMethods());
         members.addAll(getProperties());
         members.addAll(getFields());
 
-        if (includeAncestors) {
-            PascalTypeDefinition superClass = getSuperClass();
-            if (superClass != null) {
-                members.addAll(superClass.getMembers(true));
-            }
+        // Create a unique key for this type
+        String myKey = getUnitName() + "." + getName();
+        if (visited.contains(myKey)) {
+            LOG.warn("[PascalType] Circular inheritance detected: " + myKey);
+            return members;
         }
+        visited.add(myKey);
+
+        PascalTypeDefinition superClass = getSuperClass();
+        if (superClass instanceof PascalTypeDefinitionImpl) {
+            members.addAll(((PascalTypeDefinitionImpl) superClass).getMembersWithCircularDetection(visited));
+        } else if (superClass != null) {
+            // For non-impl types, just call getMembers (unlikely path)
+            members.addAll(superClass.getMembers(true));
+        }
+
         return members;
     }
 

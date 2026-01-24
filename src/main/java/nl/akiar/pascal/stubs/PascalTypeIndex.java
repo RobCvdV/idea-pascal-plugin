@@ -11,6 +11,7 @@ import com.intellij.psi.stubs.StubIndex;
 import com.intellij.psi.stubs.StubIndexKey;
 import nl.akiar.pascal.dpr.DprProjectService;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
+import nl.akiar.pascal.resolution.TransitiveDependencyResolver;
 import nl.akiar.pascal.settings.PascalSourcePathsSettings;
 import nl.akiar.pascal.uses.PascalUsesClauseUtil;
 import org.jetbrains.annotations.NotNull;
@@ -114,6 +115,80 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
                 }
             } else {
                 outOfScope.add(typeDef);
+            }
+        }
+
+        return new TypeLookupResult(inScope, outOfScope, viaScopeNames, usesInfo, offset, scopes);
+    }
+
+    /**
+     * Find type definitions using transitive dependency resolution.
+     * This method considers all transitively-available units, not just direct uses clause entries.
+     *
+     * This is especially useful for member chain resolution where a type might be defined
+     * in an indirectly-used unit.
+     *
+     * @param name The type name to search for
+     * @param originFile The original file where the code reference occurs (NOT the intermediate type's file)
+     * @param offset The offset of the reference in originFile
+     * @return TypeLookupResult with types categorized by scope
+     */
+    @NotNull
+    public static TypeLookupResult findTypeWithTransitiveDeps(
+            @NotNull String name,
+            @NotNull PsiFile originFile,
+            int offset) {
+
+        Collection<PascalTypeDefinition> allTypes = findTypes(name, originFile.getProject());
+        Set<String> availableUnits = TransitiveDependencyResolver.getAvailableUnits(originFile);
+        PascalUsesClauseUtil.UsesClauseInfo usesInfo = PascalUsesClauseUtil.parseUsesClause(originFile);
+        List<String> scopes = PascalSourcePathsSettings.getInstance(originFile.getProject()).getUnitScopeNames();
+
+        List<PascalTypeDefinition> inScope = new ArrayList<>();
+        List<PascalTypeDefinition> outOfScope = new ArrayList<>();
+        List<PascalTypeDefinition> viaScopeNames = new ArrayList<>();
+
+        for (PascalTypeDefinition typeDef : allTypes) {
+            String targetUnit = typeDef.getUnitName();
+            PsiFile targetFile = typeDef.getContainingFile();
+            if (targetFile == null) continue;
+
+            // Same file is always in scope
+            if (targetFile.equals(originFile)) {
+                inScope.add(typeDef);
+                continue;
+            }
+
+            // Check if unit is transitively available
+            String lowerUnit = targetUnit.toLowerCase();
+            if (availableUnits.contains(lowerUnit)) {
+                inScope.add(typeDef);
+            } else {
+                // Also check via scope names (e.g., "SysUtils" for "System.SysUtils")
+                boolean foundViaScope = false;
+                for (String scope : scopes) {
+                    String scopedName = (scope + "." + targetUnit).toLowerCase();
+                    if (availableUnits.contains(scopedName)) {
+                        inScope.add(typeDef);
+                        viaScopeNames.add(typeDef);
+                        foundViaScope = true;
+                        break;
+                    }
+                    // Also check reverse: if targetUnit is "System.SysUtils" and "SysUtils" is available
+                    String lowerScope = scope.toLowerCase();
+                    if (lowerUnit.startsWith(lowerScope + ".")) {
+                        String shortName = lowerUnit.substring(lowerScope.length() + 1);
+                        if (availableUnits.contains(shortName)) {
+                            inScope.add(typeDef);
+                            viaScopeNames.add(typeDef);
+                            foundViaScope = true;
+                            break;
+                        }
+                    }
+                }
+                if (!foundViaScope) {
+                    outOfScope.add(typeDef);
+                }
             }
         }
 

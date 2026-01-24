@@ -14,15 +14,10 @@ import com.intellij.psi.PsiWhiteSpace;
 import nl.akiar.pascal.PascalSyntaxHighlighter;
 import nl.akiar.pascal.PascalTokenType;
 import nl.akiar.pascal.PascalTokenTypes;
-import nl.akiar.pascal.psi.PascalTypeDefinition;
-import nl.akiar.pascal.psi.PascalVariableDefinition;
-import nl.akiar.pascal.psi.TypeKind;
-import nl.akiar.pascal.psi.VariableKind;
+import nl.akiar.pascal.psi.*;
 import nl.akiar.pascal.resolution.DelphiBuiltIns;
 import nl.akiar.pascal.stubs.PascalTypeIndex;
 import nl.akiar.pascal.stubs.PascalVariableIndex;
-import nl.akiar.pascal.psi.PascalRoutine;
-import nl.akiar.pascal.psi.PascalProperty;
 import nl.akiar.pascal.stubs.PascalPropertyIndex;
 import nl.akiar.pascal.stubs.PascalRoutineIndex;
 import com.intellij.lang.ASTNode;
@@ -40,7 +35,7 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     @Override
     @Nullable
     public PsiElement getCustomDocumentationElement(@NotNull Editor editor, @NotNull PsiFile file, @Nullable PsiElement contextElement, int targetOffset) {
-        // LOG.info("[PascalDoc] getCustomDocumentationElement called for contextElement: " + contextElement + " (text: " + (contextElement != null ? contextElement.getText() : "null") + ")");
+        LOG.info("[PascalDoc] getCustomDocumentationElement called for contextElement: " + contextElement + " (text: " + (contextElement != null ? contextElement.getText() : "null") + ")");
         if (contextElement != null && contextElement.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
             String name = contextElement.getText();
 
@@ -49,6 +44,14 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             if (DelphiBuiltIns.isBuiltIn(name)) {
                 LOG.info("[PascalDoc] Built-in identifier: " + name);
                 return contextElement; // Return the identifier, generateDoc will handle it
+            }
+
+            PsiElement parent = contextElement.getParent();
+
+            // check if UNIT_REFERENCE and get complete name (can have dot notation and needing fill in by Unit Scope Names)
+            if (parent != null && parent.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
+                LOG.info("[PascalDoc] Unit reference detected: " + parent.getText());
+                return parent;
             }
 
             // 0b. Check if this is a member access (after a DOT) - if so, only use member resolution
@@ -65,7 +68,6 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             }
 
             // 1. Check if the context element itself is a name identifier of a declaration
-            PsiElement parent = contextElement.getParent();
             if (parent instanceof nl.akiar.pascal.psi.PascalVariableDefinition ||
                 parent instanceof nl.akiar.pascal.psi.PascalTypeDefinition ||
                 parent instanceof nl.akiar.pascal.psi.PascalRoutine ||
@@ -135,6 +137,17 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     @Nullable
     public String generateDoc(PsiElement element, @Nullable PsiElement originalElement) {
         LOG.info("[PascalDoc] generateDoc called for element: " + element + " class: " + (element != null ? element.getClass().getName() : "null") + " (original: " + originalElement + ")");
+
+        // if element is UNIT_REFERENCE, generate doc for unit
+        if (element != null && element.getNode() != null &&
+            element.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
+            String unitName = element.getText();
+            LOG.info("[PascalDoc] Generating doc for unit reference: " + unitName);
+            StringBuilder sb = new StringBuilder();
+            sb.append("<b>Unit:</b> ").append(escapeHtml(unitName));
+            sb.append("<br/>&nbsp;");
+            return sb.toString();
+        }
 
         // Check if element is an identifier token (built-in or unresolved member)
         if (element != null && element.getNode() != null &&

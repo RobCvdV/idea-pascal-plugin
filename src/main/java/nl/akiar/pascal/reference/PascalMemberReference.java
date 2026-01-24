@@ -114,10 +114,18 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
 
     @Nullable
     private PascalTypeDefinition findTypeDefinition(String typeName, PsiElement context) {
-        // Use existing type index
+        // IMPORTANT: Use the ORIGINAL file where the code is written, not the intermediate type's file.
+        // This ensures transitive dependencies are resolved correctly.
+        // For example, when resolving "meResult.Lines.Add":
+        // - meResult is resolved in the original file
+        // - Lines is a property of type TStrings (from System.Classes)
+        // - Add is a method of TStrings
+        // We need to use the original file's uses clause for all lookups to ensure TStrings is found.
+        PsiFile originFile = myElement.getContainingFile();
+
         nl.akiar.pascal.stubs.PascalTypeIndex.TypeLookupResult result =
-                nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(typeName, context.getContainingFile(), context.getTextOffset());
-        
+                nl.akiar.pascal.stubs.PascalTypeIndex.findTypeWithTransitiveDeps(typeName, originFile, myElement.getTextOffset());
+
         if (!result.getInScopeTypes().isEmpty()) {
             return result.getInScopeTypes().get(0);
         }

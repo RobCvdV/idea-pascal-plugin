@@ -7,7 +7,7 @@
     <description><![CDATA[
     Provides syntax highlighting and code folding support for Delphi/Object Pascal and Delphi Form (DFM) files.
 
-    <b>Object Pascal Support (.pas, .dpr, .dpk):</b>
+    <b>Object Pascal Support (.pas, .dpr):</b>
     - Full syntax highlighting for Delphi/Object Pascal
     - All Pascal keywords and operators highlighted
     - Compiler directive highlighting ({$...})

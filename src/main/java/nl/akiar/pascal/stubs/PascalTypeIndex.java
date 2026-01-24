@@ -96,6 +96,7 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
         List<String> scopes = PascalSourcePathsSettings.getInstance(fromFile.getProject()).getUnitScopeNames();
 
         for (PascalTypeDefinition typeDef : allTypes) {
+            String targetUnit = typeDef.getUnitName();
             PsiFile targetFile = typeDef.getContainingFile();
             if (targetFile == null) continue;
 
@@ -105,7 +106,6 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
                 continue;
             }
 
-            String targetUnit = PascalUsesClauseUtil.getUnitName(targetFile);
             String unitInUses = usesInfo.findUnitInUses(targetUnit, offset, scopes);
             if (unitInUses != null) {
                 inScope.add(typeDef);
@@ -183,13 +183,35 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
         /** Get error message for out-of-scope reference, or null if OK */
         @Nullable
         public String getErrorMessage() {
-            if (!inScopeTypes.isEmpty() || outOfScopeTypes.isEmpty()) {
-                return null; // OK or not found
+            java.util.Set<String> inScopeUnits = new java.util.LinkedHashSet<>();
+            for (PascalTypeDefinition type : inScopeTypes) {
+                inScopeUnits.add(type.getUnitName());
+            }
+
+            if (inScopeUnits.size() <= 1 && inScopeTypes.size() >= 1) {
+                return null; // Unique or unique across units
+            }
+
+            if (inScopeUnits.size() > 1) {
+                // Ambiguous reference
+                return "Ambiguous reference. Found in multiple units: " + String.join(", ", inScopeUnits);
+            }
+
+            if (outOfScopeTypes.isEmpty()) {
+                return null; // Not found at all (handled by reference resolver usually)
+            }
+
+            java.util.Set<String> outOfScopeUnits = new java.util.LinkedHashSet<>();
+            for (PascalTypeDefinition type : outOfScopeTypes) {
+                outOfScopeUnits.add(type.getUnitName());
             }
 
             // Type exists but not in scope
-            PascalTypeDefinition firstOutOfScope = outOfScopeTypes.get(0);
-            String unitName = PascalUsesClauseUtil.getUnitName(firstOutOfScope.getContainingFile());
+            if (outOfScopeUnits.size() > 1) {
+                return "Ambiguous reference found in multiple units (none in uses clause): " + String.join(", ", outOfScopeUnits);
+            }
+
+            String unitName = outOfScopeUnits.iterator().next();
 
             if (usesInfo.isInInterfaceSection(referenceOffset)) {
                 if (usesInfo.getImplementationUses().contains(unitName.toLowerCase())) {
@@ -197,15 +219,15 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
                 }
                 return "Unit '" + unitName + "' is not in uses clause. Add it to interface uses.";
             } else {
-                return "Unit '" + unitName + "' is not in uses clause.";
+                return "Unit '" + unitName + "' is not in uses clause. Add it to uses clause.";
             }
         }
 
         /** Get the unit name that needs to be added to uses clause */
         @Nullable
         public String getMissingUnit() {
-            if (outOfScopeTypes.isEmpty()) return null;
-            return PascalUsesClauseUtil.getUnitName(outOfScopeTypes.get(0).getContainingFile());
+            if (outOfScopeTypes.isEmpty() || outOfScopeTypes.size() > 1) return null;
+            return outOfScopeTypes.get(0).getUnitName();
         }
     }
 

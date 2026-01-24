@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
 public class PascalUnitIndex extends ScalarIndexExtension<String> {
     public static final ID<String, Void> INDEX_ID = ID.create("nl.akiar.pascal.unit.index");
 
-    private static final Pattern UNIT_NAME_PATTERN = Pattern.compile("^\\s*unit\\s+([\\w.]+)\\s*;", Pattern.CASE_INSENSITIVE);
+    private static final Pattern UNIT_NAME_PATTERN = Pattern.compile("^\\s*unit\\s+([^;]+);", Pattern.CASE_INSENSITIVE);
 
     @NotNull
     @Override
@@ -44,7 +44,7 @@ public class PascalUnitIndex extends ScalarIndexExtension<String> {
                 }
                 Matcher matcher = UNIT_NAME_PATTERN.matcher(line);
                 if (matcher.find()) {
-                    String unitName = matcher.group(1).toLowerCase();
+                    String unitName = nl.akiar.pascal.psi.PsiUtil.normalizeUnitName(matcher.group(1));
                     return Collections.singletonMap(unitName, null);
                 }
                 // Stop if we hit implementation, interface, or program keyword

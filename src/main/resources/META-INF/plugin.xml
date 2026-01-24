@@ -108,9 +108,9 @@
         <annotator language="ObjectPascal"
                    implementationClass="nl.akiar.pascal.annotator.PascalSemanticAnnotator"/>
 
-        <!-- Pascal Uses Clause Annotator for error highlighting -->
+        <!-- Pascal Scope Annotator for uses clause error highlighting (Kotlin) -->
         <annotator language="ObjectPascal"
-                   implementationClass="nl.akiar.pascal.annotator.PascalUsesClauseAnnotator"/>
+                   implementationClass="nl.akiar.pascal.annotator.PascalScopeAnnotator"/>
 
         <!-- Pascal Documentation Provider for hover documentation -->
         <lang.documentationProvider language="ObjectPascal"

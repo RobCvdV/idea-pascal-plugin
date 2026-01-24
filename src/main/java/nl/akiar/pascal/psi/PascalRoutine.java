@@ -51,4 +51,10 @@ public interface PascalRoutine extends PsiNameIdentifierOwner, StubBasedPsiEleme
      */
     @Nullable
     String getDocComment();
+
+    /**
+     * Get the unit name for this routine's file.
+     */
+    @org.jetbrains.annotations.NotNull
+    String getUnitName();
 }

@@ -168,6 +168,45 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
     }
 
     /**
+     * Find variables prioritizing types from units in the uses clause.
+     */
+    @NotNull
+    public static VariableLookupResult findVariablesWithUsesValidation(
+            @NotNull String name,
+            @NotNull PsiFile fromFile,
+            int offset) {
+
+        Collection<PascalVariableDefinition> candidates = findVariablesWithScope(name, fromFile);
+        nl.akiar.pascal.uses.PascalUsesClauseUtil.UsesClauseInfo usesInfo =
+                nl.akiar.pascal.uses.PascalUsesClauseUtil.parseUsesClause(fromFile);
+        List<String> scopes = nl.akiar.pascal.settings.PascalSourcePathsSettings.getInstance(fromFile.getProject()).getUnitScopeNames();
+
+        List<PascalVariableDefinition> inScope = new ArrayList<>();
+        List<PascalVariableDefinition> outOfScope = new ArrayList<>();
+
+        for (PascalVariableDefinition var : candidates) {
+            VariableKind kind = var.getVariableKind();
+            if (kind == VariableKind.GLOBAL || kind == VariableKind.CONSTANT || kind == VariableKind.THREADVAR) {
+                if (fromFile.equals(var.getContainingFile())) {
+                    inScope.add(var);
+                } else {
+                    String targetUnit = var.getUnitName();
+                    if (usesInfo.findUnitInUses(targetUnit, offset, scopes) != null) {
+                        inScope.add(var);
+                    } else {
+                        outOfScope.add(var);
+                    }
+                }
+            } else {
+                // Local/Field are always "in scope" if they are candidates
+                inScope.add(var);
+            }
+        }
+
+        return new VariableLookupResult(inScope, outOfScope, usesInfo, offset);
+    }
+
+    /**
      * Find a variable at a specific position, considering scope.
      * Prioritizes: local scope > class scope > unit scope > imported scope.
      */
@@ -177,14 +216,15 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
             @NotNull PsiFile file,
             int offset) {
 
-        Collection<PascalVariableDefinition> candidates = findVariablesWithScope(name, file);
-
-        if (candidates.isEmpty()) {
+        VariableLookupResult result = findVariablesWithUsesValidation(name, file, offset);
+        List<PascalVariableDefinition> inScope = result.getInScopeVariables();
+        
+        if (inScope.isEmpty()) {
             return null;
         }
 
         // 1. Try to find the one that actually contains this offset (declaration)
-        for (PascalVariableDefinition var : candidates) {
+        for (PascalVariableDefinition var : inScope) {
             if (var.getTextRange().contains(offset)) {
                 return var;
             }
@@ -204,11 +244,15 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
         PascalVariableDefinition bestGlobalMatch = null;
         int bestGlobalDistance = Integer.MAX_VALUE;
 
-        for (PascalVariableDefinition var : candidates) {
+        for (PascalVariableDefinition var : inScope) {
             int varOffset = var.getTextOffset();
-            if (varOffset > offset) continue; // Defined after the offset
+            // Defined after the offset - only allowed for fields or if in different file
+            if (varOffset > offset && file.equals(var.getContainingFile())) {
+                VariableKind kind = var.getVariableKind();
+                if (kind != VariableKind.FIELD) continue;
+            }
 
-            int distance = offset - varOffset;
+            int distance = Math.abs(offset - varOffset);
             VariableKind kind = var.getVariableKind();
 
             if (kind == VariableKind.LOCAL || kind == VariableKind.PARAMETER || kind == VariableKind.LOOP_VAR) {
@@ -231,8 +275,8 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
                 }
             } else {
                 if (distance < bestGlobalDistance) {
-                    bestGlobalDistance = distance;
-                    bestGlobalMatch = var;
+                     bestGlobalDistance = distance;
+                     bestGlobalMatch = var;
                 }
             }
         }
@@ -241,8 +285,72 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
         if (bestFieldMatch != null) return bestFieldMatch;
         if (bestGlobalMatch != null) return bestGlobalMatch;
 
-        // If no match found before offset with proper scope, return the first candidate as a last resort
-        return candidates.iterator().next();
+        return inScope.get(0);
+    }
+
+    /**
+     * Result of variable lookup with uses clause validation.
+     */
+    public static class VariableLookupResult {
+        private final List<PascalVariableDefinition> inScopeVariables;
+        private final List<PascalVariableDefinition> outOfScopeVariables;
+        private final nl.akiar.pascal.uses.PascalUsesClauseUtil.UsesClauseInfo usesInfo;
+        private final int referenceOffset;
+
+        public VariableLookupResult(List<PascalVariableDefinition> inScope, List<PascalVariableDefinition> outOfScope,
+                                   nl.akiar.pascal.uses.PascalUsesClauseUtil.UsesClauseInfo usesInfo, int referenceOffset) {
+            this.inScopeVariables = inScope;
+            this.outOfScopeVariables = outOfScope;
+            this.usesInfo = usesInfo;
+            this.referenceOffset = referenceOffset;
+        }
+
+        public List<PascalVariableDefinition> getInScopeVariables() {
+            return inScopeVariables;
+        }
+
+        public List<PascalVariableDefinition> getOutOfScopeVariables() {
+            return outOfScopeVariables;
+        }
+
+        @Nullable
+        public String getErrorMessage() {
+            Set<String> inScopeUnits = new java.util.LinkedHashSet<>();
+            for (PascalVariableDefinition var : inScopeVariables) {
+                inScopeUnits.add(var.getUnitName());
+            }
+
+            if (inScopeUnits.size() <= 1 && !inScopeVariables.isEmpty()) {
+                return null;
+            }
+
+            if (inScopeUnits.size() > 1) {
+                return "Ambiguous reference. Found in multiple units: " + String.join(", ", inScopeUnits);
+            }
+
+            if (outOfScopeVariables.isEmpty()) {
+                return null;
+            }
+
+            Set<String> outOfScopeUnits = new java.util.LinkedHashSet<>();
+            for (PascalVariableDefinition var : outOfScopeVariables) {
+                outOfScopeUnits.add(var.getUnitName());
+            }
+
+            if (outOfScopeUnits.size() > 1) {
+                return "Ambiguous reference found in multiple units (none in uses clause): " + String.join(", ", outOfScopeUnits);
+            }
+
+            String unitName = outOfScopeUnits.iterator().next();
+            if (usesInfo.isInInterfaceSection(referenceOffset)) {
+                if (usesInfo.getImplementationUses().contains(unitName.toLowerCase())) {
+                    return "Unit '" + unitName + "' is in implementation uses, but variable is referenced in interface section. Add it to interface uses.";
+                }
+                return "Unit '" + unitName + "' is not in uses clause. Add it to interface uses.";
+            } else {
+                return "Unit '" + unitName + "' is not in uses clause. Add it to uses clause.";
+            }
+        }
     }
 
     /**

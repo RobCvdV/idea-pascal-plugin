@@ -359,4 +359,10 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
     public String toString() {
         return "PascalTypeDefinition(" + getName() + ", " + getTypeKind() + ")";
     }
+
+    @Override
+    @NotNull
+    public String getUnitName() {
+        return nl.akiar.pascal.psi.PsiUtil.getUnitName(this);
+    }
 }

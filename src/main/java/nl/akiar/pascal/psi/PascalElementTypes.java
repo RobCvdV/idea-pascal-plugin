@@ -48,6 +48,11 @@ public interface PascalElementTypes {
     com.intellij.psi.tree.IElementType UNIT_DECL_SECTION = new nl.akiar.pascal.PascalTokenType("UNIT_DECL_SECTION");
 
     /**
+     * Element type for uses clause.
+     */
+    com.intellij.psi.tree.IElementType USES_SECTION = new nl.akiar.pascal.PascalTokenType("USES_SECTION");
+
+    /**
      * Element type for program declaration.
      */
     com.intellij.psi.tree.IElementType PROGRAM_DECL_SECTION = new nl.akiar.pascal.PascalTokenType("PROGRAM_DECL_SECTION");

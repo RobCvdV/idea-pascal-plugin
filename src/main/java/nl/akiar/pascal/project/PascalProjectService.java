@@ -73,6 +73,7 @@ public final class PascalProjectService implements Disposable {
 
     @Nullable
     private VirtualFile findFileByUnitName(@NotNull String unitName) {
+        if (com.intellij.openapi.project.DumbService.isDumb(project)) return null;
         return com.intellij.openapi.application.ReadAction.compute(() -> {
             Collection<VirtualFile> files = FileBasedIndex.getInstance().getContainingFiles(
                     PascalUnitIndex.INDEX_ID,

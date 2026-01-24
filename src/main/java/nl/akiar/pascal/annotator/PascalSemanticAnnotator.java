@@ -8,6 +8,7 @@ import com.intellij.psi.PsiElement;
 import nl.akiar.pascal.PascalSyntaxHighlighter;
 import nl.akiar.pascal.PascalTokenTypes;
 import nl.akiar.pascal.psi.*;
+import nl.akiar.pascal.resolution.DelphiBuiltIns;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.HashSet;
@@ -100,6 +101,13 @@ public class PascalSemanticAnnotator implements Annotator {
     }
 
     private void annotateUsage(PsiElement element, AnnotationHolder holder) {
+        // Skip if it's inside a unit reference, unit declaration or uses section
+        if (PsiUtil.hasParent(element, PascalElementTypes.UNIT_REFERENCE) ||
+            PsiUtil.hasParent(element, PascalElementTypes.UNIT_DECL_SECTION) ||
+            PsiUtil.hasParent(element, PascalElementTypes.USES_SECTION)) {
+            return;
+        }
+
         // Skip if it's the name identifier of a definition (handled by specific annotate methods)
         PsiElement parent = element.getParent();
         if (parent instanceof PascalTypeDefinition && ((PascalTypeDefinition) parent).getNameIdentifier() == element) return;
@@ -114,6 +122,27 @@ public class PascalSemanticAnnotator implements Annotator {
             return;
         } else if ("TObject".equalsIgnoreCase(text)) {
             applyHighlight(element, holder, PascalSyntaxHighlighter.TYPE_CLASS);
+            return;
+        }
+
+        // Check for built-in functions (Assigned, Inc, Dec, Length, etc.)
+        if (DelphiBuiltIns.isBuiltInFunction(text)) {
+            applyHighlight(element, holder, PascalSyntaxHighlighter.ROUTINE_CALL);
+            return;
+        }
+
+        // Check for built-in types (Exception, TObject, etc.)
+        if (DelphiBuiltIns.isBuiltInType(text)) {
+            // Determine the appropriate color based on naming convention
+            if (text.startsWith("E") || text.toLowerCase().contains("exception")) {
+                applyHighlight(element, holder, PascalSyntaxHighlighter.TYPE_CLASS);
+            } else if (text.startsWith("I") && text.length() > 1 && Character.isUpperCase(text.charAt(1))) {
+                applyHighlight(element, holder, PascalSyntaxHighlighter.TYPE_INTERFACE);
+            } else if (text.startsWith("T")) {
+                applyHighlight(element, holder, PascalSyntaxHighlighter.TYPE_CLASS);
+            } else {
+                applyHighlight(element, holder, PascalSyntaxHighlighter.TYPE_SIMPLE);
+            }
             return;
         }
 

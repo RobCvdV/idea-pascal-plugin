@@ -314,7 +314,7 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
             case GLOBAL:
             case CONSTANT:
             case THREADVAR:
-                return findUnitName();
+                return getUnitName();
             default:
                 return null;
         }
@@ -348,35 +348,6 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
     }
 
     @Nullable
-    private String findUnitName() {
-        PsiElement parent = getParent();
-        while (parent != null) {
-            if (parent.getNode() != null && parent.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.UNIT_DECL_SECTION) {
-                ASTNode idNode = parent.getNode().findChildByType(PascalTokenTypes.IDENTIFIER);
-                if (idNode != null) return idNode.getText();
-            }
-            parent = parent.getParent();
-        }
-
-        // Search for it in children of file as a backup
-        PsiElement file = getContainingFile();
-        for (PsiElement child : file.getChildren()) {
-            if (child.getNode() != null && child.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.UNIT_DECL_SECTION) {
-                ASTNode idNode = child.getNode().findChildByType(PascalTokenTypes.IDENTIFIER);
-                if (idNode != null) return idNode.getText();
-            }
-        }
-
-        // Fall back to file name without extension
-        String fileName = getContainingFile().getName();
-        int dotIndex = fileName.lastIndexOf('.');
-        if (dotIndex > 0) {
-            return fileName.substring(0, dotIndex);
-        }
-        return fileName;
-    }
-
-    @Nullable
     public String getContainingClassName() {
         if (getVariableKind() == VariableKind.FIELD) {
             return findContainingClassName();
@@ -395,8 +366,7 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
 
     @NotNull
     public String getUnitName() {
-        String unitName = findUnitName();
-        return unitName != null ? unitName : "";
+        return nl.akiar.pascal.psi.PsiUtil.getUnitName(this);
     }
 
     @Override

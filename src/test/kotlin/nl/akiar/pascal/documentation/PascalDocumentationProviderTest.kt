@@ -4,6 +4,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import nl.akiar.pascal.documentation.PascalDocumentationProvider
 import nl.akiar.pascal.psi.PascalVariableDefinition
 import nl.akiar.pascal.psi.PascalTypeDefinition
+import nl.akiar.pascal.psi.PascalRoutine
 import com.intellij.psi.util.PsiTreeUtil
 import org.junit.jupiter.api.Test
 
@@ -106,6 +107,59 @@ class PascalDocumentationProviderTest : BasePlatformTestCase() {
         assertTrue("Element should be a PascalTypeDefinition, but was ${element!!::class.java.simpleName}", 
             element is PascalTypeDefinition)
         assertEquals("Connection", (element as PascalTypeDefinition).name)
+    }
+
+    fun testRoutineDocumentationScopeValidation() {
+        // Unit A with MyRoutine
+        myFixture.configureByText("UnitA.pas", """
+            unit UnitA;
+            interface
+            { Doc for UnitA.MyRoutine }
+            procedure MyRoutine;
+            implementation
+            procedure MyRoutine; begin end;
+            end.
+        """.trimIndent())
+
+        // Unit B with MyRoutine
+        myFixture.configureByText("UnitB.pas", """
+            unit UnitB;
+            interface
+            { Doc for UnitB.MyRoutine }
+            procedure MyRoutine;
+            implementation
+            procedure MyRoutine; begin end;
+            end.
+        """.trimIndent())
+
+        // Main unit using only UnitB
+        val mainText = """
+            unit Main;
+            interface
+            uses UnitB;
+            implementation
+            procedure Test;
+            begin
+              MyRoutine;
+            end;
+            end.
+        """.trimIndent()
+
+        val psiFile = myFixture.configureByText("Main.pas", mainText)
+        val provider = PascalDocumentationProvider()
+
+        val offset = mainText.indexOf("MyRoutine")
+        val identifier = psiFile.findElementAt(offset)!!
+        
+        val element = provider.getCustomDocumentationElement(myFixture.editor, psiFile, identifier, identifier.textOffset)
+
+        assertNotNull("Should find a documentation element", element)
+        assertTrue("Element should be a PascalRoutine, but was ${element!!::class.java.simpleName}", 
+            element is PascalRoutine)
+        
+        val routine = element as PascalRoutine
+        assertEquals("unitb", routine.getUnitName())
+        assertEquals("Doc for UnitB.MyRoutine", routine.docComment)
     }
 
     private fun String.capitalize() = this.lowercase().replaceFirstChar { it.uppercase() }

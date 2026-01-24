@@ -138,7 +138,6 @@ class PascalSonarParser : PsiParser {
 
     private fun mapNode(node: org.sonar.plugins.communitydelphi.api.ast.DelphiNode, builder: PsiBuilder, lineOffsets: IntArray) {
         com.intellij.openapi.progress.ProgressManager.checkCanceled()
-        val nodeName = node.javaClass.simpleName
         
         val firstToken = node.firstToken
         val lastToken = node.lastToken
@@ -157,6 +156,7 @@ class PascalSonarParser : PsiParser {
             node is org.sonar.plugins.communitydelphi.api.ast.InterfaceSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_SECTION
             node is org.sonar.plugins.communitydelphi.api.ast.ImplementationSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.IMPLEMENTATION_SECTION
             node is org.sonar.plugins.communitydelphi.api.ast.UnitDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_DECL_SECTION
+            node.javaClass.simpleName.contains("UsesClause", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.USES_SECTION
             node is org.sonar.plugins.communitydelphi.api.ast.ProgramDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.PROGRAM_DECL_SECTION
             node is org.sonar.plugins.communitydelphi.api.ast.LibraryDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.LIBRARY_DECL_SECTION
             node is org.sonar.plugins.communitydelphi.api.ast.TypeDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION
@@ -188,8 +188,10 @@ class PascalSonarParser : PsiParser {
                 }
             }
             node.javaClass.simpleName.contains("UnitReference", ignoreCase = true) ||
+            node.javaClass.simpleName.contains("UnitImport", ignoreCase = true) ||
             node.javaClass.simpleName.contains("UsesItem", ignoreCase = true) ||
-            node.javaClass.simpleName.contains("Namespace", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
+            node.javaClass.simpleName.contains("Namespace", ignoreCase = true) ||
+            node.javaClass.simpleName.contains("QualifiedNameDeclaration", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
             else -> null
         }
 

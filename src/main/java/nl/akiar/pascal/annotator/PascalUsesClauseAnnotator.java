@@ -10,6 +10,7 @@ import nl.akiar.pascal.PascalLanguage;
 import nl.akiar.pascal.PascalTokenTypes;
 import nl.akiar.pascal.psi.PascalElementTypes;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
+import nl.akiar.pascal.psi.PsiUtil;
 import nl.akiar.pascal.reference.PascalUnitReference;
 import nl.akiar.pascal.stubs.PascalTypeIndex;
 import nl.akiar.pascal.uses.PascalUsesClauseUtil;
@@ -28,6 +29,13 @@ public class PascalUsesClauseAnnotator implements Annotator {
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
         // Only process Pascal files
         if (element.getLanguage() != PascalLanguage.INSTANCE) {
+            return;
+        }
+
+        // Skip if inside a unit reference or unit declaration or uses section (except for the reference itself)
+        if ((PsiUtil.hasParent(element, PascalElementTypes.UNIT_DECL_SECTION) ||
+             PsiUtil.hasParent(element, PascalElementTypes.USES_SECTION)) &&
+            element.getNode().getElementType() != PascalElementTypes.UNIT_REFERENCE) {
             return;
         }
 
@@ -57,85 +65,99 @@ public class PascalUsesClauseAnnotator implements Annotator {
             return;
         }
 
-        // Skip if this is a type definition name (not a reference)
-        PsiElement parent = element.getParent();
-        if (parent instanceof PascalTypeDefinition) {
-            if (((PascalTypeDefinition) parent).getNameIdentifier() == element) {
-                return; // This is the definition, not a reference
-            }
+        // Skip if this is a definition name (not a reference)
+        if (isDefinitionName(element)) {
+            return;
         }
 
-        // Check if this identifier looks like a type reference (starts with T or I convention)
         String text = element.getText();
         if (text == null || text.isEmpty()) {
             return;
         }
 
-        // Simple heuristic: only check identifiers that look like type names
-        // Pascal convention: TClassName, IInterfaceName, EExceptionName
-        char firstChar = text.charAt(0);
-        if (firstChar != 'T' && firstChar != 'I' && firstChar != 'E') {
-            return; // Probably not a type reference
-        }
-
-        // Must be at least 2 characters (T + something)
-        if (text.length() < 2) {
-            return;
-        }
-
-        // Second character should be uppercase (TGood, not This)
-        char secondChar = text.charAt(1);
-        if (!Character.isUpperCase(secondChar)) {
-            return;
-        }
-
-        // Heuristic: If followed by a colon, it's likely a field/variable name, not a type reference.
-        // TInterfaceEntry = record IID: TGUID; end;
-        // Here IID is followed by colon, TGUID is not.
-        PsiElement nextSibling = element.getNextSibling();
-        while (nextSibling != null && (nextSibling.getNode().getElementType() == PascalTokenTypes.WHITE_SPACE ||
-                nextSibling.getNode().getElementType() == PascalTokenTypes.LINE_COMMENT ||
-                nextSibling.getNode().getElementType() == PascalTokenTypes.BLOCK_COMMENT ||
-                nextSibling.getNode().getElementType() == PascalTokenTypes.COMPILER_DIRECTIVE)) {
-            nextSibling = nextSibling.getNextSibling();
-        }
-        if (nextSibling != null && nextSibling.getNode().getElementType() == PascalTokenTypes.COLON) {
-            return;
-        }
-
-        // Look up the type with uses clause validation
         PsiFile file = element.getContainingFile();
         if (file == null) {
             return;
         }
-
         int offset = element.getTextOffset();
-        PascalTypeIndex.TypeLookupResult result =
-                PascalTypeIndex.findTypesWithUsesValidation(text, file, offset);
 
-        // If we found in-scope types, everything is OK (but check for scope name warnings)
-        if (!result.getInScopeTypes().isEmpty()) {
-            if (!result.getInScopeViaScopeNames().isEmpty()) {
-                // If ANY of the in-scope types were found via scope names, show a warning
-                PascalTypeDefinition first = result.getInScopeViaScopeNames().get(0);
-                String fullUnitName = PascalUsesClauseUtil.getUnitName(first.getContainingFile());
+        // 1. Check if it looks like a type reference (starts with T, I, or E convention)
+        if (looksLikeType(text, element)) {
+            PascalTypeIndex.TypeLookupResult typeResult = PascalTypeIndex.findTypesWithUsesValidation(text, file, offset);
+            String typeError = typeResult.getErrorMessage();
+            if (typeError != null) {
+                holder.newAnnotation(HighlightSeverity.ERROR, typeError).range(element).create();
+                return;
+            }
+
+            // Check for scope name warnings
+            if (!typeResult.getInScopeViaScopeNames().isEmpty()) {
+                PascalTypeDefinition first = typeResult.getInScopeViaScopeNames().get(0);
                 holder.newAnnotation(HighlightSeverity.WARNING,
-                                "Unit '" + fullUnitName + "' is included via unit scope names. " +
+                                "Unit '" + first.getUnitName() + "' is included via unit scope names. " +
                                 "Using short unit names is considered bad practice.")
                         .range(element)
                         .create();
             }
+            
+            // If it matched a type, we're done
+            if (!typeResult.getInScopeTypes().isEmpty()) {
+                return;
+            }
+        }
+
+        // 2. Check for routines
+        nl.akiar.pascal.stubs.PascalRoutineIndex.RoutineLookupResult routineResult =
+                nl.akiar.pascal.stubs.PascalRoutineIndex.findRoutinesWithUsesValidation(text, file, offset);
+        String routineError = routineResult.getErrorMessage();
+        if (routineError != null) {
+            // Only report if it actually exists somewhere (out of scope) or is ambiguous in scope
+            if (!routineResult.getInScopeRoutines().isEmpty() || !routineResult.getOutOfScopeRoutines().isEmpty()) {
+                holder.newAnnotation(HighlightSeverity.ERROR, routineError).range(element).create();
+                return;
+            }
+        }
+        if (!routineResult.getInScopeRoutines().isEmpty()) {
             return;
         }
 
-        // If we found out-of-scope types, show an error
-        String errorMessage = result.getErrorMessage();
-        if (errorMessage != null) {
-            LOG.info("[PascalUses] Error for '" + text + "': " + errorMessage);
-            holder.newAnnotation(HighlightSeverity.ERROR, errorMessage)
-                    .range(element)
-                    .create();
+        // 3. Check for variables
+        nl.akiar.pascal.stubs.PascalVariableIndex.VariableLookupResult varResult =
+                nl.akiar.pascal.stubs.PascalVariableIndex.findVariablesWithUsesValidation(text, file, offset);
+        String varError = varResult.getErrorMessage();
+        if (varError != null) {
+            if (!varResult.getInScopeVariables().isEmpty() || !varResult.getOutOfScopeVariables().isEmpty()) {
+                holder.newAnnotation(HighlightSeverity.ERROR, varError).range(element).create();
+                return;
+            }
         }
-        // If no types found at all, we don't show an error (might be a variable, not a type)
+    }
+
+    private boolean isDefinitionName(PsiElement element) {
+        PsiElement parent = element.getParent();
+        if (parent instanceof nl.akiar.pascal.psi.PascalVariableDefinition) {
+            return ((nl.akiar.pascal.psi.PascalVariableDefinition) parent).getNameIdentifier() == element;
+        }
+        if (parent instanceof nl.akiar.pascal.psi.PascalTypeDefinition) {
+            return ((nl.akiar.pascal.psi.PascalTypeDefinition) parent).getNameIdentifier() == element;
+        }
+        if (parent instanceof nl.akiar.pascal.psi.PascalRoutine) {
+            return ((nl.akiar.pascal.psi.PascalRoutine) parent).getNameIdentifier() == element;
+        }
+        if (parent instanceof nl.akiar.pascal.psi.PascalProperty) {
+            return ((nl.akiar.pascal.psi.PascalProperty) parent).getNameIdentifier() == element;
+        }
+        return false;
+    }
+
+    private boolean looksLikeType(String text, PsiElement element) {
+        if (text.length() < 2) return false;
+        char firstChar = text.charAt(0);
+        if (firstChar != 'T' && firstChar != 'I' && firstChar != 'E') return false;
+        if (!Character.isUpperCase(text.charAt(1))) return false;
+
+        // Heuristic: If followed by a colon, it's likely a field/variable name
+        PsiElement next = PsiUtil.getNextNoneIgnorableSibling(element);
+        return next == null || next.getNode().getElementType() != PascalTokenTypes.COLON;
     }
 }

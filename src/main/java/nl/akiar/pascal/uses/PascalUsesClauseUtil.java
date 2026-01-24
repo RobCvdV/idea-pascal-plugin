@@ -265,10 +265,39 @@ public class PascalUsesClauseUtil {
             ASTNode child = usesNode.getFirstChildNode();
             while (child != null) {
                 if (child.getElementType() == PascalElementTypes.UNIT_REFERENCE) {
-                    targetSet.add(child.getText().toLowerCase());
+                    targetSet.add(nl.akiar.pascal.psi.PsiUtil.normalizeUnitName(child.getText()));
                 } else if (child.getElementType() == PascalTokenTypes.IDENTIFIER) {
                     // Fallback for simple identifiers if UNIT_REFERENCE is not used
-                    targetSet.add(child.getText().toLowerCase());
+                    // handles dotted names in children if they are not wrapped
+                    StringBuilder unitName = new StringBuilder(child.getText());
+                    ASTNode next = child.getTreeNext();
+                    while (next != null) {
+                        IElementType nextType = next.getElementType();
+                        if (nextType == PascalTokenTypes.DOT) {
+                            unitName.append(".");
+                            next = next.getTreeNext();
+                            // Skip whitespace/comments after dot
+                            while (next != null && (next.getElementType() == PascalTokenTypes.WHITE_SPACE ||
+                                    next.getElementType() == PascalTokenTypes.LINE_COMMENT ||
+                                    next.getElementType() == PascalTokenTypes.BLOCK_COMMENT)) {
+                                next = next.getTreeNext();
+                            }
+                            if (next != null && next.getElementType() == PascalTokenTypes.IDENTIFIER) {
+                                unitName.append(next.getText());
+                                child = next; // Advance outer loop child
+                                next = child.getTreeNext();
+                            } else {
+                                break;
+                            }
+                        } else if (nextType == PascalTokenTypes.WHITE_SPACE ||
+                                nextType == PascalTokenTypes.LINE_COMMENT ||
+                                nextType == PascalTokenTypes.BLOCK_COMMENT) {
+                            next = next.getTreeNext();
+                        } else {
+                            break;
+                        }
+                    }
+                    targetSet.add(nl.akiar.pascal.psi.PsiUtil.normalizeUnitName(unitName.toString()));
                 }
                 child = child.getTreeNext();
             }
@@ -285,7 +314,7 @@ public class PascalUsesClauseUtil {
                 // End of uses clause
                 break;
             } else if (type == PascalElementTypes.UNIT_REFERENCE) {
-                targetSet.add(current.getText().toLowerCase());
+                targetSet.add(nl.akiar.pascal.psi.PsiUtil.normalizeUnitName(current.getText()));
                 current = current.getTreeNext();
                 current = skipIgnorableTokens(current);
                 continue;
@@ -317,7 +346,7 @@ public class PascalUsesClauseUtil {
                     }
                 }
 
-                targetSet.add(unitName.toString().toLowerCase());
+                targetSet.add(nl.akiar.pascal.psi.PsiUtil.normalizeUnitName(unitName.toString()));
                 // We are now past the unit name (and dots), and skipIgnorableTokens was called.
                 // Next token could be COMMA, SEMI, or KW_IN.
                 continue; 
@@ -368,12 +397,20 @@ public class PascalUsesClauseUtil {
      */
     @NotNull
     public static String getUnitName(@NotNull PsiFile file) {
+        // 1. Try to find the actual unit name in the file
+        for (PsiElement child : file.getChildren()) {
+            if (child.getNode() != null && child.getNode().getElementType() == PascalElementTypes.UNIT_DECL_SECTION) {
+                return nl.akiar.pascal.psi.PsiUtil.extractUnitNameFromSection(child.getNode());
+            }
+        }
+
+        // 2. Fallback to file name
         String fileName = file.getName();
         int dotIndex = fileName.lastIndexOf('.');
         if (dotIndex > 0) {
-            return fileName.substring(0, dotIndex).toLowerCase();
+            return fileName.substring(0, dotIndex);
         }
-        return fileName.toLowerCase();
+        return fileName;
     }
 
     /**

@@ -108,4 +108,99 @@ public class PsiUtil {
         }
         return false;
     }
+
+    @Nullable
+    public static PsiElement getNextNoneIgnorableSibling(@NotNull PsiElement element) {
+        PsiElement next = element.getNextSibling();
+        while (next != null) {
+            IElementType type = next.getNode().getElementType();
+            if (type != nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE &&
+                type != nl.akiar.pascal.PascalTokenTypes.LINE_COMMENT &&
+                type != nl.akiar.pascal.PascalTokenTypes.BLOCK_COMMENT &&
+                type != nl.akiar.pascal.PascalTokenTypes.COMPILER_DIRECTIVE) {
+                return next;
+            }
+            next = next.getNextSibling();
+        }
+        return null;
+    }
+
+    @NotNull
+    public static String getUnitName(@NotNull PsiElement element) {
+        // 1. Try to find UNIT_DECL_SECTION in parents
+        PsiElement parent = element.getParent();
+        while (parent != null) {
+            if (parent.getNode() != null && parent.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.UNIT_DECL_SECTION) {
+                return extractUnitNameFromSection(parent.getNode());
+            }
+            parent = parent.getParent();
+        }
+
+        // 2. Search for it in children of file
+        com.intellij.psi.PsiFile file = element.getContainingFile();
+        if (file != null) {
+            for (PsiElement child : file.getChildren()) {
+                if (child.getNode() != null && child.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.UNIT_DECL_SECTION) {
+                    return extractUnitNameFromSection(child.getNode());
+                }
+            }
+
+            // 3. Fall back to file name without extension
+            String fileName = file.getName();
+            int dotIndex = fileName.lastIndexOf('.');
+            if (dotIndex > 0) {
+                return fileName.substring(0, dotIndex);
+            }
+            return fileName;
+        }
+
+        return "";
+    }
+
+    @NotNull
+    public static String normalizeUnitName(@NotNull String name) {
+        // Remove comments { ... }
+        String result = name.replaceAll("\\{.*?\\}", "");
+        // Remove comments (* ... *)
+        result = result.replaceAll("\\(\\*.*?\\*\\)", "");
+        // Remove comments // ... (to end of string or newline)
+        result = result.replaceAll("//.*", "");
+        // Remove all whitespace
+        result = result.replaceAll("\\s+", "");
+        return result.toLowerCase();
+    }
+
+    @NotNull
+    public static String extractUnitNameFromSection(@NotNull ASTNode sectionNode) {
+        StringBuilder sb = new StringBuilder();
+        boolean foundUnitKeyword = false;
+
+        for (ASTNode child = sectionNode.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            IElementType type = child.getElementType();
+            if (type == nl.akiar.pascal.PascalTokenTypes.KW_UNIT ||
+                type == nl.akiar.pascal.PascalTokenTypes.KW_PROGRAM ||
+                type == nl.akiar.pascal.PascalTokenTypes.KW_LIBRARY) {
+                foundUnitKeyword = true;
+                continue;
+            }
+
+            if (foundUnitKeyword) {
+                if (type == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER ||
+                    type == nl.akiar.pascal.PascalTokenTypes.DOT ||
+                    type == nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE) {
+                    sb.append(child.getText());
+                } else if (type == nl.akiar.pascal.PascalTokenTypes.SEMI) {
+                    break;
+                }
+            }
+        }
+
+        String result = sb.toString().trim();
+        if (result.isEmpty()) {
+            // Fallback: just find the first identifier if the above logic fails
+            ASTNode idNode = sectionNode.findChildByType(nl.akiar.pascal.PascalTokenTypes.IDENTIFIER);
+            if (idNode != null) return normalizeUnitName(idNode.getText());
+        }
+        return normalizeUnitName(result);
+    }
 }

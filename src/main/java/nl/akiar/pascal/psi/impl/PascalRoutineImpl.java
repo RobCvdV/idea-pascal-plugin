@@ -295,6 +295,12 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
     }
 
     @Override
+    @NotNull
+    public String getUnitName() {
+        return nl.akiar.pascal.psi.PsiUtil.getUnitName(this);
+    }
+
+    @Override
     public String toString() {
         return "PascalRoutine(" + getName() + ")";
     }

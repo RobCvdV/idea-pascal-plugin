@@ -10,6 +10,7 @@ import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiReference;
+import com.intellij.psi.PsiWhiteSpace;
 import nl.akiar.pascal.PascalSyntaxHighlighter;
 import nl.akiar.pascal.PascalTokenType;
 import nl.akiar.pascal.PascalTokenTypes;
@@ -17,6 +18,7 @@ import nl.akiar.pascal.psi.PascalTypeDefinition;
 import nl.akiar.pascal.psi.PascalVariableDefinition;
 import nl.akiar.pascal.psi.TypeKind;
 import nl.akiar.pascal.psi.VariableKind;
+import nl.akiar.pascal.resolution.DelphiBuiltIns;
 import nl.akiar.pascal.stubs.PascalTypeIndex;
 import nl.akiar.pascal.stubs.PascalVariableIndex;
 import nl.akiar.pascal.psi.PascalRoutine;
@@ -41,21 +43,41 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         // LOG.info("[PascalDoc] getCustomDocumentationElement called for contextElement: " + contextElement + " (text: " + (contextElement != null ? contextElement.getText() : "null") + ")");
         if (contextElement != null && contextElement.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
             String name = contextElement.getText();
-            
-            // 0. Check if the context element itself is a name identifier of a declaration
+
+            // 0. Check for built-in functions/types FIRST - return the identifier itself
+            // so generateDoc can create special documentation for built-ins
+            if (DelphiBuiltIns.isBuiltIn(name)) {
+                LOG.info("[PascalDoc] Built-in identifier: " + name);
+                return contextElement; // Return the identifier, generateDoc will handle it
+            }
+
+            // 0b. Check if this is a member access (after a DOT) - if so, only use member resolution
+            // Don't fall back to global lookups for member access
+            boolean isMemberAccess = false;
+            PsiElement prevLeaf = com.intellij.psi.util.PsiTreeUtil.prevLeaf(contextElement);
+            while (prevLeaf != null && (prevLeaf instanceof PsiWhiteSpace || prevLeaf instanceof com.intellij.psi.PsiComment)) {
+                prevLeaf = com.intellij.psi.util.PsiTreeUtil.prevLeaf(prevLeaf);
+            }
+            if (prevLeaf != null && prevLeaf.getNode() != null &&
+                prevLeaf.getNode().getElementType() == PascalTokenTypes.DOT) {
+                isMemberAccess = true;
+                LOG.info("[PascalDoc] Member access detected for: " + name);
+            }
+
+            // 1. Check if the context element itself is a name identifier of a declaration
             PsiElement parent = contextElement.getParent();
             if (parent instanceof nl.akiar.pascal.psi.PascalVariableDefinition ||
                 parent instanceof nl.akiar.pascal.psi.PascalTypeDefinition ||
                 parent instanceof nl.akiar.pascal.psi.PascalRoutine ||
                 parent instanceof nl.akiar.pascal.psi.PascalProperty) {
-                
+
                 // If the identifier is the name identifier of its parent, return the parent
                 if (((com.intellij.psi.PsiNameIdentifierOwner) parent).getNameIdentifier() == contextElement) {
                     return parent;
                 }
             }
 
-            // 1. Check if it resolves via reference (handles local vars, parameters, members)
+            // 2. Check if it resolves via reference (handles local vars, parameters, members)
             PsiReference[] refs = contextElement.getReferences();
             for (PsiReference ref : refs) {
                 PsiElement resolved = ref.resolve();
@@ -64,10 +86,19 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 }
             }
 
-            // 2. Fallback to index lookup if not resolved via reference
-            Collection<PascalTypeDefinition> types = PascalTypeIndex.findTypes(name, contextElement.getProject());
-            if (!types.isEmpty()) {
-                return types.iterator().next();
+            // For member access, don't fall back to global lookups - return unresolved
+            // This prevents showing wrong documentation for obj.member when member
+            // can't be found in obj's type
+            if (isMemberAccess) {
+                LOG.info("[PascalDoc] Member access '" + name + "' could not be resolved, not falling back to global lookup");
+                return contextElement; // Will show as unresolved member
+            }
+
+            // 3. Fallback to in-scope index lookup (only for non-member access)
+            nl.akiar.pascal.stubs.PascalTypeIndex.TypeLookupResult typeResult =
+                    nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(name, contextElement.getContainingFile(), contextElement.getTextOffset());
+            if (!typeResult.getInScopeTypes().isEmpty()) {
+                return typeResult.getInScopeTypes().get(0);
             }
 
             PsiFile currentFile = contextElement.getContainingFile();
@@ -82,9 +113,19 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 return props.iterator().next();
             }
 
-            Collection<PascalRoutine> routines = PascalRoutineIndex.findRoutines(name, contextElement.getProject());
-            if (!routines.isEmpty()) {
-                return routines.iterator().next();
+            PascalRoutineIndex.RoutineLookupResult routineResult =
+                    PascalRoutineIndex.findRoutinesWithUsesValidation(name, contextElement.getContainingFile(), contextElement.getTextOffset());
+            if (!routineResult.getInScopeRoutines().isEmpty()) {
+                return routineResult.getInScopeRoutines().get(0);
+            }
+
+            // 4. Last resort: out-of-scope matches (but NOT for built-ins)
+            if (!typeResult.getOutOfScopeTypes().isEmpty()) {
+                return typeResult.getOutOfScopeTypes().get(0);
+            }
+
+            if (!routineResult.getOutOfScopeRoutines().isEmpty()) {
+                return routineResult.getOutOfScopeRoutines().get(0);
             }
         }
         return super.getCustomDocumentationElement(editor, file, contextElement, targetOffset);
@@ -94,6 +135,26 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     @Nullable
     public String generateDoc(PsiElement element, @Nullable PsiElement originalElement) {
         LOG.info("[PascalDoc] generateDoc called for element: " + element + " class: " + (element != null ? element.getClass().getName() : "null") + " (original: " + originalElement + ")");
+
+        // Check if element is an identifier token (built-in or unresolved member)
+        if (element != null && element.getNode() != null &&
+            element.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
+            String name = element.getText();
+            if (DelphiBuiltIns.isBuiltIn(name)) {
+                return generateBuiltInDoc(name);
+            }
+
+            // Check if this is an unresolved member access
+            PsiElement prevLeaf = com.intellij.psi.util.PsiTreeUtil.prevLeaf(element);
+            while (prevLeaf != null && (prevLeaf instanceof PsiWhiteSpace || prevLeaf instanceof com.intellij.psi.PsiComment)) {
+                prevLeaf = com.intellij.psi.util.PsiTreeUtil.prevLeaf(prevLeaf);
+            }
+            if (prevLeaf != null && prevLeaf.getNode() != null &&
+                prevLeaf.getNode().getElementType() == PascalTokenTypes.DOT) {
+                return generateUnresolvedMemberDoc(name, prevLeaf);
+            }
+        }
+
         if (element instanceof PascalTypeDefinition) {
             PascalTypeDefinition typeDef = (PascalTypeDefinition) element;
             LOG.info("[PascalDoc] Generating doc for type definition: " + typeDef.getName());
@@ -352,6 +413,183 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         sb.append("<br/>&nbsp;");
 
         return sb.toString();
+    }
+
+    private String generateBuiltInDoc(String name) {
+        StringBuilder sb = new StringBuilder();
+        EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
+        Color bgColor = scheme.getDefaultBackground();
+        Color fgColor = scheme.getDefaultForeground();
+        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
+        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
+
+        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
+          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
+
+        if (DelphiBuiltIns.isBuiltInFunction(name)) {
+            appendStyled(sb, name, PascalSyntaxHighlighter.ROUTINE_CALL, scheme, true);
+            sb.append("</div>");
+            sb.append("<br/>Kind: <b>Built-in Function</b>");
+            sb.append("<br/>Unit: <b>System</b> (implicit)");
+            sb.append("<hr/>");
+            sb.append(getBuiltInFunctionDescription(name));
+        } else if (DelphiBuiltIns.isBuiltInType(name)) {
+            appendStyled(sb, name, getBuiltInTypeColor(name), scheme, true);
+            sb.append("</div>");
+            sb.append("<br/>Kind: <b>Built-in Type</b>");
+            sb.append("<br/>Unit: <b>System</b> (implicit)");
+            sb.append("<hr/>");
+            sb.append(getBuiltInTypeDescription(name));
+        } else if (DelphiBuiltIns.isBuiltInConstant(name)) {
+            appendStyled(sb, name, PascalSyntaxHighlighter.VAR_CONSTANT, scheme, true);
+            sb.append("</div>");
+            sb.append("<br/>Kind: <b>Built-in Constant</b>");
+            sb.append("<br/>Unit: <b>System</b> (implicit)");
+        } else {
+            sb.append(escapeHtml(name));
+            sb.append("</div>");
+            sb.append("<br/>Kind: <b>Built-in</b>");
+            sb.append("<br/>Unit: <b>System</b> (implicit)");
+        }
+
+        sb.append("<br/>&nbsp;");
+        return sb.toString();
+    }
+
+    private TextAttributesKey getBuiltInTypeColor(String name) {
+        String lower = name.toLowerCase();
+        if (lower.startsWith("t") || lower.equals("tobject") || lower.contains("exception")) {
+            return PascalSyntaxHighlighter.TYPE_CLASS;
+        }
+        if (lower.startsWith("i") && name.length() > 1 && Character.isUpperCase(name.charAt(1))) {
+            return PascalSyntaxHighlighter.TYPE_INTERFACE;
+        }
+        return PascalSyntaxHighlighter.TYPE_SIMPLE;
+    }
+
+    private String getBuiltInFunctionDescription(String name) {
+        String lower = name.toLowerCase();
+        switch (lower) {
+            case "assigned":
+                return "Tests whether a pointer or procedural variable is <code>nil</code>.<br/>" +
+                       "Returns <code>True</code> if the pointer is not <code>nil</code>.";
+            case "length":
+                return "Returns the number of elements in an array or characters in a string.";
+            case "setlength":
+                return "Sets the length of a dynamic array or string.";
+            case "inc":
+                return "Increments a variable by 1 or a specified amount.";
+            case "dec":
+                return "Decrements a variable by 1 or a specified amount.";
+            case "ord":
+                return "Returns the ordinal value of an ordinal-type expression.";
+            case "chr":
+                return "Returns the character for a specified ordinal value.";
+            case "high":
+                return "Returns the highest value in the range of an ordinal type or array.";
+            case "low":
+                return "Returns the lowest value in the range of an ordinal type or array.";
+            case "sizeof":
+                return "Returns the size in bytes of a type or variable.";
+            case "copy":
+                return "Returns a substring or a copy of part of an array.";
+            case "pos":
+                return "Searches for a substring in a string and returns its position.";
+            case "inttostr":
+                return "Converts an integer to its string representation.";
+            case "strtoint":
+                return "Converts a string to an integer.";
+            case "format":
+                return "Formats a string with the specified arguments.";
+            case "freeandnil":
+                return "Frees an object and sets its reference to <code>nil</code>.";
+            default:
+                return "Built-in function from the System unit.";
+        }
+    }
+
+    private String generateUnresolvedMemberDoc(String memberName, PsiElement dotElement) {
+        StringBuilder sb = new StringBuilder();
+        EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
+        Color bgColor = scheme.getDefaultBackground();
+        Color fgColor = scheme.getDefaultForeground();
+        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
+        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
+
+        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
+          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
+        sb.append(escapeHtml(memberName));
+        sb.append("</div>");
+
+        // Try to find what the qualifier is
+        PsiElement qualifier = com.intellij.psi.util.PsiTreeUtil.prevLeaf(dotElement);
+        while (qualifier != null && (qualifier instanceof PsiWhiteSpace || qualifier instanceof com.intellij.psi.PsiComment)) {
+            qualifier = com.intellij.psi.util.PsiTreeUtil.prevLeaf(qualifier);
+        }
+
+        String qualifierTypeName = null;
+        if (qualifier != null) {
+            // Try to resolve qualifier to find its type
+            PsiReference[] refs = qualifier.getReferences();
+            for (PsiReference ref : refs) {
+                PsiElement resolved = ref.resolve();
+                if (resolved instanceof PascalVariableDefinition) {
+                    qualifierTypeName = ((PascalVariableDefinition) resolved).getTypeName();
+                    break;
+                } else if (resolved instanceof PascalProperty) {
+                    qualifierTypeName = ((PascalProperty) resolved).getTypeName();
+                    break;
+                } else if (resolved instanceof PascalTypeDefinition) {
+                    qualifierTypeName = ((PascalTypeDefinition) resolved).getName();
+                    break;
+                }
+            }
+        }
+
+        sb.append("<br/>Kind: <b>Member</b> (unresolved)");
+        if (qualifierTypeName != null) {
+            sb.append("<br/>Qualifier type: <code>").append(escapeHtml(qualifierTypeName)).append("</code>");
+            sb.append("<hr/>");
+            sb.append("Could not find member '<b>").append(escapeHtml(memberName)).append("</b>' ");
+            sb.append("in type '<b>").append(escapeHtml(qualifierTypeName)).append("</b>' or its ancestors.");
+            sb.append("<br/><br/>The type might not be indexed, or the member is defined in a base class that wasn't found.");
+        } else {
+            sb.append("<hr/>");
+            sb.append("Could not resolve the qualifier expression.");
+        }
+
+        sb.append("<br/>&nbsp;");
+        return sb.toString();
+    }
+
+    private String getBuiltInTypeDescription(String name) {
+        String lower = name.toLowerCase();
+        switch (lower) {
+            case "tobject":
+                return "The ultimate ancestor class. All classes inherit from TObject.";
+            case "exception":
+                return "Base class for all exception types.";
+            case "string":
+                return "A managed string type (UnicodeString by default).";
+            case "integer":
+                return "A signed 32-bit integer type.";
+            case "boolean":
+                return "A Boolean type with values <code>True</code> and <code>False</code>.";
+            case "tstrings":
+                return "Abstract base class for string list classes.";
+            case "tstringlist":
+                return "A list of strings with sorting and searching capabilities.";
+            case "tlist":
+                return "A list of pointers.";
+            case "tstream":
+                return "Abstract base class for streaming data.";
+            case "tcomponent":
+                return "Base class for all components.";
+            case "tpersistent":
+                return "Base class for objects that have published properties.";
+            default:
+                return "Built-in type from the System unit.";
+        }
     }
 
     private void appendVariableHeader(StringBuilder sb, PascalVariableDefinition varDef, EditorColorsScheme scheme) {

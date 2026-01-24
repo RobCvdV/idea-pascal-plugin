@@ -54,4 +54,7 @@ public interface PascalTypeDefinition extends PsiNameIdentifierOwner, StubBasedP
 
     @NotNull
     List<PsiElement> getMembers(boolean includeAncestors);
+
+    @NotNull
+    String getUnitName();
 }

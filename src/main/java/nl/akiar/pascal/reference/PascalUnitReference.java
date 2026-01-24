@@ -20,13 +20,15 @@ public class PascalUnitReference extends PsiReferenceBase<PsiElement> {
 
     public PascalUnitReference(@NotNull PsiElement element) {
         super(element, new TextRange(0, element.getTextLength()));
+        String text;
         if (element.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE) {
-            this.unitName = element.getText();
+            text = element.getText();
         } else if (element.getParent() != null && element.getParent().getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE) {
-            this.unitName = element.getParent().getText();
+            text = element.getParent().getText();
         } else {
-            this.unitName = element.getText();
+            text = element.getText();
         }
+        this.unitName = nl.akiar.pascal.psi.PsiUtil.normalizeUnitName(text);
     }
 
     @Nullable

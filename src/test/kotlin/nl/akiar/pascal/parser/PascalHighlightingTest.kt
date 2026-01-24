@@ -86,4 +86,58 @@ class PascalRegressionTest : BasePlatformTestCase() {
         // In some environments forcedTextAttributesKey is null even if highlight is applied
         // We verified via logs that it is applied.
     }
+
+    @Test
+    fun testUnitNameHighlighting() {
+        val text = """
+            unit Next.Settings.Interfaces;
+            interface
+            uses Next.Core.Id, Next.Core.Enum;
+            implementation
+            end.
+        """.trimIndent()
+        myFixture.configureByText("Next.Settings.Interfaces.pas", text)
+        val highlighter = myFixture.doHighlighting()
+
+        val interfacesOffset = text.indexOf("Interfaces")
+        val interfacesHighlight = highlighter.find { it.startOffset == interfacesOffset }
+        
+        // Should NOT be highlighted as TYPE_INTERFACE (which would be purple/pink)
+        // It should be highlighted as UNIT_REFERENCE (which is IDENTIFIER by default)
+        if (interfacesHighlight != null) {
+            val key = interfacesHighlight.forcedTextAttributesKey
+            if (key != null) {
+                assertNotSame("Interfaces in unit declaration should not be highlighted as an interface type", 
+                    nl.akiar.pascal.PascalSyntaxHighlighter.TYPE_INTERFACE, key)
+            }
+        }
+
+        val idOffset = text.indexOf("Id")
+        val idHighlight = highlighter.find { it.startOffset == idOffset }
+        if (idHighlight != null) {
+            val key = idHighlight.forcedTextAttributesKey
+            if (key != null) {
+                assertNotSame("Id in uses clause should not be highlighted as an interface type", 
+                    nl.akiar.pascal.PascalSyntaxHighlighter.TYPE_INTERFACE, key)
+            }
+        }
+    }
+
+    @Test
+    fun testQualifiedTypeHighlighting() {
+        val text = """
+            unit test;
+            interface
+            var
+              x: System.Integer;
+            implementation
+            end.
+        """.trimIndent()
+        myFixture.configureByText("test.pas", text)
+        val highlighter = myFixture.doHighlighting()
+
+        val integerOffset = text.indexOf("Integer")
+        val integerHighlight = highlighter.find { it.startOffset == integerOffset && it.forcedTextAttributesKey == nl.akiar.pascal.PascalSyntaxHighlighter.TYPE_SIMPLE }
+        assertNotNull("Integer in System.Integer should still be highlighted as a simple type", integerHighlight)
+    }
 }

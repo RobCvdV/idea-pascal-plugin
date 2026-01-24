@@ -89,6 +89,13 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
                 // Look up the type definition
                 typeDef = findTypeDefinition(typeName, resolvedQualifier);
             }
+        } else if (resolvedQualifier instanceof PascalProperty) {
+            // Property access - get the property's type
+            String typeName = ((PascalProperty) resolvedQualifier).getTypeName();
+            System.out.println("[DEBUG_LOG] [PascalNav] Property type: " + typeName);
+            if (typeName != null) {
+                typeDef = findTypeDefinition(typeName, resolvedQualifier);
+            }
         } else if (resolvedQualifier instanceof PascalTypeDefinition) {
             // Static member access or class reference
             typeDef = (PascalTypeDefinition) resolvedQualifier;

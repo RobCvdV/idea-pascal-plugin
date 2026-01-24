@@ -99,73 +99,75 @@ public final class PascalDependencyService implements Disposable {
 
     private synchronized void scanDependencies() {
         if (project.isDisposed()) return;
-        LOG.info("[PascalDependency] Starting dependency scan");
+        com.intellij.openapi.project.DumbService.getInstance(project).runReadActionInSmartMode(() -> {
+            if (project.isDisposed()) return;
+            LOG.info("[PascalDependency] Starting dependency scan");
 
-        Set<VirtualFile> toProcess = new HashSet<>();
-        
-        // 1. Add all project files
-        VirtualFile projectDir = ProjectUtil.guessProjectDir(project);
-        if (projectDir != null) {
-            collectProjectFiles(projectDir, toProcess);
-        }
-
-        // 2. Add files from DprProjectService
-        DprProjectService dprService = DprProjectService.getInstance(project);
-        for (String filePath : dprService.getReferencedFiles()) {
-            VirtualFile file = LocalFileSystem.getInstance().findFileByPath(filePath);
-            if (file != null) toProcess.add(file);
-        }
-
-        // 3. Add files from PascalProjectService (.dproj)
-        PascalProjectService pascalProjectService = PascalProjectService.getInstance(project);
-        // PascalProjectService doesn't expose all files directly, but we can get them from discovered directories
-        // actually PascalProjectService should be updated to expose referenced files, but for now we'll 
-        // focus on transitively crawling from what we have.
-
-        // 4. Also add currently open files
-        com.intellij.openapi.fileEditor.FileEditorManager fem = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project);
-        for (VirtualFile openFile : fem.getOpenFiles()) {
-            if ("pas".equalsIgnoreCase(openFile.getExtension())) {
-                toProcess.add(openFile);
+            Set<VirtualFile> toProcess = new HashSet<>();
+            
+            // 1. Add all project files
+            VirtualFile projectDir = ProjectUtil.guessProjectDir(project);
+            if (projectDir != null) {
+                collectProjectFiles(projectDir, toProcess);
             }
-        }
 
-        // Add everything we've collected so far to active set
-        boolean changed = activeFiles.addAll(toProcess);
+            // 2. Add files from DprProjectService
+            DprProjectService dprService = DprProjectService.getInstance(project);
+            for (String filePath : dprService.getReferencedFiles()) {
+                VirtualFile file = LocalFileSystem.getInstance().findFileByPath(filePath);
+                if (file != null) toProcess.add(file);
+            }
 
-        // 5. Transitive crawl
-        Queue<VirtualFile> queue = new LinkedList<>(toProcess);
-        Set<VirtualFile> newActive = new HashSet<>();
+            // 3. Add files from PascalProjectService (.dproj)
+            // PascalProjectService doesn't expose all files directly, but we can get them from discovered directories
+            // actually PascalProjectService should be updated to expose referenced files, but for now we'll 
+            // focus on transitively crawling from what we have.
 
-        while (!queue.isEmpty()) {
-            ProgressManager.checkCanceled();
-            VirtualFile file = queue.poll();
-            if (processedFiles.contains(file)) continue;
-            processedFiles.add(file);
-
-            List<String> usedUnits = extractUsedUnits(file);
-            for (String unitName : usedUnits) {
-                VirtualFile resolved = PascalProjectService.getInstance(project).resolveUnit(unitName, true);
-                if (resolved != null && !activeFiles.contains(resolved)) {
-                    newActive.add(resolved);
-                    queue.add(resolved);
-                    changed = true;
+            // 4. Also add currently open files
+            com.intellij.openapi.fileEditor.FileEditorManager fem = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project);
+            for (VirtualFile openFile : fem.getOpenFiles()) {
+                if ("pas".equalsIgnoreCase(openFile.getExtension())) {
+                    toProcess.add(openFile);
                 }
             }
-        }
 
-        if (changed) {
-            activeFiles.addAll(newActive);
-            LOG.info("[PascalDependency] Scan complete. Total active files: " + activeFiles.size());
-            // Trigger re-index of newly active files
-            if (!newActive.isEmpty()) {
-                com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
-                    if (!project.isDisposed()) {
-                        com.intellij.util.FileContentUtilCore.reparseFiles(newActive);
+            // Add everything we've collected so far to active set
+            boolean changed = activeFiles.addAll(toProcess);
+
+            // 5. Transitive crawl
+            Queue<VirtualFile> queue = new LinkedList<>(toProcess);
+            Set<VirtualFile> newActive = new HashSet<>();
+
+            while (!queue.isEmpty()) {
+                ProgressManager.checkCanceled();
+                VirtualFile file = queue.poll();
+                if (processedFiles.contains(file)) continue;
+                processedFiles.add(file);
+
+                List<String> usedUnits = extractUsedUnits(file);
+                for (String unitName : usedUnits) {
+                    VirtualFile resolved = PascalProjectService.getInstance(project).resolveUnit(unitName, true);
+                    if (resolved != null && !activeFiles.contains(resolved)) {
+                        newActive.add(resolved);
+                        queue.add(resolved);
+                        changed = true;
                     }
-                }, com.intellij.openapi.application.ModalityState.nonModal());
+                }
             }
-        }
+
+            if (changed) {
+                activeFiles.addAll(newActive);
+                LOG.info("[PascalDependency] Scan complete. Total active files: " + activeFiles.size());
+                // Trigger re-index of newly active files
+                if (!newActive.isEmpty()) {
+                    com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
+                        if (!project.isDisposed()) {
+                            com.intellij.util.FileContentUtilCore.reparseFiles(newActive);
+                        }
+                    }, com.intellij.openapi.application.ModalityState.nonModal());
+                }
+            }
+        });
     }
 
     private void collectProjectFiles(VirtualFile dir, Set<VirtualFile> result) {

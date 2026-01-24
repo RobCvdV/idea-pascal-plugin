@@ -16,7 +16,6 @@ import nl.akiar.pascal.PascalTokenType;
 import nl.akiar.pascal.PascalTokenTypes;
 import nl.akiar.pascal.psi.*;
 import nl.akiar.pascal.resolution.DelphiBuiltIns;
-import nl.akiar.pascal.stubs.PascalTypeIndex;
 import nl.akiar.pascal.stubs.PascalVariableIndex;
 import nl.akiar.pascal.stubs.PascalPropertyIndex;
 import nl.akiar.pascal.stubs.PascalRoutineIndex;
@@ -174,16 +173,16 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             StringBuilder sb = new StringBuilder();
 
             EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-            Color bgColor = scheme.getDefaultBackground();
-            Color fgColor = scheme.getDefaultForeground();
-            String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
-            String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
+//            Color bgColor = scheme.getDefaultBackground();
+//            Color fgColor = scheme.getDefaultForeground();
+//            String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
+//            String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
 
             // Type signature (header)
-            sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
-              .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
-            appendHighlightedHeader(sb, typeDef, scheme);
-            sb.append("</div>");
+//            sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
+//              .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
+            appendHighlightedTypeDefinition(sb, typeDef, scheme);
+//            sb.append("</div>");
 
             // Generic parameters (only if present)
             List<String> typeParams = typeDef.getTypeParameters();
@@ -245,13 +244,13 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     private String generatePropertyDoc(PascalProperty prop) {
         StringBuilder sb = new StringBuilder();
         EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-        Color bgColor = scheme.getDefaultBackground();
-        Color fgColor = scheme.getDefaultForeground();
-        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
-        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
-
-        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
-          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
+//        Color bgColor = scheme.getDefaultBackground();
+//        Color fgColor = scheme.getDefaultForeground();
+//        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
+//        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
+//
+//        sb.append("<div style=' ").append(bgHex).append("; color: ").append(fgHex)
+//          .append("; padding: 5px; border-rbackground-color:adius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
         
         appendStyled(sb, "property ", PascalSyntaxHighlighter.KEYWORD, scheme, true);
         appendStyled(sb, prop.getName(), PascalSyntaxHighlighter.VAR_FIELD, scheme, true);
@@ -276,7 +275,7 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             sb.append(escapeHtml(write));
         }
         
-        sb.append(";</div>");
+//        sb.append(";</div>");
 
         String visibility = prop.getVisibility();
         if (visibility != null && !visibility.isEmpty()) {
@@ -303,17 +302,18 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
         Color bgColor = scheme.getDefaultBackground();
         Color fgColor = scheme.getDefaultForeground();
-        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
-        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
+//        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
+//        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
 
-        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
-          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
+//        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
+//          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
         
         // Better signature extraction
-        String text = routine.getText();
-        String signature = text.split("begin|var|const|type|\\{|\\/\\/|\\(\\*", 2)[0].trim();
-        sb.append(escapeHtml(signature));
-        sb.append("</div>");
+        appendHighlightedRoutineDefinition(sb, routine, scheme);
+//        String text = routine.getText();
+//        String signature = text.split("begin|var|const|type|\\{|\\/\\/|\\(\\*", 2)[0].trim();
+//        sb.append(escapeHtml(signature));
+//        sb.append("</div>");
 
         String visibility = routine.getVisibility();
         if (visibility != null && !visibility.isEmpty()) {
@@ -348,16 +348,16 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         StringBuilder sb = new StringBuilder();
 
         EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-        Color bgColor = scheme.getDefaultBackground();
-        Color fgColor = scheme.getDefaultForeground();
-        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
-        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
-
-        // Variable signature (header)
-        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
-          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
+//        Color bgColor = scheme.getDefaultBackground();
+//        Color fgColor = scheme.getDefaultForeground();
+//        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
+//        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
+//
+//        // Variable signature (header)
+//        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
+//          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
         appendVariableHeader(sb, varDef, scheme);
-        sb.append("</div>");
+//        sb.append("</div>");
 
         // Variable kind and visibility
         VariableKind kind = varDef.getVariableKind();
@@ -431,36 +431,36 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     private String generateBuiltInDoc(String name) {
         StringBuilder sb = new StringBuilder();
         EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-        Color bgColor = scheme.getDefaultBackground();
-        Color fgColor = scheme.getDefaultForeground();
-        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
-        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
-
-        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
-          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
+//        Color bgColor = scheme.getDefaultBackground();
+//        Color fgColor = scheme.getDefaultForeground();
+//        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
+//        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
+//
+//        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
+//          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
 
         if (DelphiBuiltIns.isBuiltInFunction(name)) {
             appendStyled(sb, name, PascalSyntaxHighlighter.ROUTINE_CALL, scheme, true);
-            sb.append("</div>");
+//            sb.append("</div>");
             sb.append("<br/>Kind: <b>Built-in Function</b>");
             sb.append("<br/>Unit: <b>System</b> (implicit)");
             sb.append("<hr/>");
             sb.append(getBuiltInFunctionDescription(name));
         } else if (DelphiBuiltIns.isBuiltInType(name)) {
             appendStyled(sb, name, getBuiltInTypeColor(name), scheme, true);
-            sb.append("</div>");
+//            sb.append("</div>");
             sb.append("<br/>Kind: <b>Built-in Type</b>");
             sb.append("<br/>Unit: <b>System</b> (implicit)");
             sb.append("<hr/>");
             sb.append(getBuiltInTypeDescription(name));
         } else if (DelphiBuiltIns.isBuiltInConstant(name)) {
             appendStyled(sb, name, PascalSyntaxHighlighter.VAR_CONSTANT, scheme, true);
-            sb.append("</div>");
+//            sb.append("</div>");
             sb.append("<br/>Kind: <b>Built-in Constant</b>");
             sb.append("<br/>Unit: <b>System</b> (implicit)");
         } else {
             sb.append(escapeHtml(name));
-            sb.append("</div>");
+//            sb.append("</div>");
             sb.append("<br/>Kind: <b>Built-in</b>");
             sb.append("<br/>Unit: <b>System</b> (implicit)");
         }
@@ -524,15 +524,15 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     private String generateUnresolvedMemberDoc(String memberName, PsiElement dotElement) {
         StringBuilder sb = new StringBuilder();
         EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-        Color bgColor = scheme.getDefaultBackground();
-        Color fgColor = scheme.getDefaultForeground();
-        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
-        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
-
-        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
-          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
+//        Color bgColor = scheme.getDefaultBackground();
+//        Color fgColor = scheme.getDefaultForeground();
+//        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
+//        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
+//
+//        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
+//          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
         sb.append(escapeHtml(memberName));
-        sb.append("</div>");
+//        sb.append("</div>");
 
         // Try to find what the qualifier is
         PsiElement qualifier = com.intellij.psi.util.PsiTreeUtil.prevLeaf(dotElement);
@@ -667,7 +667,7 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         }
     }
 
-    private void appendHighlightedHeader(StringBuilder sb, PascalTypeDefinition typeDef, EditorColorsScheme scheme) {
+    private void appendHighlightedTypeDefinition(StringBuilder sb, PascalTypeDefinition typeDef, EditorColorsScheme scheme) {
         // Re-implementing logic to iterate tokens for better highlighting:
         ASTNode node = typeDef.getNode();
         ASTNode child = node.getFirstChildNode();
@@ -706,6 +706,37 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                     TextAttributesKey colorKey = getIdentifierColor(text, typeDef);
                     appendStyled(sb, text, colorKey, scheme, false);
                 }
+            } else if (type == PascalTokenTypes.STRING_LITERAL) {
+                appendStyled(sb, text, PascalSyntaxHighlighter.STRING, scheme, false);
+            } else {
+                sb.append(escapeHtml(text));
+            }
+
+            child = child.getTreeNext();
+        }
+    }
+
+    private void appendHighlightedRoutineDefinition(StringBuilder sb, PascalRoutine routine, EditorColorsScheme scheme) {
+        // Similar logic can be implemented here for routines if needed
+        ASTNode node = routine.getNode();
+        ASTNode child = node.getFirstChildNode();
+        while (child != null) {
+            IElementType type = child.getElementType();
+            String text = child.getText();
+
+            if (type == PascalTokenTypes.SEMI) {
+                sb.append(";");
+                break;
+            }
+
+            if (isKeyword(type)) {
+                appendStyled(sb, text, PascalSyntaxHighlighter.KEYWORD, scheme, true);
+            } else if (type == PascalTokenTypes.IDENTIFIER && text.equals(routine.getName())) {
+                appendStyled(sb, text, PascalSyntaxHighlighter.ROUTINE_DECLARATION, scheme, true);
+            } else if (type == PascalElementTypes.FORMAL_PARAMETER) {
+                appendStyled(sb, text, PascalSyntaxHighlighter.VAR_PARAMETER, scheme, false);
+            } else if (type == PascalElementTypes.TYPE_DEFINITION) {
+                appendStyled(sb, text, PascalSyntaxHighlighter.TYPE_PARAMETER, scheme, false);
             } else if (type == PascalTokenTypes.STRING_LITERAL) {
                 appendStyled(sb, text, PascalSyntaxHighlighter.STRING, scheme, false);
             } else {

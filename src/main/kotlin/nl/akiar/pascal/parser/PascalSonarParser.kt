@@ -143,6 +143,9 @@ class PascalSonarParser : PsiParser {
             }
         }
 
+        // Minimal guarded PSI fallback: if sonar-delphi produced no unit/uses/refs, synthesize from text
+        runFallbackIfNoUnitElements(builder, text)
+
         // ALWAYS consume all tokens to prevent "Missed tokens" errors in IntelliJ
         advanceToEnd(builder)
 
@@ -156,6 +159,56 @@ class PascalSonarParser : PsiParser {
         diag("parse done, tree built")
         CURRENT_SHOULD_DIAG.set(false)
         return builder.getTreeBuilt()
+    }
+
+    private fun runFallbackIfNoUnitElements(builder: PsiBuilder, text: String) {
+        val stats = STATS_TL.get()
+        if (stats.unitDeclCount > 0 || stats.usesSectionCount > 0 || stats.unitRefCount > 0) return
+
+        // Detect unit header and interface/uses locations
+        val unitHeaderRegex = Regex("""(?is)\bunit\s+([A-Za-z_][\w.]*)\s*;""")
+        val interfaceRegex = Regex("""(?is)\binterface\b""")
+        val usesRegex = Regex("""(?is)\buses\b""")
+
+        val unitMatch = unitHeaderRegex.find(text) ?: run {
+            return
+        }
+        val unitStart = unitMatch.range.first
+        val unitEnd = unitMatch.range.last + 1
+
+        // Synthesize UNIT_DECL_SECTION for header span
+        synthesize(builder, unitStart, unitEnd, nl.akiar.pascal.psi.PascalElementTypes.UNIT_DECL_SECTION)
+
+        // Try to find uses section in interface part
+        val interfaceMatch = interfaceRegex.find(text)
+        val usesMatch = usesRegex.find(text, startIndex = interfaceMatch?.range?.first ?: 0)
+        if (usesMatch != null) {
+            // Heuristic: capture until the next ';' after 'uses'
+            val usesStart = usesMatch.range.first
+            var usesEnd = usesStart
+            while (usesEnd < text.length && text[usesEnd] != ';') usesEnd++
+            if (usesEnd < text.length) usesEnd++ // include semicolon
+            synthesize(builder, usesStart, usesEnd, nl.akiar.pascal.psi.PascalElementTypes.USES_SECTION)
+        }
+
+        diag("[fallback] synthesized UNIT/USES from text for file with zero sonar elements")
+    }
+
+    private fun synthesize(builder: PsiBuilder, startOffset: Int, endOffset: Int, type: IElementType) {
+        // Advance to start, mark, advance to end, then done
+        while (!builder.eof() && builder.currentOffset < startOffset) {
+            builder.advanceLexer()
+        }
+        val marker = builder.mark()
+        while (!builder.eof() && builder.currentOffset < endOffset) {
+            builder.advanceLexer()
+        }
+        marker.done(type)
+        val stats = STATS_TL.get()
+        when (type) {
+            nl.akiar.pascal.psi.PascalElementTypes.UNIT_DECL_SECTION -> stats.unitDeclCount++
+            nl.akiar.pascal.psi.PascalElementTypes.USES_SECTION -> stats.usesSectionCount++
+        }
     }
 
     private fun handleException(e: Exception, message: String, isParsingError: Boolean = false) {

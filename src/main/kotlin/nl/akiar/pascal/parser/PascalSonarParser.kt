@@ -23,7 +23,9 @@ class PascalSonarParser : PsiParser {
         private val compilerVersion = CompilerVersion.fromVersionNumber("35.0") // Delphi 11
         private val platform = Platform.WINDOWS
         private val toolchain = Toolchain.DCC32
-        private val definitions = emptySet<String>()
+        // Default definitions for Windows x86 - required for RTL units like System.Classes
+        // which have conditional procedure bodies that become empty without platform definitions
+        private val definitions = setOf("MSWINDOWS", "WIN32", "CPUX86")
 
         private data class ParserComponents(
             val preprocessorFactory: DelphiPreprocessorFactory,

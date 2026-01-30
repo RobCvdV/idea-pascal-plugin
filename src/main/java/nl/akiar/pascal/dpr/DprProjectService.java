@@ -60,6 +60,10 @@ public final class DprProjectService implements Disposable {
      */
     public void rescan() {
         if (project.isDisposed()) return;
+        if (!com.intellij.diagnostic.LoadingState.COMPONENTS_LOADED.isOccurred()) {
+            LOG.info("[DprProjectService] Skipping rescan - platform not fully loaded yet");
+            return;
+        }
         LOG.info("[DprProjectService] Starting .dpr rescan");
         com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
             synchronized (this) {

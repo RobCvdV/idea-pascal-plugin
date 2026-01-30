@@ -8,6 +8,7 @@ import nl.akiar.pascal.psi.PascalProperty;
 import nl.akiar.pascal.psi.PascalRoutine;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
 import nl.akiar.pascal.psi.PascalVariableDefinition;
+import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -29,6 +30,22 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
     @Nullable
     @Override
     public PsiElement resolve() {
+        LOG.info("[MemberTraversal] PascalMemberReference.resolve element='" + myElement.getText() + "' file='" + myElement.getContainingFile().getName() + "'");
+        // Use unified chain resolver so this reference benefits from full member-chain context
+        PsiElement resolved = nl.akiar.pascal.resolution.MemberChainResolver.resolveElement(myElement);
+        LOG.info("[MemberTraversal] PascalMemberReference.chain resolved -> " + (resolved != null ? resolved.getClass().getSimpleName() : "<unresolved>"));
+        if (resolved != null) {
+            // Enforce accessibility rules for routines/properties/fields
+            if (resolved instanceof nl.akiar.pascal.psi.PascalRoutine ||
+                resolved instanceof nl.akiar.pascal.psi.PascalProperty ||
+                resolved instanceof nl.akiar.pascal.psi.PascalVariableDefinition) {
+                if (!isAccessible(resolved)) {
+                    return null;
+                }
+            }
+            return resolved;
+        }
+        // Fallback to previous logic if chain resolver couldn't resolve; keep minimal guard
         // 1. Identify the qualifier
         PsiElement prev = com.intellij.psi.util.PsiTreeUtil.prevLeaf(myElement);
         while (prev != null && (prev instanceof PsiWhiteSpace || prev instanceof com.intellij.psi.PsiComment)) {
@@ -46,38 +63,30 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
 
         if (qualifier == null) return null;
 
-        System.out.println("[DEBUG_LOG] [PascalNav] Qualifier for member access: '" + qualifier.getText() + "'");
-
         // 2. Resolve the qualifier to find its type
         PsiElement resolvedQualifier = null;
         PsiReference[] refs = qualifier.getReferences();
-        System.out.println("[DEBUG_LOG] [PascalNav] Qualifier '" + qualifier.getText() + "' has " + refs.length + " references");
         for (PsiReference ref : refs) {
             resolvedQualifier = ref.resolve();
             if (resolvedQualifier != null) {
-                System.out.println("[DEBUG_LOG] [PascalNav] Qualifier resolved via reference to: " + resolvedQualifier);
                 break;
             }
         }
 
         if (resolvedQualifier == null) {
-            System.out.println("[DEBUG_LOG] [PascalNav] Attempting manual resolution for qualifier: " + qualifier.getText());
             String qualifierName = qualifier.getText();
             resolvedQualifier = nl.akiar.pascal.stubs.PascalVariableIndex.findVariableAtPosition(qualifierName, qualifier.getContainingFile(), qualifier.getTextOffset());
-            if (resolvedQualifier != null) {
-                System.out.println("[DEBUG_LOG] [PascalNav] Qualifier resolved manually to variable: " + resolvedQualifier);
-            } else {
+            if (resolvedQualifier == null) {
                 nl.akiar.pascal.stubs.PascalTypeIndex.TypeLookupResult typeResult =
                         nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(qualifierName, qualifier.getContainingFile(), qualifier.getTextOffset());
                 if (!typeResult.getInScopeTypes().isEmpty()) {
                     resolvedQualifier = typeResult.getInScopeTypes().get(0);
-                    System.out.println("[DEBUG_LOG] [PascalNav] Qualifier resolved manually to type: " + resolvedQualifier);
                 }
             }
         }
 
         if (resolvedQualifier == null) {
-            LOG.info("[PascalNav] Could not resolve qualifier: " + qualifier.getText());
+            LOG.info("[MemberTraversal] qualifier unresolved for '" + myElement.getText() + "'");
             return null;
         }
 
@@ -92,7 +101,6 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
         } else if (resolvedQualifier instanceof PascalProperty) {
             // Property access - get the property's type
             String typeName = ((PascalProperty) resolvedQualifier).getTypeName();
-            System.out.println("[DEBUG_LOG] [PascalNav] Property type: " + typeName);
             if (typeName != null) {
                 typeDef = findTypeDefinition(typeName, resolvedQualifier);
             }
@@ -102,14 +110,12 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
         }
 
         if (typeDef == null) {
-            LOG.info("[PascalNav] Could not determine type for qualifier: " + resolvedQualifier.getText());
+            LOG.info("[MemberTraversal] qualifier type unresolved for '" + myElement.getText() + "'");
             return null;
         }
-
-        LOG.info("[PascalNav] Searching in type: " + typeDef.getName());
-
-        // 4. Search for the member in the type and its ancestors
-        return findMemberInType(typeDef, memberName, true);
+        PsiElement member = findMemberInType(typeDef, memberName, true);
+        LOG.info("[MemberTraversal] fallback member search result -> " + (member != null ? member.getClass().getSimpleName() : "<unresolved>"));
+        return member;
     }
 
     @Nullable

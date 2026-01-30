@@ -159,12 +159,17 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
                 continue;
             }
 
-            // Check if unit is transitively available
-            String lowerUnit = targetUnit.toLowerCase();
-            if (availableUnits.contains(lowerUnit)) {
+            String lowerUnit = targetUnit != null ? targetUnit.toLowerCase() : "";
+
+            // Implicit System availability: System and System.* are considered available
+            boolean implicitSystem = lowerUnit.equals("system") || lowerUnit.startsWith("system.");
+
+            if (implicitSystem || availableUnits.contains(lowerUnit)) {
                 inScope.add(typeDef);
+                if (!implicitSystem) {
+                    // no via-scope mark for implicit System
+                }
             } else {
-                // Also check via scope names (e.g., "SysUtils" for "System.SysUtils")
                 boolean foundViaScope = false;
                 for (String scope : scopes) {
                     String scopedName = (scope + "." + targetUnit).toLowerCase();
@@ -174,7 +179,6 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
                         foundViaScope = true;
                         break;
                     }
-                    // Also check reverse: if targetUnit is "System.SysUtils" and "SysUtils" is available
                     String lowerScope = scope.toLowerCase();
                     if (lowerUnit.startsWith(lowerScope + ".")) {
                         String shortName = lowerUnit.substring(lowerScope.length() + 1);

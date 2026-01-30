@@ -217,10 +217,10 @@ object DelphiBuiltIns {
      */
     private val BUILT_IN_TYPES = setOf(
         // Object Pascal base types
-        "tobject",
-        "tclass",
-        "tinterfacedobject",
-        "tinterfacedpersistent",
+//        "tobject",
+//        "tclass",
+//        "tinterfacedobject",
+//        "tinterfacedpersistent",
 
         // Exception types
         "exception",
@@ -345,18 +345,18 @@ object DelphiBuiltIns {
         "file",
 
         // Common classes (from System.Classes/SysUtils)
-        "tlist",
-        "tobjectlist",
-        "tstrings",
-        "tstringlist",
-        "tstream",
-        "tfilestream",
-        "tmemorystream",
-        "tcomponent",
-        "tpersistent",
-        "tcollection",
-        "tcollectionitem",
-        "tthread"
+//        "tlist",
+//        "tobjectlist",
+//        "tstrings",
+//        "tstringlist",
+//        "tstream",
+//        "tfilestream",
+//        "tmemorystream",
+//        "tcomponent",
+//        "tpersistent",
+//        "tcollection",
+//        "tcollectionitem",
+//        "tthread"
     )
 
     /**

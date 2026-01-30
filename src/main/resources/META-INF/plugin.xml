@@ -134,6 +134,8 @@
             instance="nl.akiar.pascal.settings.PascalSourcePathsConfigurable"/>
 
         <postStartupActivity implementation="nl.akiar.pascal.project.PascalProjectInitializationActivity"/>
+        <!-- Clear caches after indices are ready and on roots change -->
+        <postStartupActivity implementation="nl.akiar.pascal.startup.PascalSmartModeRefresher"/>
     </extensions>
 
     <projectListeners>

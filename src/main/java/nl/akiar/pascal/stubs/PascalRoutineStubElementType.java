@@ -24,7 +24,38 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
     @NotNull
     @Override
     public PascalRoutineStub createStub(@NotNull PascalRoutine psi, StubElement parentStub) {
-        return new PascalRoutineStubImpl(parentStub, psi.getName(), psi.isImplementation());
+        String ownerName = null;
+        // Try parent type definition first
+        PsiElement parent = psi.getParent();
+        while (parent != null) {
+            if (parent instanceof nl.akiar.pascal.psi.PascalTypeDefinition) {
+                String n = ((nl.akiar.pascal.psi.PascalTypeDefinition) parent).getName();
+                if (n != null && !n.isEmpty()) ownerName = n;
+                break;
+            }
+            parent = parent.getParent();
+        }
+        // Scan qualified name TClass.Method
+        if (ownerName == null) {
+            com.intellij.lang.ASTNode node = psi.getNode();
+            com.intellij.lang.ASTNode child = node.getFirstChildNode();
+            com.intellij.lang.ASTNode lastId = null;
+            while (child != null) {
+                if (child.getElementType() == nl.akiar.pascal.PascalTokenTypes.LPAREN ||
+                    child.getElementType() == nl.akiar.pascal.PascalTokenTypes.SEMI ||
+                    child.getElementType() == nl.akiar.pascal.PascalTokenTypes.COLON) {
+                    break;
+                }
+                if (child.getElementType() == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                    lastId = child;
+                } else if (child.getElementType() == nl.akiar.pascal.PascalTokenTypes.DOT && lastId != null) {
+                    ownerName = lastId.getText();
+                    break;
+                }
+                child = child.getTreeNext();
+            }
+        }
+        return new PascalRoutineStubImpl(parentStub, psi.getName(), psi.isImplementation(), ownerName);
     }
 
     @NotNull
@@ -37,6 +68,7 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
     public void serialize(@NotNull PascalRoutineStub stub, @NotNull StubOutputStream dataStream) throws IOException {
         dataStream.writeName(stub.getName());
         dataStream.writeBoolean(stub.isImplementation());
+        dataStream.writeName(stub.getContainingClassName());
     }
 
     @NotNull
@@ -44,7 +76,8 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
     public PascalRoutineStub deserialize(@NotNull StubInputStream dataStream, StubElement parentStub) throws IOException {
         String name = dataStream.readNameString();
         boolean isImplementation = dataStream.readBoolean();
-        return new PascalRoutineStubImpl(parentStub, name, isImplementation);
+        String ownerName = dataStream.readNameString();
+        return new PascalRoutineStubImpl(parentStub, name, isImplementation, ownerName);
     }
 
     @Override

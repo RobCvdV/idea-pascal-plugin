@@ -17,6 +17,8 @@ import nl.akiar.pascal.stubs.PascalTypeIndex;
 import nl.akiar.pascal.stubs.PascalVariableIndex;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.openapi.util.Key;
+import nl.akiar.pascal.resolution.MemberChainResolver;
 
 import java.util.Collection;
 import org.jetbrains.annotations.NotNull;
@@ -31,6 +33,7 @@ import java.util.List;
  */
 public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
     private static final Logger LOG = Logger.getInstance(PascalGotoDeclarationHandler.class);
+    private static final Key<Boolean> GOTO_MEMBER_RESOLVING = Key.create("pascal.goto.member.resolving");
 
     public PascalGotoDeclarationHandler() {
         System.out.println("[DEBUG_LOG] [PascalNav] PascalGotoDeclarationHandler instantiated");
@@ -39,6 +42,7 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
     @Override
     @Nullable
     public PsiElement[] getGotoDeclarationTargets(@Nullable PsiElement sourceElement, int offset, Editor editor) {
+        LOG.info("[MemberTraversal] Goto: source='" + (sourceElement != null ? sourceElement.getText() : "<null>") + "' file='" + (sourceElement != null ? sourceElement.getContainingFile().getName() : "<null>") + "' offset=" + offset);
         if (sourceElement == null) {
             return null;
         }
@@ -83,11 +87,22 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
             leaf = PsiTreeUtil.prevLeaf(leaf);
         }
         if (leaf != null && leaf.getNode().getElementType() == PascalTokenTypes.DOT) {
-            LOG.info("[PascalNav] Detected dot before identifier, attempting manual member resolution");
-            PascalMemberReference memberRef = new PascalMemberReference(sourceElement, new TextRange(0, sourceElement.getTextLength()));
-            PsiElement resolved = memberRef.resolve();
-            if (resolved != null) {
-                return new PsiElement[]{resolved};
+            LOG.info("[MemberTraversal] Goto: manual member resolution fallback");
+            // Prevent recursive re-entry
+            Boolean inProgress = sourceElement.getUserData(GOTO_MEMBER_RESOLVING);
+            if (Boolean.TRUE.equals(inProgress)) {
+                LOG.info("[MemberTraversal] Goto: reentrancy guard active, skipping");
+                return null;
+            }
+            sourceElement.putUserData(GOTO_MEMBER_RESOLVING, true);
+            try {
+                PsiElement resolved = MemberChainResolver.resolveElement(sourceElement);
+                LOG.info("[MemberTraversal] Goto: chain resolved -> " + (resolved != null ? resolved.getClass().getSimpleName() : "<unresolved>"));
+                if (resolved != null) {
+                    return new PsiElement[]{resolved};
+                }
+            } finally {
+                sourceElement.putUserData(GOTO_MEMBER_RESOLVING, null);
             }
         }
         

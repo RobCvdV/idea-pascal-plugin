@@ -94,6 +94,10 @@ public final class PascalProjectService implements Disposable {
 
     public void rescan() {
         if (project.isDisposed()) return;
+        if (!com.intellij.diagnostic.LoadingState.COMPONENTS_LOADED.isOccurred()) {
+            LOG.info("[PascalProject] Skipping rescan - platform not fully loaded yet");
+            return;
+        }
         LOG.info("[PascalProject] Starting project rescan");
         com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
             synchronized (this) {

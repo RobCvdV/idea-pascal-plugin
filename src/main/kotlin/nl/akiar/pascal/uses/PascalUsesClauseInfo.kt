@@ -1,12 +1,16 @@
 package nl.akiar.pascal.uses
 
 import com.intellij.lang.ASTNode
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.fileTypes.PlainTextLanguage
 import com.intellij.openapi.util.Key
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.psi.PsiFile
 import com.intellij.psi.tree.IElementType
 import com.intellij.psi.util.CachedValueProvider
 import com.intellij.psi.util.CachedValuesManager
 import nl.akiar.pascal.PascalTokenTypes
+import nl.akiar.pascal.parser.PascalSonarParser
 import nl.akiar.pascal.psi.PascalElementTypes
 import nl.akiar.pascal.psi.PsiUtil
 
@@ -188,6 +192,7 @@ data class PascalUsesClauseInfo(
 
     companion object {
         private val CACHE_KEY = Key.create<com.intellij.psi.util.CachedValue<PascalUsesClauseInfo>>("PASCAL_USES_CLAUSE_CACHE_V2")
+        private val LOG = Logger.getInstance(PascalUsesClauseInfo::class.java)
 
         /**
          * Parse uses clauses from a Pascal file (cached).
@@ -195,9 +200,74 @@ data class PascalUsesClauseInfo(
         @JvmStatic
         fun parse(file: PsiFile): PascalUsesClauseInfo {
             return CachedValuesManager.getManager(file.project).getCachedValue(file, CACHE_KEY, {
-                val result = parseImpl(file)
+                // Fast path: parse uses from file text without loading AST to keep stub-safe and performant
+                val fast = parseFromText(file)
+                val result = fast ?: parseImpl(file)
                 CachedValueProvider.Result.create(result, file)
             }, false)
+        }
+
+        /**
+         * Stub-safe text-based parser for uses clauses and section starts. Avoids AST loads.
+         */
+        private fun parseFromText(file: PsiFile): PascalUsesClauseInfo? {
+            val text = file.viewProvider.document?.text ?: return null
+            val lower = text.lowercase()
+            var interfaceStart = -1
+            var implementationStart = -1
+            val interfaceUses = mutableListOf<String>()
+            val implementationUses = mutableListOf<String>()
+
+            // Locate section starts (approximate)
+            interfaceStart = lower.indexOf("interface").takeIf { it >= 0 } ?: -1
+            implementationStart = lower.indexOf("implementation").takeIf { it >= 0 } ?: -1
+
+            // Find uses in interface
+            if (interfaceStart >= 0) {
+                val ifaceChunk = lower.substring(interfaceStart, if (implementationStart > interfaceStart) implementationStart else lower.length)
+                interfaceUses.addAll(extractUsesNames(ifaceChunk))
+            }
+            // Find uses in implementation
+            if (implementationStart >= 0) {
+                val implChunk = lower.substring(implementationStart)
+                implementationUses.addAll(extractUsesNames(implChunk))
+            }
+
+            if (interfaceStart < 0 && implementationStart < 0 && (interfaceUses.isNotEmpty() || implementationUses.isNotEmpty())) {
+                interfaceStart = 0
+            }
+
+            return PascalUsesClauseInfo(
+                interfaceUses = interfaceUses.map { nl.akiar.pascal.psi.PsiUtil.normalizeUnitName(it) },
+                implementationUses = implementationUses.map { nl.akiar.pascal.psi.PsiUtil.normalizeUnitName(it) },
+                interfaceSectionStart = interfaceStart,
+                implementationSectionStart = implementationStart
+            )
+        }
+
+        private fun extractUsesNames(chunk: String): List<String> {
+            val result = mutableListOf<String>()
+            var idx = 0
+            while (true) {
+                val usesIdx = chunk.indexOf("uses", idx)
+                if (usesIdx < 0) break
+                // From uses to next ';'
+                val semiIdx = chunk.indexOf(';', usesIdx)
+                val end = if (semiIdx > usesIdx) semiIdx else chunk.length
+                val usesBody = chunk.substring(usesIdx + 4, end)
+                // Split by commas, strip "in 'path'" parts
+                val parts = usesBody.split(',')
+                for (p in parts) {
+                    var unit = p.trim()
+                    val inIdx = unit.indexOf(" in ")
+                    if (inIdx >= 0) unit = unit.substring(0, inIdx).trim()
+                    // remove quotes and whitespace
+                    unit = unit.replace("\"", "").replace("'", "").trim()
+                    if (unit.isNotEmpty()) result.add(unit)
+                }
+                idx = end + 1
+            }
+            return result
         }
 
         private fun parseImpl(file: PsiFile): PascalUsesClauseInfo {
@@ -212,6 +282,9 @@ data class PascalUsesClauseInfo(
 
             val state = ParseState()
             findSectionsAndUses(fileNode, state, interfaceUses, implementationUses)
+            if (nl.akiar.pascal.log.UnitLogFilter.shouldLog(file)) {
+                LOG.info("[UsesClauses] Parsing uses clauses for file: ${file.name} all uses so far: ${interfaceUses + implementationUses}")
+            }
 
             // For program files (no interface/implementation), treat all uses as "interface" uses
             if (state.interfaceSectionStart < 0 && state.implementationSectionStart < 0 && interfaceUses.isNotEmpty()) {
@@ -245,6 +318,10 @@ data class PascalUsesClauseInfo(
             implementationUses: MutableList<String>
         ) {
             var child: ASTNode? = node.firstChildNode
+//            if (interfaceUses.size > 3) {
+//                LOG.info("[UsesClauses] Scanning node: ${node.elementType} at offset ${node.text}")
+//                LOG.info("[UsesClauses] uses so far: ${interfaceUses}, implementation=${implementationUses}")
+//            }
             while (child != null) {
                 val type: IElementType = child.elementType
 

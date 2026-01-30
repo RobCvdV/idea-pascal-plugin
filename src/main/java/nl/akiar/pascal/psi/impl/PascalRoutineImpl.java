@@ -190,7 +190,7 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
     @Override
     @Nullable
     public PascalTypeDefinition getContainingClass() {
-        // Case 1: Declaration inside a type definition
+        // Case 1: Declaration inside a type definition (stub-safe parent walk)
         PsiElement parent = getParent();
         while (parent != null) {
             if (parent instanceof PascalTypeDefinition) {
@@ -203,36 +203,14 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
             parent = parent.getParent();
         }
 
-        // Case 2: Implementation with qualified name (TClass.Method)
+        // Case 2: Implementation: consult counterpart declaration only (stub-safe)
         if (isImplementation()) {
             PascalRoutine declaration = getDeclaration();
             if (declaration != null) {
                 return declaration.getContainingClass();
             }
-
-            // Fallback: try to resolve the qualifier from the qualified name if possible
-            // In Delphi, implementations in the implementation section usually look like:
-            // procedure TMyClass.MyMethod;
-            ASTNode node = getNode();
-            ASTNode child = node.getFirstChildNode();
-            while (child != null) {
-                if (child.getElementType() == PascalTokenTypes.IDENTIFIER) {
-                    ASTNode next = child.getTreeNext();
-                    while (next != null && next.getElementType() == PascalTokenTypes.WHITE_SPACE) {
-                        next = next.getTreeNext();
-                    }
-                    if (next != null && next.getElementType() == PascalTokenTypes.DOT) {
-                        // This identifier is a class name qualifier
-                        String className = child.getText();
-                        nl.akiar.pascal.stubs.PascalTypeIndex.TypeLookupResult typeResult =
-                                nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(className, getContainingFile(), child.getStartOffset());
-                        if (!typeResult.getInScopeTypes().isEmpty()) {
-                            return typeResult.getInScopeTypes().get(0);
-                        }
-                    }
-                }
-                child = child.getTreeNext();
-            }
+            // Avoid AST-based fallback scanning to prevent stub/AST mismatch
+            return null;
         }
 
         return null;
@@ -303,5 +281,15 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
     @Override
     public String toString() {
         return "PascalRoutine(" + getName() + ")";
+    }
+
+    @Override
+    @org.jetbrains.annotations.Nullable
+    public String getContainingClassName() {
+        nl.akiar.pascal.stubs.PascalRoutineStub stub = getGreenStub();
+        if (stub != null) return stub.getContainingClassName();
+        // Fallback: if we have an interface declaration inside a type, use the type's name
+        nl.akiar.pascal.psi.PascalTypeDefinition td = getContainingClass();
+        return td != null ? td.getName() : null;
     }
 }

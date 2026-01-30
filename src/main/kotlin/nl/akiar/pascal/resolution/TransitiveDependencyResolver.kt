@@ -11,6 +11,7 @@ import com.intellij.psi.util.CachedValueProvider
 import com.intellij.psi.util.CachedValuesManager
 import com.intellij.psi.util.PsiModificationTracker
 import nl.akiar.pascal.project.PascalProjectService
+import nl.akiar.pascal.settings.PascalSourcePathsSettings
 import nl.akiar.pascal.uses.PascalUsesClauseInfo
 
 /**
@@ -100,30 +101,48 @@ object TransitiveDependencyResolver {
 
     private fun computeTransitiveDependencies(file: PsiFile, maxDepth: Int): TransitiveDependencyResult {
         val project = file.project
-        val usesInfo = PascalUsesClauseInfo.parse(file)
-        val directUnits = usesInfo.allUses
+        val usesInfo = nl.akiar.pascal.uses.PascalUsesClauseInfo.parse(file)
+        val directUnitsRaw = usesInfo.allUses // both interface and implementation
+        val scopes = nl.akiar.pascal.settings.PascalSourcePathsSettings.getInstance(project).unitScopeNames.map { it.lowercase() }
 
-        LOG.debug("[TransitiveDeps] Computing for file: ${file.name}")
-        LOG.debug("[TransitiveDeps] Direct uses: $directUnits")
+        // Seed with direct units and scope-expanded variants (e.g., Classes -> System.Classes)
+        val directUnits = mutableListOf<String>()
+        val seed = mutableSetOf<String>()
+        for (u in directUnitsRaw) {
+            val lu = u.lowercase()
+            directUnits.add(lu)
+            seed.add(lu)
+            if (!lu.contains('.')) {
+                for (scope in scopes) {
+                    seed.add("$scope.$lu")
+                }
+            }
+        }
+        // Always ensure implicit base scopes are present
+        seed.add("system")
+        seed.add("system.classes")
+        seed.add("classes")
 
         val visited = mutableSetOf<String>()
         val unitGraph = mutableMapOf<String, List<String>>()
 
-        // Track the file's own unit name separately to avoid self-reference during recursion
         val fileUnitName = extractUnitName(file)?.lowercase()
 
-        // Resolve all direct dependencies first
-        for (unitName in directUnits) {
+        for (unitName in seed) {
             resolveTransitive(unitName, visited, unitGraph, project, 0, maxDepth, fileUnitName)
         }
 
-        LOG.debug("[TransitiveDeps] Total transitive units: ${visited.size}")
-
-        return TransitiveDependencyResult(
+        val result = TransitiveDependencyResult(
             directUnits = directUnits,
             transitiveUnits = visited.toSet(),
             unitGraph = unitGraph.toMap()
         )
+        // Gate the diagnostic log with the unit log filter to avoid spam
+        if (nl.akiar.pascal.log.UnitLogFilter.shouldLog(file)) {
+            com.intellij.openapi.diagnostic.Logger.getInstance(TransitiveDependencyResolver::class.java)
+                .info("[MemberTraversal][Diag] Transitive available units for '${file.name}' count=${result.transitiveUnits.size} sample=${result.transitiveUnits.take(10)}")
+        }
+        return result
     }
 
     private fun resolveTransitive(
@@ -136,54 +155,30 @@ object TransitiveDependencyResolver {
         originUnitName: String? = null
     ) {
         val lowerUnit = unitName.lowercase()
+        if (originUnitName != null && lowerUnit == originUnitName) return
+        if (!visited.add(lowerUnit)) return
+        if (currentDepth >= maxDepth) return
 
-        // Skip if this is the origin file (avoid self-reference)
-        if (originUnitName != null && lowerUnit == originUnitName) {
-            return
-        }
-
-        // Skip if already visited
-        if (visited.contains(lowerUnit)) {
-            return
-        }
-
-        // Mark as visited
-        visited.add(lowerUnit)
-
-        // Check depth limit
-        if (currentDepth >= maxDepth) {
-            LOG.debug("[TransitiveDeps] Max depth reached at: $unitName")
-            return
-        }
-
-        // Resolve unit name to file
         val projectService = PascalProjectService.getInstance(project)
         val virtualFile = projectService.resolveUnit(unitName, true)
-
         if (virtualFile == null) {
-            LOG.debug("[TransitiveDeps] Could not resolve unit: $unitName")
             return
         }
-
-        // Get PsiFile from VirtualFile
-        val psiFile = getPsiFile(virtualFile, project)
-        if (psiFile == null) {
-            LOG.debug("[TransitiveDeps] Could not get PsiFile for: $unitName")
-            return
-        }
-
-        // Parse uses clause of the resolved file
+        val psiFile = getPsiFile(virtualFile, project) ?: return
         val usesInfo = PascalUsesClauseInfo.parse(psiFile)
-        val dependencies = usesInfo.allUses
+        val deps = usesInfo.allUses
+        unitGraph[lowerUnit] = deps
 
-        // Store in graph for debugging
-        unitGraph[lowerUnit] = dependencies
-
-        LOG.debug("[TransitiveDeps] Unit '$unitName' uses: $dependencies")
-
-        // Recurse into dependencies
-        for (depUnit in dependencies) {
-            resolveTransitive(depUnit, visited, unitGraph, project, currentDepth + 1, maxDepth, originUnitName)
+        // Expand dependencies: only prefix scopes for unscoped names
+        val scopes = PascalSourcePathsSettings.getInstance(project).unitScopeNames.map { it.lowercase() }
+        for (dep in deps) {
+            val ldep = dep.lowercase()
+            resolveTransitive(ldep, visited, unitGraph, project, currentDepth + 1, maxDepth, originUnitName)
+            if (!ldep.contains('.')) {
+                for (scope in scopes) {
+                    resolveTransitive("$scope.$ldep", visited, unitGraph, project, currentDepth + 1, maxDepth, originUnitName)
+                }
+            }
         }
     }
 
@@ -196,12 +191,7 @@ object TransitiveDependencyResolver {
 
     private fun extractUnitName(file: PsiFile): String? {
         val fileName = file.name
-        // Remove extension (.pas, .dpr, etc.)
         val dotIndex = fileName.lastIndexOf('.')
-        return if (dotIndex > 0) {
-            fileName.substring(0, dotIndex)
-        } else {
-            fileName
-        }
+        return if (dotIndex > 0) fileName.substring(0, dotIndex) else fileName
     }
 }

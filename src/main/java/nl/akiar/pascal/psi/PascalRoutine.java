@@ -40,6 +40,14 @@ public interface PascalRoutine extends PsiNameIdentifierOwner, StubBasedPsiEleme
     PascalTypeDefinition getContainingClass();
 
     /**
+     * Returns the simple name of the class that contains this method (e.g., "TStrings"),
+     * or null if it's a global routine. This may be derived from the qualified name
+     * (TClass.Method) or stub data and does not require resolving the class PSI.
+     */
+    @Nullable
+    String getContainingClassName();
+
+    /**
      * Returns the visibility of the routine (e.g., "private", "protected", "public", "published").
      * For global routines, this is usually null or an empty string.
      */

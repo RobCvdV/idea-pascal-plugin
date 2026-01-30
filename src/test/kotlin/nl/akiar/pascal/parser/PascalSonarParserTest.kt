@@ -565,4 +565,42 @@ class PascalSonarParserTest : BasePlatformTestCase() {
         }
         println("DEBUG TREE:\n" + debugInfo)
     }
+
+    @Test
+    fun testUnitHeaderDottedNameIsUnitReference() {
+        val text = """
+            unit System.Classes;
+            interface
+            implementation
+            end.
+        """.trimIndent()
+        val psiFile = myFixture.configureByText("System.Classes.pas", text)
+        assertNotNull(psiFile)
+        val debugInfo = com.intellij.openapi.application.runReadAction {
+            com.intellij.psi.impl.DebugUtil.psiToString(psiFile, false)
+        }
+        assertTrue("Should contain UNIT_DECL_SECTION", debugInfo.contains("UNIT_DECL_SECTION"))
+        assertTrue("Header should include UNIT_REFERENCE for dotted name", debugInfo.contains("UNIT_REFERENCE"))
+        // Ensure no PascalVariableDefinition or PascalMemberReference created from header
+        assertFalse(debugInfo.contains("PascalVariableDefinition"))
+    }
+
+    @Test
+    fun testUsesClauseDottedNamesAreUnitReferences() {
+        val text = """
+            unit TestUnit;
+            interface
+            uses System.SysUtils, System.Classes, Winapi.Windows, Winapi.Messages;
+            implementation
+            end.
+        """.trimIndent()
+        val psiFile = myFixture.configureByText("TestUses.pas", text)
+        val debugInfo = com.intellij.openapi.application.runReadAction {
+            com.intellij.psi.impl.DebugUtil.psiToString(psiFile, false)
+        }
+        assertTrue("Should contain USES_SECTION", debugInfo.contains("USES_SECTION"))
+        // Expect multiple UNIT_REFERENCE occurrences
+        val unitRefCount = debugInfo.split("UNIT_REFERENCE").size - 1
+        assertTrue("Should contain at least 4 UNIT_REFERENCE entries", unitRefCount >= 4)
+    }
 }

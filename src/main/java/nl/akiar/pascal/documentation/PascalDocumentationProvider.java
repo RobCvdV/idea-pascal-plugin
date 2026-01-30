@@ -16,6 +16,7 @@ import nl.akiar.pascal.PascalTokenType;
 import nl.akiar.pascal.PascalTokenTypes;
 import nl.akiar.pascal.psi.*;
 import nl.akiar.pascal.resolution.DelphiBuiltIns;
+import nl.akiar.pascal.resolution.MemberChainResolver;
 import nl.akiar.pascal.stubs.PascalVariableIndex;
 import nl.akiar.pascal.stubs.PascalPropertyIndex;
 import nl.akiar.pascal.stubs.PascalRoutineIndex;
@@ -34,7 +35,7 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     @Override
     @Nullable
     public PsiElement getCustomDocumentationElement(@NotNull Editor editor, @NotNull PsiFile file, @Nullable PsiElement contextElement, int targetOffset) {
-        LOG.info("[PascalDoc] getCustomDocumentationElement called for contextElement: " + contextElement + " (text: " + (contextElement != null ? contextElement.getText() : "null") + ")");
+        LOG.info("[MemberTraversal] Doc:getCustomDocumentationElement element='" + (contextElement != null ? contextElement.getText() : "<null>") + "' file='" + file.getName() + "'");
         if (contextElement != null && contextElement.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
             String name = contextElement.getText();
 
@@ -91,7 +92,13 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             // This prevents showing wrong documentation for obj.member when member
             // can't be found in obj's type
             if (isMemberAccess) {
-                LOG.info("[PascalDoc] Member access '" + name + "' could not be resolved, not falling back to global lookup");
+                LOG.info("[MemberTraversal] Doc: member access detected; attempting chain resolve");
+                PsiElement chainResolved = MemberChainResolver.resolveElement(contextElement);
+                if (chainResolved != null) {
+                    LOG.info("[MemberTraversal] Doc: chain resolved -> " + chainResolved.getClass().getSimpleName());
+                    return chainResolved;
+                }
+                LOG.info("[MemberTraversal] Doc: chain unresolved -> no global fallback");
                 return contextElement; // Will show as unresolved member
             }
 
@@ -522,6 +529,7 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     }
 
     private String generateUnresolvedMemberDoc(String memberName, PsiElement dotElement) {
+        LOG.info("[MemberTraversal] Doc: generateUnresolvedMemberDoc member='" + memberName + "'");
         StringBuilder sb = new StringBuilder();
         EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
 //        Color bgColor = scheme.getDefaultBackground();

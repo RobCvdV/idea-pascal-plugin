@@ -126,34 +126,16 @@ public class PsiUtil {
     }
 
     @NotNull
-    public static String getUnitName(@NotNull PsiElement element) {
-        // 1. Try to find UNIT_DECL_SECTION in parents
-        PsiElement parent = element.getParent();
-        while (parent != null) {
-            if (parent.getNode() != null && parent.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.UNIT_DECL_SECTION) {
-                return extractUnitNameFromSection(parent.getNode());
-            }
-            parent = parent.getParent();
-        }
-
-        // 2. Search for it in children of file
+    public static String getUnitName(@NotNull com.intellij.psi.PsiElement element) {
+        // Avoid traversing PSI tree to prevent AST loading during stub-based operations.
+        // Use containing file's name without extension as unit name.
         com.intellij.psi.PsiFile file = element.getContainingFile();
         if (file != null) {
-            for (PsiElement child : file.getChildren()) {
-                if (child.getNode() != null && child.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.UNIT_DECL_SECTION) {
-                    return extractUnitNameFromSection(child.getNode());
-                }
-            }
-
-            // 3. Fall back to file name without extension
             String fileName = file.getName();
             int dotIndex = fileName.lastIndexOf('.');
-            if (dotIndex > 0) {
-                return fileName.substring(0, dotIndex);
-            }
-            return fileName;
+            String unit = (dotIndex > 0) ? fileName.substring(0, dotIndex) : fileName;
+            return normalizeUnitName(unit);
         }
-
         return "";
     }
 

@@ -30,48 +30,43 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
                 IElementType type = node != null ? node.getElementType() : null;
                 
                 if (type == PascalTokenTypes.IDENTIFIER) {
-                    // Skip if it's a definition
+                    // Skip definition names
                     PsiElement parent = element.getParent();
                     if (parent instanceof PascalTypeDefinition) {
                         if (((PascalTypeDefinition) parent).getNameIdentifier() == element) {
-                            LOG.info("[PascalNav]  -> Skipping definition name: " + text);
                             return PsiReference.EMPTY_ARRAY;
                         }
                     }
                     if (parent instanceof nl.akiar.pascal.psi.PascalVariableDefinition) {
                         if (((nl.akiar.pascal.psi.PascalVariableDefinition) parent).getNameIdentifier() == element) {
-                            LOG.info("[PascalNav]  -> Skipping variable definition name: " + text);
                             return PsiReference.EMPTY_ARRAY;
                         }
                     }
                     if (parent instanceof nl.akiar.pascal.psi.PascalRoutine) {
                         if (((nl.akiar.pascal.psi.PascalRoutine) parent).getNameIdentifier() == element) {
-                            LOG.info("[PascalNav]  -> Skipping routine definition name: " + text);
                             return PsiReference.EMPTY_ARRAY;
                         }
                     }
 
-                    // Check if inside a unit reference
+                    // If inside a UNIT_REFERENCE (header or uses), treat as unit reference
                     if (parent != null && parent.getNode() != null && parent.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
                         return new PsiReference[]{new PascalUnitReference(element)};
                     }
 
-                    // Check for member access (Obj.Member)
+                    // If inside unit declaration or uses section, any dotted identifiers should be unit references
+                    if (nl.akiar.pascal.psi.PsiUtil.hasParent(element, PascalElementTypes.UNIT_DECL_SECTION) ||
+                        nl.akiar.pascal.psi.PsiUtil.hasParent(element, PascalElementTypes.USES_SECTION)) {
+                        return new PsiReference[]{new PascalUnitReference(element)};
+                    }
+
+                    // Member access (Obj.Member) outside unit/uses
                     PsiElement prev = PsiTreeUtil.prevLeaf(element);
                     while (prev != null && (prev instanceof PsiWhiteSpace || prev instanceof com.intellij.psi.PsiComment)) {
                         prev = PsiTreeUtil.prevLeaf(prev);
                     }
-
-                    if (prev != null) {
-                        System.out.println("[DEBUG_LOG] [PascalNav] Prev leaf for '" + text + "' is: '" + prev.getText() + "' type: " + prev.getNode().getElementType());
-                    }
-
                     if (prev != null && prev.getNode().getElementType() == PascalTokenTypes.DOT) {
-                        System.out.println("[DEBUG_LOG] [PascalNav] Creating member reference for: " + text);
                         return new PsiReference[]{new PascalMemberReference(element, new TextRange(0, text.length()))};
                     }
-                    
-                    System.out.println("[DEBUG_LOG] [PascalNav] Creating identifier reference for: " + text);
                     return new PsiReference[]{new PascalIdentifierReference(element, new TextRange(0, text.length()))};
                 }
 

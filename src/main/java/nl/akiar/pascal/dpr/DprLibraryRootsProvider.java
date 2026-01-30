@@ -28,26 +28,40 @@ public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
     @Override
     @NotNull
     public Collection<SyntheticLibrary> getAdditionalProjectLibraries(@NotNull Project project) {
-        if (project.isDefault() || !project.isInitialized() || !LoadingState.COMPONENTS_LOADED.isOccurred()) {
+        // Early exit if platform is not fully loaded yet
+        if (!LoadingState.COMPONENTS_LOADED.isOccurred()) {
+            return Collections.emptyList();
+        }
+
+        if (project.isDefault() || !project.isInitialized() || project.isDisposed()) {
+            return Collections.emptyList();
+        }
+
+        // Additional check: ensure we're not in dumb mode during initial indexing
+        if (com.intellij.openapi.project.DumbService.isDumb(project)) {
             return Collections.emptyList();
         }
 
         Set<String> allDirectories = new HashSet<>();
 
-        // 1. Add DPR-referenced directories
-        DprProjectService dprService = DprProjectService.getInstance(project);
-        allDirectories.addAll(dprService.getReferencedDirectories());
+        try {
+            // 1. Add DPR-referenced directories
+            DprProjectService dprService = DprProjectService.getInstance(project);
+            allDirectories.addAll(dprService.getReferencedDirectories());
 
-        // 2. Add directories discovered from .dproj and .optset
-        PascalProjectService pascalProjectService = PascalProjectService.getInstance(project);
-        allDirectories.addAll(pascalProjectService.getDiscoveredDirectories());
+            // 2. Add directories discovered from .dproj and .optset
+            PascalProjectService pascalProjectService = PascalProjectService.getInstance(project);
+            allDirectories.addAll(pascalProjectService.getDiscoveredDirectories());
 
-        // 3. Add user-configured source paths
-        PascalSourcePathsSettings settings = PascalSourcePathsSettings.getInstance(project);
-        allDirectories.addAll(settings.getSourcePaths());
+            // 3. Add user-configured source paths
+            PascalSourcePathsSettings settings = PascalSourcePathsSettings.getInstance(project);
+            allDirectories.addAll(settings.getSourcePaths());
+        } catch (Exception e) {
+            LOG.warn("[PascalLibraryRoots] Error collecting directories: " + e.getMessage());
+            return Collections.emptyList();
+        }
 
         if (allDirectories.isEmpty()) {
-            LOG.info("[PascalLibraryRoots] No source directories found");
             return Collections.emptyList();
         }
 

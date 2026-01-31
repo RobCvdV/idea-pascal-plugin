@@ -121,7 +121,8 @@ class PascalSonarParserTest : BasePlatformTestCase() {
         }
         println("DEBUG TREE:\n" + debugInfo)
 
-        // GVariable, AParam, LVariable should be PascalVariableDefinition
+        // GVariable, AParam, LVariable should all be PascalVariableDefinition
+        // (stub-based VARIABLE_DEFINITION with variableKind property)
         val occurrences = debugInfo.split("PascalVariableDefinition").size - 1
         assertEquals("Should have 3 PascalVariableDefinition nodes", 3, occurrences)
     }

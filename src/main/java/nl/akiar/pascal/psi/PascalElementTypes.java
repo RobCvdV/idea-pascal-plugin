@@ -93,4 +93,115 @@ public interface PascalElementTypes {
      */
     IStubElementType<nl.akiar.pascal.stubs.PascalPropertyStub, PascalProperty> PROPERTY_DEFINITION =
             new nl.akiar.pascal.stubs.PascalPropertyStubElementType();
+
+    // ============================================================================
+    // Scope/Section Types (for variable scope checking)
+    // ============================================================================
+
+    /**
+     * Element type for class body scope (between class and end).
+     */
+    com.intellij.psi.tree.IElementType CLASS_BODY = new nl.akiar.pascal.PascalTokenType("CLASS_BODY");
+
+    /**
+     * Element type for record body scope (between record and end).
+     */
+    com.intellij.psi.tree.IElementType RECORD_BODY = new nl.akiar.pascal.PascalTokenType("RECORD_BODY");
+
+    /**
+     * Element type for interface body scope (between interface and end).
+     */
+    com.intellij.psi.tree.IElementType INTERFACE_BODY = new nl.akiar.pascal.PascalTokenType("INTERFACE_BODY");
+
+    /**
+     * Element type for routine body scope (local variable scope).
+     */
+    com.intellij.psi.tree.IElementType ROUTINE_BODY = new nl.akiar.pascal.PascalTokenType("ROUTINE_BODY");
+
+    /**
+     * Element type for visibility section (private, protected, public, published).
+     */
+    com.intellij.psi.tree.IElementType VISIBILITY_SECTION = new nl.akiar.pascal.PascalTokenType("VISIBILITY_SECTION");
+
+    // ============================================================================
+    // Routine Type Distinction
+    // ============================================================================
+
+    /**
+     * Element type for standalone routines (not inside a class/record).
+     */
+    com.intellij.psi.tree.IElementType STANDALONE_ROUTINE = new nl.akiar.pascal.PascalTokenType("STANDALONE_ROUTINE");
+
+    /**
+     * Element type for method declarations (inside class/record).
+     */
+    com.intellij.psi.tree.IElementType METHOD_DECLARATION = new nl.akiar.pascal.PascalTokenType("METHOD_DECLARATION");
+
+    /**
+     * Element type for class methods (class function/procedure).
+     */
+    com.intellij.psi.tree.IElementType CLASS_METHOD = new nl.akiar.pascal.PascalTokenType("CLASS_METHOD");
+
+    /**
+     * Element type for constructor declarations.
+     */
+    com.intellij.psi.tree.IElementType CONSTRUCTOR_DECLARATION = new nl.akiar.pascal.PascalTokenType("CONSTRUCTOR_DECLARATION");
+
+    /**
+     * Element type for destructor declarations.
+     */
+    com.intellij.psi.tree.IElementType DESTRUCTOR_DECLARATION = new nl.akiar.pascal.PascalTokenType("DESTRUCTOR_DECLARATION");
+
+    // ============================================================================
+    // Specific Identifier Element Types
+    // ============================================================================
+
+    /**
+     * Element type for enum element declarations (enum values).
+     */
+    com.intellij.psi.tree.IElementType ENUM_ELEMENT = new nl.akiar.pascal.PascalTokenType("ENUM_ELEMENT");
+
+    /**
+     * Element type for field definitions in records/classes.
+     */
+    com.intellij.psi.tree.IElementType FIELD_DEFINITION = new nl.akiar.pascal.PascalTokenType("FIELD_DEFINITION");
+
+    /**
+     * Element type for constant definitions.
+     */
+    com.intellij.psi.tree.IElementType CONSTANT_DEFINITION = new nl.akiar.pascal.PascalTokenType("CONSTANT_DEFINITION");
+
+    /**
+     * Element type for label definitions.
+     */
+    com.intellij.psi.tree.IElementType LABEL_DEFINITION = new nl.akiar.pascal.PascalTokenType("LABEL_DEFINITION");
+
+    /**
+     * Element type for local variable definitions (inside routine body).
+     */
+    com.intellij.psi.tree.IElementType LOCAL_VARIABLE = new nl.akiar.pascal.PascalTokenType("LOCAL_VARIABLE");
+
+    // ============================================================================
+    // Specific Type Definition Types
+    // ============================================================================
+
+    /**
+     * Element type for class type definitions.
+     */
+    com.intellij.psi.tree.IElementType CLASS_TYPE = new nl.akiar.pascal.PascalTokenType("CLASS_TYPE");
+
+    /**
+     * Element type for record type definitions.
+     */
+    com.intellij.psi.tree.IElementType RECORD_TYPE = new nl.akiar.pascal.PascalTokenType("RECORD_TYPE");
+
+    /**
+     * Element type for interface type definitions.
+     */
+    com.intellij.psi.tree.IElementType INTERFACE_TYPE = new nl.akiar.pascal.PascalTokenType("INTERFACE_TYPE");
+
+    /**
+     * Element type for enum type definitions.
+     */
+    com.intellij.psi.tree.IElementType ENUM_TYPE = new nl.akiar.pascal.PascalTokenType("ENUM_TYPE");
 }

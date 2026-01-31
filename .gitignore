@@ -33,3 +33,4 @@ lib/
 libs/*.jar
 *.hprof
 /*.prompt.md
+/CLAUDE.md

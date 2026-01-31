@@ -264,53 +264,122 @@ class PascalSonarParser : PsiParser {
 
         // Determine element type, with special handling for unit header and uses items
         val markerType = when {
+            // ============================================================================
+            // Unit Structure Sections
+            // ============================================================================
             node is org.sonar.plugins.communitydelphi.api.ast.InterfaceSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_SECTION
             node is org.sonar.plugins.communitydelphi.api.ast.ImplementationSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.IMPLEMENTATION_SECTION
             node is org.sonar.plugins.communitydelphi.api.ast.UnitDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_DECL_SECTION
-            // Treat various sonar nodes representing unit names as UNIT_REFERENCE
+            node is org.sonar.plugins.communitydelphi.api.ast.ProgramDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.PROGRAM_DECL_SECTION
+            node is org.sonar.plugins.communitydelphi.api.ast.LibraryDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.LIBRARY_DECL_SECTION
+
+            // ============================================================================
+            // Uses Clause / Unit References
+            // ============================================================================
             node.javaClass.simpleName.contains("QualifiedNameDeclaration", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
             node.javaClass.simpleName.contains("Namespace", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
             node.javaClass.simpleName.contains("UnitReference", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
             node.javaClass.simpleName.contains("UnitImport", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
             node.javaClass.simpleName.contains("UsesItem", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
             node.javaClass.simpleName.contains("UsesClause", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.USES_SECTION
-            node is org.sonar.plugins.communitydelphi.api.ast.ProgramDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.PROGRAM_DECL_SECTION
-            node is org.sonar.plugins.communitydelphi.api.ast.LibraryDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.LIBRARY_DECL_SECTION
+
+            // ============================================================================
+            // Type Definitions - Specific Types
+            // ============================================================================
+            // Check for specific type definitions before generic TypeDeclarationNode
+            node.javaClass.simpleName.contains("ClassType", ignoreCase = true) &&
+                !node.javaClass.simpleName.contains("Reference", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.CLASS_TYPE
+            node.javaClass.simpleName.contains("RecordType", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.RECORD_TYPE
+            node.javaClass.simpleName.contains("InterfaceType", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_TYPE
+            node.javaClass.simpleName.contains("EnumType", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.ENUM_TYPE
+            // Generic type declaration (fallback)
             node is org.sonar.plugins.communitydelphi.api.ast.TypeDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION
             node is org.sonar.plugins.communitydelphi.api.ast.TypeParameterNode -> nl.akiar.pascal.psi.PascalElementTypes.GENERIC_PARAMETER
-            // Map formal parameter sections robustly
-            node.javaClass.simpleName.contains("FormalParameter", ignoreCase = true) && !node.javaClass.simpleName.contains("List", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER
+
+            // ============================================================================
+            // Scope/Body Sections (for variable scope checking)
+            // ============================================================================
+            node.javaClass.simpleName.contains("RoutineBody", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_BODY
+            node.javaClass.simpleName.contains("VisibilitySection", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.VISIBILITY_SECTION
+
+            // ============================================================================
+            // Enum Elements
+            // ============================================================================
+            node.javaClass.simpleName.contains("EnumElement", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.ENUM_ELEMENT
+
+            // ============================================================================
+            // Field Definitions (in records/classes)
+            // ============================================================================
+            node.javaClass.simpleName.contains("FieldDeclaration", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.FIELD_DEFINITION
+
+            // ============================================================================
+            // Parameters
+            // ============================================================================
+            node.javaClass.simpleName.contains("FormalParameter", ignoreCase = true) &&
+                !node.javaClass.simpleName.contains("List", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER
             node.javaClass.simpleName.contains("Parameter", ignoreCase = true) &&
                 !node.javaClass.simpleName.contains("TypeParameter", ignoreCase = true) &&
                 !node.javaClass.simpleName.contains("List", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER
-            // Avoid misclassifying identifiers in unit/uses contexts as variables/parameters
+
+            // ============================================================================
+            // Variable/Constant Definitions with Context
+            // ============================================================================
+            // Note: We use VARIABLE_DEFINITION (stub-based) for all variable declarations
+            // to ensure proper indexing and IDE features. The variableKind property on
+            // PascalVariableDefinition distinguishes between GLOBAL, FIELD, PARAMETER, LOCAL.
             node is org.sonar.plugins.communitydelphi.api.ast.NameDeclarationNode -> {
                 val parent = node.parent
                 val parentName = parent?.javaClass?.simpleName ?: ""
+
+                diag("NameDeclarationNode: nodeName=${node.javaClass.simpleName} parentName=$parentName")
 
                 // If in unit header or uses, do not produce VARIABLE_DEFINITION
                 val inUnitOrUses = parentName.contains("UnitDeclaration", ignoreCase = true) ||
                                    parentName.contains("Uses", ignoreCase = true)
 
-                val isVarOrParam = parentName.contains("FormalParameter", ignoreCase = true) ||
-                                  parentName.contains("NameDeclarationList", ignoreCase = true) ||
-                                  parentName.contains("VarDeclaration", ignoreCase = true) ||
-                                  parentName.contains("FieldDeclaration", ignoreCase = true) ||
-                                  parentName.contains("ConstDeclaration", ignoreCase = true)
-
-                if (!inUnitOrUses && isVarOrParam) {
-                    nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_DEFINITION
-                } else {
-                    null
+                when {
+                    inUnitOrUses -> null
+                    // All variable-like declarations (vars, consts, fields, params) use stub-based VARIABLE_DEFINITION
+                    parentName.contains("ConstDeclaration", ignoreCase = true) ||
+                        parentName.contains("FieldDeclaration", ignoreCase = true) ||
+                        parentName.contains("FormalParameter", ignoreCase = true) ||
+                        parentName.contains("NameDeclarationList", ignoreCase = true) ||
+                        parentName.contains("VarDeclaration", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_DEFINITION
+                    else -> {
+                        diag("NameDeclarationNode: unhandled parentName=$parentName")
+                        null
+                    }
                 }
             }
+
+            // ============================================================================
+            // Declaration Sections
+            // ============================================================================
             node is org.sonar.plugins.communitydelphi.api.ast.VarSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION
             node is org.sonar.plugins.communitydelphi.api.ast.ConstSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.CONST_SECTION
             node is org.sonar.plugins.communitydelphi.api.ast.TypeSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.TYPE_SECTION
+
+            // ============================================================================
+            // Properties
+            // ============================================================================
             node is org.sonar.plugins.communitydelphi.api.ast.PropertyNode -> nl.akiar.pascal.psi.PascalElementTypes.PROPERTY_DEFINITION
-            node is org.sonar.plugins.communitydelphi.api.ast.RoutineDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION
-            node is org.sonar.plugins.communitydelphi.api.ast.RoutineImplementationNode -> nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION
-            node is org.sonar.plugins.communitydelphi.api.ast.RoutineNode -> nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION
+
+            // ============================================================================
+            // Routines - use stub-based ROUTINE_DECLARATION for all routines
+            // ============================================================================
+            // Note: We use the stub-based ROUTINE_DECLARATION for proper indexing.
+            // The PascalRoutine implementation can determine specific routine type
+            // (standalone, method, constructor, etc.) based on context.
+            node is org.sonar.plugins.communitydelphi.api.ast.RoutineDeclarationNode ||
+                node is org.sonar.plugins.communitydelphi.api.ast.RoutineImplementationNode ||
+                node is org.sonar.plugins.communitydelphi.api.ast.RoutineNode ->
+                    nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION
+
+            // ============================================================================
+            // Labels
+            // ============================================================================
+            node.javaClass.simpleName.contains("LabelDeclaration", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.LABEL_DEFINITION
+
             else -> null
         }
         if (markerType != null) {

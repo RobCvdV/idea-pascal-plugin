@@ -90,8 +90,27 @@ public class PascalPropertyImpl extends StubBasedPsiElementBase<PascalPropertySt
     private String findSpecifierValue(String specifier) {
         ASTNode node = getNode();
         ASTNode child = node.getFirstChildNode();
+
+        // Determine which keyword token to look for
+        IElementType keywordType = null;
+        if ("read".equalsIgnoreCase(specifier)) {
+            keywordType = PascalTokenTypes.KW_READ;
+        } else if ("write".equalsIgnoreCase(specifier)) {
+            keywordType = PascalTokenTypes.KW_WRITE;
+        } else if ("stored".equalsIgnoreCase(specifier)) {
+            keywordType = PascalTokenTypes.KW_STORED;
+        } else if ("default".equalsIgnoreCase(specifier)) {
+            keywordType = PascalTokenTypes.KW_DEFAULT;
+        }
+
         while (child != null) {
-            if (child.getElementType() == PascalTokenTypes.IDENTIFIER && child.getText().equalsIgnoreCase(specifier)) {
+            // Check for keyword token (read, write, stored, default)
+            boolean isSpecifierKeyword = (keywordType != null && child.getElementType() == keywordType);
+            // Also check for identifier (fallback for older parsing)
+            boolean isSpecifierIdentifier = (child.getElementType() == PascalTokenTypes.IDENTIFIER &&
+                                             child.getText().equalsIgnoreCase(specifier));
+
+            if (isSpecifierKeyword || isSpecifierIdentifier) {
                 ASTNode value = child.getTreeNext();
                 while (value != null && value.getElementType() == PascalTokenTypes.WHITE_SPACE) {
                     value = value.getTreeNext();

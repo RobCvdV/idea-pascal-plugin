@@ -30,20 +30,20 @@ public class PascalIdentifierReference extends PsiReferenceBase<PsiElement> impl
     @NotNull
     @Override
     public ResolveResult[] multiResolve(boolean incompleteCode) {
-        LOG.info("[PascalNav] Identifier resolution for: " + name);
+//        LOG.info("[PascalNav] Identifier resolution for: " + name);
         List<ResolveResult> results = new ArrayList<>();
 
         // 0. Built-in functions and types don't resolve to any specific element
         // They are compiler intrinsics - return empty to prevent wrong resolution
         if (DelphiBuiltIns.isBuiltInFunction(name)) {
-            LOG.info("[PascalNav]  -> Built-in function (no target): " + name);
+//            LOG.info("[PascalNav]  -> Built-in function (no target): " + name);
             return new ResolveResult[0]; // No specific target for built-ins
         }
 
         // 1. Try to resolve as a variable (includes local, fields, globals)
         PascalVariableDefinition var = PascalVariableIndex.findVariableAtPosition(name, myElement.getContainingFile(), myElement.getTextOffset());
         if (var != null) {
-            LOG.info("[PascalNav]  -> Resolved to variable: " + var.getName());
+//            LOG.info("[PascalNav]  -> Resolved to variable: " + var.getName());
             results.add(new PsiElementResolveResult(var));
         }
 
@@ -53,7 +53,7 @@ public class PascalIdentifierReference extends PsiReferenceBase<PsiElement> impl
                     PascalTypeIndex.findTypesWithUsesValidation(name, myElement.getContainingFile(), myElement.getTextOffset());
 
             for (PascalTypeDefinition type : typeResult.getInScopeTypes()) {
-                LOG.info("[PascalNav]  -> Resolved to in-scope type: " + type.getName());
+//                LOG.info("[PascalNav]  -> Resolved to in-scope type: " + type.getName());
                 results.add(new PsiElementResolveResult(type));
             }
         }
@@ -63,7 +63,7 @@ public class PascalIdentifierReference extends PsiReferenceBase<PsiElement> impl
                 nl.akiar.pascal.stubs.PascalRoutineIndex.findRoutinesWithUsesValidation(name, myElement.getContainingFile(), myElement.getTextOffset());
 
         for (nl.akiar.pascal.psi.PascalRoutine routine : routineResult.getInScopeRoutines()) {
-            LOG.info("[PascalNav]  -> Resolved to in-scope routine: " + routine.getName());
+//            LOG.info("[PascalNav]  -> Resolved to in-scope routine: " + routine.getName());
             results.add(new PsiElementResolveResult(routine));
         }
 
@@ -73,11 +73,11 @@ public class PascalIdentifierReference extends PsiReferenceBase<PsiElement> impl
             nl.akiar.pascal.stubs.PascalTypeIndex.TypeLookupResult typeResult =
                     PascalTypeIndex.findTypesWithUsesValidation(name, myElement.getContainingFile(), myElement.getTextOffset());
             for (PascalTypeDefinition type : typeResult.getOutOfScopeTypes()) {
-                LOG.info("[PascalNav]  -> Resolved to out-of-scope type: " + type.getName());
+//                LOG.info("[PascalNav]  -> Resolved to out-of-scope type: " + type.getName());
                 results.add(new PsiElementResolveResult(type));
             }
             for (nl.akiar.pascal.psi.PascalRoutine routine : routineResult.getOutOfScopeRoutines()) {
-                LOG.info("[PascalNav]  -> Resolved to out-of-scope routine: " + routine.getName());
+//                LOG.info("[PascalNav]  -> Resolved to out-of-scope routine: " + routine.getName());
                 results.add(new PsiElementResolveResult(routine));
             }
         }

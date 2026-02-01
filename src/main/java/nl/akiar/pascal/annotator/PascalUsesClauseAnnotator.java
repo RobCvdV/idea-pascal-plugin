@@ -70,6 +70,11 @@ public class PascalUsesClauseAnnotator implements Annotator {
             return;
         }
 
+        // Skip property getter/setter identifiers (class members, not global refs)
+        if (isPropertySpecifierIdentifier(element)) {
+            return;
+        }
+
         String text = element.getText();
         if (text == null || text.isEmpty()) {
             return;
@@ -159,5 +164,22 @@ public class PascalUsesClauseAnnotator implements Annotator {
         // Heuristic: If followed by a colon, it's likely a field/variable name
         PsiElement next = PsiUtil.getNextNoneIgnorableSibling(element);
         return next == null || next.getNode().getElementType() != PascalTokenTypes.COLON;
+    }
+
+    private boolean isPropertySpecifierIdentifier(PsiElement element) {
+        // Check if inside PROPERTY_DEFINITION
+        if (!PsiUtil.hasParent(element, PascalElementTypes.PROPERTY_DEFINITION)) {
+            return false;
+        }
+
+        // Check if preceded by KW_READ, KW_WRITE, KW_STORED, or KW_DEFAULT
+        PsiElement prev = PsiUtil.getPrevNoneIgnorableSibling(element);
+        if (prev == null) return false;
+
+        com.intellij.psi.tree.IElementType prevType = prev.getNode().getElementType();
+        return prevType == PascalTokenTypes.KW_READ ||
+               prevType == PascalTokenTypes.KW_WRITE ||
+               prevType == PascalTokenTypes.KW_STORED ||
+               prevType == PascalTokenTypes.KW_DEFAULT;
     }
 }

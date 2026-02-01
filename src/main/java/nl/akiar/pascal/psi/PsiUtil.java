@@ -45,6 +45,65 @@ public class PsiUtil {
         }
     }
 
+    /**
+     * Find the first node matching any of the given element types.
+     * Useful for finding identifiers that might be tokenized as keywords (like "Index").
+     */
+    @Nullable
+    public static ASTNode findFirstRecursiveAnyOf(@NotNull ASTNode node, @NotNull IElementType... types) {
+        for (IElementType type : types) {
+            if (node.getElementType() == type) return node;
+        }
+        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            ASTNode found = findFirstRecursiveAnyOf(child, types);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    /**
+     * Find all nodes matching any of the given element types.
+     */
+    @NotNull
+    public static List<ASTNode> findAllRecursiveAnyOf(@NotNull ASTNode node, @NotNull IElementType... types) {
+        List<ASTNode> result = new ArrayList<>();
+        findAllRecursiveAnyOf(node, result, types);
+        return result;
+    }
+
+    private static void findAllRecursiveAnyOf(@NotNull ASTNode node, @NotNull List<ASTNode> result, @NotNull IElementType... types) {
+        for (IElementType type : types) {
+            if (node.getElementType() == type) {
+                result.add(node);
+                break;
+            }
+        }
+        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            findAllRecursiveAnyOf(child, result, types);
+        }
+    }
+
+    /**
+     * Element types that can serve as identifiers in Pascal.
+     * These are "soft keywords" that have special meaning in certain contexts
+     * but can also be used as regular identifiers (variable names, parameter names, etc.)
+     */
+    public static final IElementType[] IDENTIFIER_LIKE_TYPES = {
+        nl.akiar.pascal.PascalTokenTypes.IDENTIFIER,
+        // Property specifier keywords that can be used as identifiers
+        nl.akiar.pascal.PascalTokenTypes.KW_INDEX,
+        nl.akiar.pascal.PascalTokenTypes.KW_NAME,
+        nl.akiar.pascal.PascalTokenTypes.KW_READ,
+        nl.akiar.pascal.PascalTokenTypes.KW_WRITE,
+        nl.akiar.pascal.PascalTokenTypes.KW_DEFAULT,
+        nl.akiar.pascal.PascalTokenTypes.KW_STORED,
+        nl.akiar.pascal.PascalTokenTypes.KW_NODEFAULT,
+        nl.akiar.pascal.PascalTokenTypes.KW_IMPLEMENTS,
+        // Other soft keywords
+        nl.akiar.pascal.PascalTokenTypes.KW_MESSAGE,
+        nl.akiar.pascal.PascalTokenTypes.KW_DISPID,
+    };
+
     @Nullable
     public static String getVisibility(@NotNull PsiElement element) {
         // Find the containing TYPE_DEFINITION
@@ -121,6 +180,22 @@ public class PsiUtil {
                 return next;
             }
             next = next.getNextSibling();
+        }
+        return null;
+    }
+
+    @Nullable
+    public static PsiElement getPrevNoneIgnorableSibling(@NotNull PsiElement element) {
+        PsiElement prev = element.getPrevSibling();
+        while (prev != null) {
+            IElementType type = prev.getNode().getElementType();
+            if (type != nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE &&
+                type != nl.akiar.pascal.PascalTokenTypes.LINE_COMMENT &&
+                type != nl.akiar.pascal.PascalTokenTypes.BLOCK_COMMENT &&
+                type != nl.akiar.pascal.PascalTokenTypes.COMPILER_DIRECTIVE) {
+                return prev;
+            }
+            prev = prev.getPrevSibling();
         }
         return null;
     }

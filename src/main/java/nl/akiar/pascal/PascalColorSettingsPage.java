@@ -36,6 +36,7 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
             new AttributesDescriptor("Type//Record type", PascalSyntaxHighlighter.TYPE_RECORD),
             new AttributesDescriptor("Type//Interface type", PascalSyntaxHighlighter.TYPE_INTERFACE),
             new AttributesDescriptor("Type//Enum type", PascalSyntaxHighlighter.TYPE_ENUM),
+            new AttributesDescriptor("Type//Enum element", PascalSyntaxHighlighter.ENUM_ELEMENT),
             new AttributesDescriptor("Type//Generic parameter", PascalSyntaxHighlighter.TYPE_PARAMETER),
             new AttributesDescriptor("Type//Procedural type", PascalSyntaxHighlighter.TYPE_PROCEDURAL),
             new AttributesDescriptor("Type//Simple type", PascalSyntaxHighlighter.TYPE_SIMPLE),
@@ -128,6 +129,7 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
                "  B: Boolean;\n" +
                "begin\n" +
                "  B := True;\n" +
+               "  FColor := Red; // Enum element usage\n" +
                "  for I := 0 to Count - 1 do\n" +
                "  begin\n" +
                "    if I mod 2 = 0 then\n" +

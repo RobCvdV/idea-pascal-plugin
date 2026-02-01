@@ -373,7 +373,11 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
     @Nullable
     public PsiElement getNameIdentifier() {
         // Use recursive search because Sonar nests identifiers under IdentifierNodeImpl
-        ASTNode identifierNode = nl.akiar.pascal.psi.PsiUtil.findFirstRecursive(getNode(), nl.akiar.pascal.PascalTokenTypes.IDENTIFIER);
+        // Also accept keywords that can be used as identifiers (like "Index", "Name", "Read", etc.)
+        ASTNode identifierNode = nl.akiar.pascal.psi.PsiUtil.findFirstRecursiveAnyOf(
+            getNode(),
+            nl.akiar.pascal.psi.PsiUtil.IDENTIFIER_LIKE_TYPES
+        );
         if (identifierNode != null) {
             return identifierNode.getPsi();
         }

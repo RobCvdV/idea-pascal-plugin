@@ -44,39 +44,56 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
     public PsiElement getNameIdentifier() {
         // For qualified names TClass.Method, we want the last identifier before the parameters/body starts.
         // We must avoid identifiers inside parameters or the return type.
-        
+        // Also accept keywords that can be used as identifiers (like "Index", "Name", "Read", etc.)
+
         ASTNode node = getNode();
-        List<ASTNode> allIds = nl.akiar.pascal.psi.PsiUtil.findAllRecursive(node, nl.akiar.pascal.PascalTokenTypes.IDENTIFIER);
-        
+        List<ASTNode> allIds = nl.akiar.pascal.psi.PsiUtil.findAllRecursiveAnyOf(
+            node,
+            nl.akiar.pascal.psi.PsiUtil.IDENTIFIER_LIKE_TYPES
+        );
+
+        // Find the position of the opening parenthesis (start of parameters)
+        // or colon (return type) or semicolon (end of declaration)
+        int parenOffset = findFirstTokenOffset(node, nl.akiar.pascal.PascalTokenTypes.LPAREN);
+        int colonOffset = findFirstTokenOffset(node, nl.akiar.pascal.PascalTokenTypes.COLON);
+        int semiOffset = findFirstTokenOffset(node, nl.akiar.pascal.PascalTokenTypes.SEMI);
+
+        // The routine name must appear before any of these
+        int cutoffOffset = Integer.MAX_VALUE;
+        if (parenOffset >= 0) cutoffOffset = Math.min(cutoffOffset, parenOffset);
+        if (colonOffset >= 0) cutoffOffset = Math.min(cutoffOffset, colonOffset);
+        if (semiOffset >= 0) cutoffOffset = Math.min(cutoffOffset, semiOffset);
+
         ASTNode bestId = null;
         for (ASTNode idNode : allIds) {
             PsiElement psi = idNode.getPsi();
+
             // Skip identifiers inside parameters
             if (nl.akiar.pascal.psi.PsiUtil.hasParent(psi, nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER)) {
                 continue;
             }
-            
-            // In Delphi, the routine name comes before '(' or ';' or ':' (for functions)
-            // But with qualified names, we might have multiple identifiers (TClass . Method)
-            // We want the last identifier that is part of the routine name itself.
+
+            // Skip identifiers that appear after the cutoff (parameters, return type)
+            int idOffset = idNode.getStartOffset();
+            if (idOffset >= cutoffOffset) {
+                continue;
+            }
+
+            // This identifier appears before parameters/return type, it's the routine name
+            // For qualified names (TClass.Method), keep the last one
             bestId = idNode;
-            
-            // If we hit any of these, we are past the routine name
-            ASTNode next = idNode.getTreeNext();
-            while (next != null && next.getElementType() == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE) {
-                next = next.getTreeNext();
-            }
-            if (next != null) {
-                IElementType type = next.getElementType();
-                if (type == nl.akiar.pascal.PascalTokenTypes.LPAREN || 
-                    type == nl.akiar.pascal.PascalTokenTypes.SEMI || 
-                    type == nl.akiar.pascal.PascalTokenTypes.COLON) {
-                    break; 
-                }
-            }
         }
-        
+
         return bestId != null ? bestId.getPsi() : null;
+    }
+
+    /**
+     * Find the offset of the first occurrence of a specific token type.
+     * Returns -1 if not found.
+     */
+    private int findFirstTokenOffset(ASTNode parent, IElementType tokenType) {
+        ASTNode found = nl.akiar.pascal.psi.PsiUtil.findFirstRecursive(parent, tokenType);
+        return found != null ? found.getStartOffset() : -1;
     }
 
     @Override

@@ -72,6 +72,10 @@ public class PascalSyntaxHighlighter extends SyntaxHighlighterBase {
     public static final TextAttributesKey TYPE_ENUM =
             createTextAttributesKey("PASCAL_TYPE_ENUM", DefaultLanguageHighlighterColors.CONSTANT);
 
+    // Enum element (individual enum values like taLeftJustify, clRed)
+    public static final TextAttributesKey ENUM_ELEMENT =
+            createTextAttributesKey("PASCAL_ENUM_ELEMENT", DefaultLanguageHighlighterColors.CONSTANT);
+
     public static final TextAttributesKey TYPE_SIMPLE =
             createTextAttributesKey("PASCAL_TYPE_SIMPLE", DefaultLanguageHighlighterColors.PREDEFINED_SYMBOL);
 

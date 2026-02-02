@@ -65,4 +65,11 @@ public interface PascalRoutine extends PsiNameIdentifierOwner, StubBasedPsiEleme
      */
     @org.jetbrains.annotations.NotNull
     String getUnitName();
+
+    /**
+     * Returns the return type name for functions (e.g., "TStrings", "Integer").
+     * Returns null for procedures (no return type).
+     */
+    @Nullable
+    String getReturnTypeName();
 }

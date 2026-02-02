@@ -55,7 +55,86 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
                 child = child.getTreeNext();
             }
         }
-        return new PascalRoutineStubImpl(parentStub, psi.getName(), psi.isImplementation(), ownerName);
+
+        // Extract return type name from function signature
+        String returnTypeName = extractReturnTypeName(psi);
+
+        return new PascalRoutineStubImpl(parentStub, psi.getName(), psi.isImplementation(), ownerName, returnTypeName);
+    }
+
+    /**
+     * Extract the return type name from a function's AST.
+     * Functions have the syntax: function Name(...): ReturnType;
+     * Procedures don't have a return type.
+     */
+    @org.jetbrains.annotations.Nullable
+    private String extractReturnTypeName(@NotNull PascalRoutine psi) {
+        ASTNode node = psi.getNode();
+        if (node == null) return null;
+
+        // Find the colon after the parameter list (or after the name for parameterless functions)
+        // Then find the identifier after the colon
+        ASTNode child = node.getFirstChildNode();
+        boolean foundRparen = false;
+        boolean foundColon = false;
+
+        while (child != null) {
+            com.intellij.psi.tree.IElementType type = child.getElementType();
+
+            // Skip past the RPAREN (end of parameters)
+            if (type == nl.akiar.pascal.PascalTokenTypes.RPAREN) {
+                foundRparen = true;
+            }
+
+            // Look for COLON after RPAREN (or at the start for parameterless functions)
+            if (type == nl.akiar.pascal.PascalTokenTypes.COLON) {
+                foundColon = true;
+                child = child.getTreeNext();
+                continue;
+            }
+
+            // After colon, look for the type identifier
+            if (foundColon) {
+                // Skip whitespace
+                if (type == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE) {
+                    child = child.getTreeNext();
+                    continue;
+                }
+
+                // Found the return type identifier
+                if (type == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                    StringBuilder typeName = new StringBuilder(child.getText());
+                    // Handle qualified names like System.TObject
+                    child = child.getTreeNext();
+                    while (child != null) {
+                        com.intellij.psi.tree.IElementType nextType = child.getElementType();
+                        if (nextType == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE) {
+                            child = child.getTreeNext();
+                            continue;
+                        }
+                        if (nextType == nl.akiar.pascal.PascalTokenTypes.DOT) {
+                            typeName.append(".");
+                            child = child.getTreeNext();
+                        } else if (nextType == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                            typeName.append(child.getText());
+                            child = child.getTreeNext();
+                        } else {
+                            break;
+                        }
+                    }
+                    return typeName.toString();
+                }
+
+                // If we hit semicolon or other tokens, stop
+                if (type == nl.akiar.pascal.PascalTokenTypes.SEMI) {
+                    break;
+                }
+            }
+
+            child = child.getTreeNext();
+        }
+
+        return null;
     }
 
     @NotNull
@@ -69,6 +148,7 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
         dataStream.writeName(stub.getName());
         dataStream.writeBoolean(stub.isImplementation());
         dataStream.writeName(stub.getContainingClassName());
+        dataStream.writeName(stub.getReturnTypeName());
     }
 
     @NotNull
@@ -77,7 +157,8 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
         String name = dataStream.readNameString();
         boolean isImplementation = dataStream.readBoolean();
         String ownerName = dataStream.readNameString();
-        return new PascalRoutineStubImpl(parentStub, name, isImplementation, ownerName);
+        String returnTypeName = dataStream.readNameString();
+        return new PascalRoutineStubImpl(parentStub, name, isImplementation, ownerName, returnTypeName);
     }
 
     @Override

@@ -10,12 +10,15 @@ public class PascalRoutineStubImpl extends StubBase<PascalRoutine> implements Pa
     private final String name;
     private final boolean isImplementation;
     private final @Nullable String containingClassName;
+    private final @Nullable String returnTypeName;
 
-    public PascalRoutineStubImpl(StubElement parent, String name, boolean isImplementation, @Nullable String containingClassName) {
+    public PascalRoutineStubImpl(StubElement parent, String name, boolean isImplementation,
+                                  @Nullable String containingClassName, @Nullable String returnTypeName) {
         super(parent, PascalElementTypes.ROUTINE_DECLARATION);
         this.name = name;
         this.isImplementation = isImplementation;
         this.containingClassName = containingClassName;
+        this.returnTypeName = returnTypeName;
     }
 
     @Override
@@ -26,4 +29,7 @@ public class PascalRoutineStubImpl extends StubBase<PascalRoutine> implements Pa
 
     @Override
     public @Nullable String getContainingClassName() { return containingClassName; }
+
+    @Override
+    public @Nullable String getReturnTypeName() { return returnTypeName; }
 }

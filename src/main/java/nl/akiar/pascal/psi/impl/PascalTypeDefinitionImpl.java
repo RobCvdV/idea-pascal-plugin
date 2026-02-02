@@ -440,15 +440,22 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
     @Override
     @NotNull
     public List<PsiElement> getMembers(boolean includeAncestors) {
-        if (!includeAncestors) {
-            List<PsiElement> members = new ArrayList<>();
-            members.addAll(getMethods());
-            members.addAll(getProperties());
-            members.addAll(getFields());
-            return members;
-        }
-        // Use visited set to detect circular references in inheritance
-        return getMembersWithCircularDetection(new HashSet<>());
+        // Use cached member list when possible
+        return nl.akiar.pascal.resolution.MemberResolutionCache.INSTANCE.getOrComputeMembers(
+            this,
+            includeAncestors,
+            () -> {
+                if (!includeAncestors) {
+                    List<PsiElement> members = new ArrayList<>();
+                    members.addAll(getMethods());
+                    members.addAll(getProperties());
+                    members.addAll(getFields());
+                    return members;
+                }
+                // Use visited set to detect circular references in inheritance
+                return getMembersWithCircularDetection(new HashSet<>());
+            }
+        );
     }
 
     /**

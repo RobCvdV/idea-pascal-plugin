@@ -28,7 +28,20 @@ object MemberResolutionCache {
         val typePtr: SmartPsiElementPointer<PascalTypeDefinition>?
     )
 
+    // Cache for member lists (fields, properties, methods) of a type
+    private data class MemberListKey(
+        val typePtr: SmartPsiElementPointer<PascalTypeDefinition>,
+        val typeName: String,
+        val unitName: String?,
+        val includeAncestors: Boolean
+    )
+
+    private data class MemberListValue(
+        val memberPtrs: List<SmartPsiElementPointer<PsiElement>>
+    )
+
     private val typeOfCache = ConcurrentHashMap<TypeOfKey, TypeOfVal>()
+    private val memberListCache = ConcurrentHashMap<MemberListKey, MemberListValue>()
     @Volatile private var lastModCount: Long = -1L
 
     private fun ensureFresh(project: Project) {
@@ -37,6 +50,7 @@ object MemberResolutionCache {
             synchronized(this) {
                 if (mod != lastModCount) {
                     typeOfCache.clear()
+                    memberListCache.clear()
                     lastModCount = mod
                 }
             }
@@ -74,11 +88,54 @@ object MemberResolutionCache {
     }
 
     /**
+     * Get cached members for a type, or compute and cache them.
+     *
+     * @param typeDef The type definition to get members for
+     * @param includeAncestors Whether to include inherited members
+     * @param compute Function to compute the members if not cached
+     * @return List of member elements (routines, properties, fields)
+     */
+    fun getOrComputeMembers(
+        typeDef: PascalTypeDefinition,
+        includeAncestors: Boolean,
+        compute: () -> List<PsiElement>
+    ): List<PsiElement> {
+        val project = typeDef.project
+        ensureFresh(project)
+        val spm = SmartPointerManager.getInstance(project)
+        val typePtr = spm.createSmartPsiElementPointer(typeDef)
+        val key = MemberListKey(
+            typePtr = typePtr,
+            typeName = typeDef.name ?: "",
+            unitName = typeDef.unitName,
+            includeAncestors = includeAncestors
+        )
+
+        val cached = memberListCache[key]
+        if (cached != null) {
+            val members = cached.memberPtrs.mapNotNull { ptr ->
+                ptr.element?.takeIf { it.isValid }
+            }
+            // If all pointers are still valid, return cached
+            if (members.size == cached.memberPtrs.size) {
+                return members
+            }
+            // Some pointers became invalid, recompute
+        }
+
+        val computed = compute()
+        val ptrs = computed.map { spm.createSmartPsiElementPointer(it) }
+        memberListCache[key] = MemberListValue(ptrs)
+        return computed
+    }
+
+    /**
      * Clear all caches explicitly. Optionally align internal modification counter with the provided project.
      */
     @JvmStatic
     fun clearAll(project: Project? = null) {
         typeOfCache.clear()
+        memberListCache.clear()
         if (project != null) {
             lastModCount = PsiModificationTracker.getInstance(project).modificationCount
         } else {

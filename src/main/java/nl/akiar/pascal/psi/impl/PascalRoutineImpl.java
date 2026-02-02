@@ -296,6 +296,86 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
     }
 
     @Override
+    @org.jetbrains.annotations.Nullable
+    public String getReturnTypeName() {
+        // Stub-first approach: get from stub if available
+        nl.akiar.pascal.stubs.PascalRoutineStub stub = getGreenStub();
+        if (stub != null) {
+            return stub.getReturnTypeName();
+        }
+
+        // Fall back to AST parsing
+        return extractReturnTypeNameFromAST();
+    }
+
+    /**
+     * Extract return type name from AST when stub is not available.
+     * Functions have the syntax: function Name(...): ReturnType;
+     */
+    @org.jetbrains.annotations.Nullable
+    private String extractReturnTypeNameFromAST() {
+        com.intellij.lang.ASTNode node = getNode();
+        if (node == null) return null;
+
+        // Find the colon after the parameter list, then find the identifier after the colon
+        com.intellij.lang.ASTNode child = node.getFirstChildNode();
+        boolean foundColon = false;
+
+        while (child != null) {
+            com.intellij.psi.tree.IElementType type = child.getElementType();
+
+            // Look for COLON
+            if (type == nl.akiar.pascal.PascalTokenTypes.COLON) {
+                foundColon = true;
+                child = child.getTreeNext();
+                continue;
+            }
+
+            // After colon, look for the type identifier
+            if (foundColon) {
+                // Skip whitespace
+                if (type == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE) {
+                    child = child.getTreeNext();
+                    continue;
+                }
+
+                // Found the return type identifier
+                if (type == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                    StringBuilder typeName = new StringBuilder(child.getText());
+                    // Handle qualified names like System.TObject
+                    child = child.getTreeNext();
+                    while (child != null) {
+                        com.intellij.psi.tree.IElementType nextType = child.getElementType();
+                        if (nextType == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE) {
+                            child = child.getTreeNext();
+                            continue;
+                        }
+                        if (nextType == nl.akiar.pascal.PascalTokenTypes.DOT) {
+                            typeName.append(".");
+                            child = child.getTreeNext();
+                        } else if (nextType == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                            typeName.append(child.getText());
+                            child = child.getTreeNext();
+                        } else {
+                            break;
+                        }
+                    }
+                    return typeName.toString();
+                }
+
+                // If we hit semicolon or other tokens, stop
+                if (type == nl.akiar.pascal.PascalTokenTypes.SEMI) {
+                    break;
+                }
+            }
+
+            child = child.getTreeNext();
+        }
+
+        return null;
+    }
+
+    @Override
     public String toString() {
         return "PascalRoutine(" + getName() + ")";
     }

@@ -59,6 +59,11 @@ object MemberChainResolver {
         } catch (_: Throwable) {
             // best effort
         }
+        try {
+            InheritanceChainCache.clearAll(project)
+        } catch (_: Throwable) {
+            // best effort
+        }
         if (project != null) {
             try {
                 DaemonCodeAnalyzer.getInstance(project).restart()
@@ -383,7 +388,7 @@ object MemberChainResolver {
         val typeName = when (element) {
             is PascalVariableDefinition -> element.typeName
             is PascalProperty -> element.typeName
-            is PascalRoutine -> null
+            is PascalRoutine -> element.returnTypeName  // Now uses stub-based return type
             else -> null
         }
         if (typeName.isNullOrBlank()) return null
@@ -463,11 +468,13 @@ object MemberChainResolver {
     }
 
     private fun findMemberInType(typeDef: PascalTypeDefinition, name: String, callSiteFile: PsiFile, includeAncestors: Boolean): PsiElement? {
+        // Collect all owner type names using cached inheritance chain
         val owners = mutableSetOf<String>()
-        var current: PascalTypeDefinition? = typeDef
-        while (current != null) {
-            current.name?.let { owners.add(it) }
-            current = if (includeAncestors) current.superClass else null
+        typeDef.name?.let { owners.add(it) }
+        if (includeAncestors) {
+            // Use cached inheritance chain for ancestor lookup
+            val ancestors = InheritanceChainCache.getAllAncestorTypes(typeDef)
+            ancestors.forEach { it.name?.let { n -> owners.add(n) } }
         }
 
         // Search for fields (variables) in the index

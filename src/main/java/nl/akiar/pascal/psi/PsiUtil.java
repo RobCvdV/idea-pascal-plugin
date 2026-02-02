@@ -107,19 +107,40 @@ public class PsiUtil {
     @Nullable
     public static String getVisibility(@NotNull PsiElement element) {
         // Find the containing TYPE_DEFINITION
-        PsiElement parent = element.getParent();
-        while (parent != null && parent.getNode().getElementType() != nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION) {
-            parent = parent.getParent();
+        PsiElement typeDefParent = element.getParent();
+        while (typeDefParent != null && typeDefParent.getNode().getElementType() != nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION) {
+            typeDefParent = typeDefParent.getParent();
         }
 
-        if (parent == null) return null;
+        if (typeDefParent == null) return null;
 
-        // Traverse children of TYPE_DEFINITION to find the last visibility keyword before this element
+        // Strategy 1: Check if element is inside a VISIBILITY_SECTION and extract visibility from there
+        PsiElement visSection = element.getParent();
+        while (visSection != null && visSection != typeDefParent) {
+            if (visSection.getNode() != null &&
+                visSection.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.VISIBILITY_SECTION) {
+                // Found the visibility section, extract the visibility keyword from it
+                return extractVisibilityFromSection(visSection.getNode());
+            }
+            visSection = visSection.getParent();
+        }
+
+        // Strategy 2: Traverse TYPE_DEFINITION children to find visibility keywords
+        // This handles flat structures where visibility keywords are direct children
         String lastVisibility = "public"; // default
-        ASTNode node = parent.getNode();
+        ASTNode node = typeDefParent.getNode();
         for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
-            if (isAncestor(child.getPsi(), element)) break;
+            // If element is inside this child, check this child for visibility then break
+            if (isAncestor(child.getPsi(), element)) {
+                // Check if this child contains visibility keywords
+                String foundVis = extractVisibilityFromNode(child);
+                if (foundVis != null) {
+                    return foundVis;
+                }
+                break;
+            }
 
+            // Check for visibility keywords at this level
             IElementType type = child.getElementType();
             if (type == nl.akiar.pascal.PascalTokenTypes.KW_PRIVATE) {
                 // Check if preceded by STRICT
@@ -147,6 +168,74 @@ public class PsiUtil {
             else if (type == nl.akiar.pascal.PascalTokenTypes.KW_PUBLISHED) lastVisibility = "published";
         }
         return lastVisibility;
+    }
+
+    @Nullable
+    private static String extractVisibilityFromSection(ASTNode sectionNode) {
+        // Look for the first visibility keyword in this section
+        for (ASTNode child = sectionNode.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            IElementType type = child.getElementType();
+            if (type == nl.akiar.pascal.PascalTokenTypes.KW_PRIVATE) {
+                // Check if preceded by STRICT
+                ASTNode prev = child.getTreePrev();
+                while (prev != null && (prev.getElementType() == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE)) {
+                    prev = prev.getTreePrev();
+                }
+                if (prev != null && prev.getElementType() == nl.akiar.pascal.PascalTokenTypes.KW_STRICT) {
+                    return "strict private";
+                }
+                return "private";
+            } else if (type == nl.akiar.pascal.PascalTokenTypes.KW_PROTECTED) {
+                ASTNode prev = child.getTreePrev();
+                while (prev != null && (prev.getElementType() == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE)) {
+                    prev = prev.getTreePrev();
+                }
+                if (prev != null && prev.getElementType() == nl.akiar.pascal.PascalTokenTypes.KW_STRICT) {
+                    return "strict protected";
+                }
+                return "protected";
+            } else if (type == nl.akiar.pascal.PascalTokenTypes.KW_PUBLIC) {
+                return "public";
+            } else if (type == nl.akiar.pascal.PascalTokenTypes.KW_PUBLISHED) {
+                return "published";
+            }
+        }
+        return null;
+    }
+
+    @Nullable
+    private static String extractVisibilityFromNode(ASTNode node) {
+        // Recursively search for visibility keywords in this node
+        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            IElementType type = child.getElementType();
+            if (type == nl.akiar.pascal.PascalTokenTypes.KW_PRIVATE) {
+                ASTNode prev = child.getTreePrev();
+                while (prev != null && (prev.getElementType() == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE)) {
+                    prev = prev.getTreePrev();
+                }
+                if (prev != null && prev.getElementType() == nl.akiar.pascal.PascalTokenTypes.KW_STRICT) {
+                    return "strict private";
+                }
+                return "private";
+            } else if (type == nl.akiar.pascal.PascalTokenTypes.KW_PROTECTED) {
+                ASTNode prev = child.getTreePrev();
+                while (prev != null && (prev.getElementType() == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE)) {
+                    prev = prev.getTreePrev();
+                }
+                if (prev != null && prev.getElementType() == nl.akiar.pascal.PascalTokenTypes.KW_STRICT) {
+                    return "strict protected";
+                }
+                return "protected";
+            } else if (type == nl.akiar.pascal.PascalTokenTypes.KW_PUBLIC) {
+                return "public";
+            } else if (type == nl.akiar.pascal.PascalTokenTypes.KW_PUBLISHED) {
+                return "published";
+            }
+            // Recurse into children
+            String fromChild = extractVisibilityFromNode(child);
+            if (fromChild != null) return fromChild;
+        }
+        return null;
     }
 
     public static boolean isAncestor(@NotNull PsiElement ancestor, @NotNull PsiElement element) {

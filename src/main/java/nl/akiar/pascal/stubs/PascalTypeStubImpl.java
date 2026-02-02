@@ -17,12 +17,15 @@ public class PascalTypeStubImpl extends StubBase<PascalTypeDefinition> implement
     private final String name;
     private final TypeKind typeKind;
     private final List<String> typeParameters;
+    private final String superClassName;
 
-    public PascalTypeStubImpl(StubElement<?> parent, @Nullable String name, @NotNull TypeKind typeKind, @NotNull List<String> typeParameters) {
+    public PascalTypeStubImpl(StubElement<?> parent, @Nullable String name, @NotNull TypeKind typeKind,
+                              @NotNull List<String> typeParameters, @Nullable String superClassName) {
         super(parent, PascalElementTypes.TYPE_DEFINITION);
         this.name = name;
         this.typeKind = typeKind;
         this.typeParameters = typeParameters;
+        this.superClassName = superClassName;
     }
 
     @Override
@@ -41,5 +44,11 @@ public class PascalTypeStubImpl extends StubBase<PascalTypeDefinition> implement
     @NotNull
     public List<String> getTypeParameters() {
         return typeParameters;
+    }
+
+    @Override
+    @Nullable
+    public String getSuperClassName() {
+        return superClassName;
     }
 }

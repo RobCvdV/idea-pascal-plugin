@@ -49,6 +49,18 @@ public interface PascalTypeDefinition extends PsiNameIdentifierOwner, StubBasedP
     @NotNull
     List<PascalVariableDefinition> getFields();
 
+    /**
+     * Get the name of the direct superclass (for classes) or parent interface.
+     * Returns null if no superclass/parent is specified.
+     * This method uses the stub when available for fast access.
+     */
+    @Nullable
+    String getSuperClassName();
+
+    /**
+     * Get the resolved superclass PSI element.
+     * This may require type resolution if crossing unit boundaries.
+     */
     @Nullable
     PascalTypeDefinition getSuperClass();
 

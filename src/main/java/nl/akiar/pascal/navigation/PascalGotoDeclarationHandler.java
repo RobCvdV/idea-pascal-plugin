@@ -25,6 +25,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
+import nl.akiar.pascal.psi.PsiUtil;
 
 /**
  * Handles Cmd+Click (Go to Declaration) for Pascal type references.
@@ -71,6 +72,11 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
                 PsiElement resolved = ref.resolve();
                 if (resolved != null) {
                     LOG.info("[PascalNav]  -> Resolved via reference to: " + resolved);
+                    // Check visibility - only return if accessible
+                    if (!isAccessible(resolved, sourceElement)) {
+                        LOG.info("[PascalNav]  -> Resolved element not accessible due to visibility");
+                        continue; // Try next reference
+                    }
                     return new PsiElement[]{resolved};
                 }
             }
@@ -99,6 +105,11 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
                 PsiElement resolved = MemberChainResolver.resolveElement(sourceElement);
                 LOG.info("[MemberTraversal] Goto: chain resolved -> " + (resolved != null ? resolved.getClass().getSimpleName() : "<unresolved>"));
                 if (resolved != null) {
+                    // Check visibility - only return if accessible
+                    if (!isAccessible(resolved, sourceElement)) {
+                        LOG.info("[MemberTraversal] Goto: resolved element not accessible due to visibility");
+                        return null;
+                    }
                     return new PsiElement[]{resolved};
                 }
             } finally {
@@ -185,5 +196,52 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
     @Nullable
     public String getActionText(@NotNull DataContext context) {
         return null;
+    }
+
+    /**
+     * Check if a resolved element is accessible from the call site based on visibility rules.
+     *
+     * @param resolved The resolved element (routine, property, or variable)
+     * @param callSite The element at the call site
+     * @return true if the element is accessible, false if visibility rules block access
+     */
+    private boolean isAccessible(@NotNull PsiElement resolved, @NotNull PsiElement callSite) {
+        String visibility = PsiUtil.getVisibility(resolved);
+        if (visibility == null) {
+            return true; // No visibility info, allow access
+        }
+
+        String resolvedUnit = PsiUtil.getUnitName(resolved);
+        String callSiteUnit = PsiUtil.getUnitName(callSite);
+
+        LOG.info("[PascalNav] Visibility check: " + visibility + ", resolvedUnit=" + resolvedUnit + ", callSiteUnit=" + callSiteUnit);
+
+        // Public and published are always accessible
+        if ("public".equals(visibility) || "published".equals(visibility)) {
+            return true;
+        }
+
+        // Private and strict private: must be in same unit
+        if ("private".equals(visibility) || "strict private".equals(visibility)) {
+            boolean sameUnit = resolvedUnit != null && resolvedUnit.equalsIgnoreCase(callSiteUnit);
+            if (!sameUnit) {
+                LOG.info("[PascalNav]  -> Private member not accessible from different unit");
+            }
+            return sameUnit;
+        }
+
+        // Protected and strict protected: same unit OR descendant class
+        // For now, we allow protected access from the same unit only
+        // Full inheritance-based protected access would require checking if callSite is in a descendant class
+        if ("protected".equals(visibility) || "strict protected".equals(visibility)) {
+            boolean sameUnit = resolvedUnit != null && resolvedUnit.equalsIgnoreCase(callSiteUnit);
+            if (!sameUnit) {
+                // TODO: Check if callSite is within a class that descends from resolved's containing class
+                LOG.info("[PascalNav]  -> Protected member not accessible from different unit (inheritance check not implemented)");
+            }
+            return sameUnit;
+        }
+
+        return true;
     }
 }

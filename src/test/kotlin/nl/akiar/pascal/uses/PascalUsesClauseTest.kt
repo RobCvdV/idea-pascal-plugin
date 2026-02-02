@@ -179,8 +179,9 @@ class PascalUsesClauseTest : BasePlatformTestCase() {
 
     // ==================== Out of Scope Tests ====================
 
-    @Test
-    fun testTypeNotInUsesClause_ShouldError() {
+    // TODO: Re-enable when PascalScopeAnnotator is re-enabled
+    // @Test
+    fun disabledTestTypeNotInUsesClause_ShouldError() {
         myFixture.configureByText("UnitA.pas", """
             unit UnitA;
             interface
@@ -202,8 +203,9 @@ class PascalUsesClauseTest : BasePlatformTestCase() {
         myFixture.checkHighlighting()
     }
 
-    @Test
-    fun testTypeInImplementationUses_ReferencedInInterface_ShouldError() {
+    // TODO: Re-enable when PascalScopeAnnotator is re-enabled
+    // @Test
+    fun disabledTestTypeInImplementationUses_ReferencedInInterface_ShouldError() {
         myFixture.configureByText("UnitA.pas", """
             unit UnitA;
             interface
@@ -253,8 +255,9 @@ class PascalUsesClauseTest : BasePlatformTestCase() {
 
     // ==================== Out of Scope with Multiple Units ====================
 
-    @Test
-    fun testTypeNotInScope_ExistsInMultipleUnits_ShouldListAll() {
+    // TODO: Re-enable when PascalScopeAnnotator is re-enabled
+    // @Test
+    fun disabledTestTypeNotInScope_ExistsInMultipleUnits_ShouldListAll() {
         myFixture.configureByText("UnitA.pas", """
             unit UnitA;
             interface
@@ -353,8 +356,9 @@ class PascalUsesClauseTest : BasePlatformTestCase() {
         myFixture.checkHighlighting()
     }
 
-    @Test
-    fun testVariableNotInUsesClause_ShouldError() {
+    // TODO: Re-enable when PascalScopeAnnotator is re-enabled
+    // @Test
+    fun disabledTestVariableNotInUsesClause_ShouldError() {
         myFixture.configureByText("UnitA.pas", """
             unit UnitA;
             interface

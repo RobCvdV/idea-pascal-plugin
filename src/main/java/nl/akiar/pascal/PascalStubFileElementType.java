@@ -33,7 +33,7 @@ public class PascalStubFileElementType extends IStubFileElementType<PsiFileStub<
 
     @Override
     public int getStubVersion() {
-        // Bump to force reindex after changing stub gating behavior
-        return super.getStubVersion() + 3;
+        // Bump to force reindex after changing stub structure (added superClassName to type stub)
+        return super.getStubVersion() + 4;
     }
 }

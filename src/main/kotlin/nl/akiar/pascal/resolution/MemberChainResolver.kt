@@ -469,6 +469,16 @@ object MemberChainResolver {
             current.name?.let { owners.add(it) }
             current = if (includeAncestors) current.superClass else null
         }
+
+        // Search for fields (variables) in the index
+        val fields = PascalVariableIndex.findVariables(name, callSiteFile.project)
+        val field = fields.firstOrNull { v ->
+            v.variableKind == nl.akiar.pascal.psi.VariableKind.FIELD &&
+            v.containingClass?.name?.let { owners.contains(it) } == true
+        }
+        if (field != null) return field
+
+        // Search for properties in the index
         val props = PascalPropertyIndex.findProperties(name, callSiteFile.project)
         val prop = props.firstOrNull { p ->
             val owner = p.containingClass?.name
@@ -476,6 +486,7 @@ object MemberChainResolver {
         }
         if (prop != null) return prop
 
+        // Search for routines in the index
         val routines = PascalRoutineIndex.findRoutines(name, callSiteFile.project)
         val routine = routines.firstOrNull { r ->
             val ownerName = r.containingClassName
@@ -497,7 +508,18 @@ object MemberChainResolver {
             if (vf != null) {
                 val psi = com.intellij.psi.PsiManager.getInstance(project).findFile(vf)
                 if (psi != null) {
-                    // Try properties first
+                    // Try fields first
+                    val fileFields = PsiTreeUtil.findChildrenOfType(psi, PascalVariableDefinition::class.java)
+                    val fHit = fileFields.firstOrNull { f ->
+                        f.name.equals(name, true) &&
+                        f.variableKind == nl.akiar.pascal.psi.VariableKind.FIELD &&
+                        f.containingClass?.name?.let { owners.contains(it) } == true
+                    }
+                    if (fHit != null) {
+                        maybeLog("[MemberTraversal] member '$name' (scan) -> PascalVariableDefinitionImpl in unit=${ownerUnit}", callSiteFile)
+                        return fHit
+                    }
+                    // Try properties
                     val fileProps = PsiTreeUtil.findChildrenOfType(psi, PascalProperty::class.java)
                     val pHit = fileProps.firstOrNull { p -> p.name.equals(name, true) && p.containingClass?.name?.let { owners.contains(it) } == true }
                     if (pHit != null) {
@@ -510,6 +532,38 @@ object MemberChainResolver {
                     if (rHit != null) {
                         maybeLog("[MemberTraversal] member '$name' (scan) -> PascalRoutineImpl in unit=${ownerUnit}", callSiteFile)
                         return rHit
+                    }
+                }
+            }
+        }
+
+        // Last resort: scan the type definition directly if it's accessible
+        // This handles cases where index isn't populated (e.g., test fixtures)
+        val typeFile = typeDef.containingFile
+        if (typeFile != null) {
+            for (ownerType in owners.mapNotNull { ownerName ->
+                PsiTreeUtil.findChildrenOfType(typeFile, PascalTypeDefinition::class.java)
+                    .firstOrNull { it.name.equals(ownerName, true) }
+            }) {
+                // Check fields
+                for (f in ownerType.fields) {
+                    if (f.name.equals(name, true)) {
+                        maybeLog("[MemberTraversal] member '$name' (direct scan) -> field in type=${ownerType.name}", callSiteFile)
+                        return f
+                    }
+                }
+                // Check properties
+                for (p in ownerType.properties) {
+                    if (p.name.equals(name, true)) {
+                        maybeLog("[MemberTraversal] member '$name' (direct scan) -> property in type=${ownerType.name}", callSiteFile)
+                        return p
+                    }
+                }
+                // Check methods
+                for (m in ownerType.methods) {
+                    if (m.name.equals(name, true)) {
+                        maybeLog("[MemberTraversal] member '$name' (direct scan) -> method in type=${ownerType.name}", callSiteFile)
+                        return m
                     }
                 }
             }

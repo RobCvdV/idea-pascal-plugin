@@ -49,6 +49,11 @@ java {
 }
 
 tasks {
+    // Handle duplicate plugin.xml from patchPluginXml
+    withType<ProcessResources> {
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    }
+
     // Set the JVM compatibility versions
     withType<JavaCompile> {
         sourceCompatibility = "21"

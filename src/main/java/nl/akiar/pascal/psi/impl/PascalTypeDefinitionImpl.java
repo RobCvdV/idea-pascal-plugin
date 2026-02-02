@@ -4,6 +4,7 @@ import com.intellij.extapi.psi.StubBasedPsiElementBase;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.stubs.IStubElementType;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -310,38 +311,129 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
 
     @Override
     @Nullable
-    public PascalTypeDefinition getSuperClass() {
-        // Look for TBase in class(TBase)
+    public String getSuperClassName() {
+        // Stub-first approach: get from stub if available
+        PascalTypeStub stub = getGreenStub();
+        if (stub != null) {
+            return stub.getSuperClassName();
+        }
+
+        // Fall back to AST parsing
+        return extractSuperClassNameFromAST();
+    }
+
+    /**
+     * Extract superclass name from AST when stub is not available.
+     * The AST structure is:
+     *   TYPE_DEFINITION
+     *     IDENTIFIER (type name)
+     *     CLASS_TYPE / RECORD_TYPE / INTERFACE_TYPE
+     *       LPAREN
+     *       IDENTIFIER (superclass name)
+     *       ...
+     */
+    @Nullable
+    private String extractSuperClassNameFromAST() {
         ASTNode node = getNode();
-        ASTNode lparen = node.findChildByType(PascalTokenTypes.LPAREN);
-        if (lparen != null) {
-            ASTNode next = lparen.getTreeNext();
-            while (next != null && next.getElementType() == PascalTokenTypes.WHITE_SPACE) {
+        if (node == null) return null;
+
+        // Check that we're not an enum or alias type
+        TypeKind kind = getTypeKind();
+        if (kind == TypeKind.ENUM || kind == TypeKind.ALIAS || kind == TypeKind.PROCEDURAL) {
+            return null;
+        }
+
+        // Look for CLASS_TYPE, RECORD_TYPE, or INTERFACE_TYPE child node
+        ASTNode typeNode = node.findChildByType(nl.akiar.pascal.psi.PascalElementTypes.CLASS_TYPE);
+        if (typeNode == null) {
+            typeNode = node.findChildByType(nl.akiar.pascal.psi.PascalElementTypes.RECORD_TYPE);
+        }
+        if (typeNode == null) {
+            typeNode = node.findChildByType(nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_TYPE);
+        }
+
+        // If no specific type node, search in the TYPE_DEFINITION itself
+        if (typeNode == null) {
+            typeNode = node;
+        }
+
+        // Look for LPAREN within the type node
+        ASTNode lparen = typeNode.findChildByType(PascalTokenTypes.LPAREN);
+        if (lparen == null) {
+            // Also check recursively in children
+            lparen = nl.akiar.pascal.psi.PsiUtil.findFirstRecursive(typeNode, PascalTokenTypes.LPAREN);
+        }
+        if (lparen == null) return null;
+
+        // Find the first identifier after LPAREN - this is the superclass name
+        ASTNode next = lparen.getTreeNext();
+        StringBuilder superName = new StringBuilder();
+        while (next != null) {
+            IElementType type = next.getElementType();
+            if (type == PascalTokenTypes.WHITE_SPACE) {
                 next = next.getTreeNext();
+                continue;
             }
-            if (next != null) {
-                // Should be a type reference. For now, try to resolve it.
-                PsiElement psi = next.getPsi();
-                PsiReference[] refs = psi.getReferences();
-                for (PsiReference ref : refs) {
-                    PsiElement resolved = ref.resolve();
-                    if (resolved instanceof PascalTypeDefinition) {
-                        return (PascalTypeDefinition) resolved;
+            if (type == PascalTokenTypes.IDENTIFIER) {
+                superName.append(next.getText());
+                next = next.getTreeNext();
+                // Handle dotted names like System.TObject
+                while (next != null) {
+                    if (next.getElementType() == PascalTokenTypes.WHITE_SPACE) {
+                        next = next.getTreeNext();
+                        continue;
+                    }
+                    if (next.getElementType() == PascalTokenTypes.DOT) {
+                        superName.append(".");
+                        next = next.getTreeNext();
+                    } else if (next.getElementType() == PascalTokenTypes.IDENTIFIER) {
+                        superName.append(next.getText());
+                        next = next.getTreeNext();
+                    } else {
+                        break;
                     }
                 }
+                return superName.length() > 0 ? superName.toString() : null;
+            }
+            // If we hit RPAREN or COMMA before identifier, no superclass
+            if (type == PascalTokenTypes.RPAREN || type == PascalTokenTypes.COMMA) {
+                return null;
+            }
+            next = next.getTreeNext();
+        }
+        return null;
+    }
 
-                // Manual fallback - use transitive dependency resolution
-                // This uses this type's containing file's transitive deps, which is correct
-                // because the superclass must be visible from where the class is defined
-                String typeName = psi.getText();
-                nl.akiar.pascal.stubs.PascalTypeIndex.TypeLookupResult result =
-                        nl.akiar.pascal.stubs.PascalTypeIndex.findTypeWithTransitiveDeps(
-                                typeName, getContainingFile(), psi.getTextOffset());
-                if (!result.getInScopeTypes().isEmpty()) {
-                    return result.getInScopeTypes().get(0);
+    @Override
+    @Nullable
+    public PascalTypeDefinition getSuperClass() {
+        // Step 1: Get superclass name (fast path via stub, or slow path via AST)
+        String superClassName = getSuperClassName();
+        if (superClassName == null) {
+            return null;
+        }
+
+        // Step 2a: First, try to find in the same file (fast path, no index needed)
+        // This is important for test fixtures and when the superclass is in the same unit
+        PsiFile containingFile = getContainingFile();
+        if (containingFile != null) {
+            Collection<PascalTypeDefinition> sameFileTypes =
+                    PsiTreeUtil.findChildrenOfType(containingFile, PascalTypeDefinition.class);
+            for (PascalTypeDefinition typeDef : sameFileTypes) {
+                if (typeDef != this && superClassName.equalsIgnoreCase(typeDef.getName())) {
+                    return typeDef;
                 }
             }
         }
+
+        // Step 2b: Fall back to transitive dependency resolution for cross-unit lookups
+        nl.akiar.pascal.stubs.PascalTypeIndex.TypeLookupResult result =
+                nl.akiar.pascal.stubs.PascalTypeIndex.findTypeWithTransitiveDeps(
+                        superClassName, containingFile, getTextOffset());
+        if (!result.getInScopeTypes().isEmpty()) {
+            return result.getInScopeTypes().get(0);
+        }
+
         return null;
     }
 

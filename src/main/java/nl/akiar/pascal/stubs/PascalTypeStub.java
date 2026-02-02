@@ -31,4 +31,14 @@ public interface PascalTypeStub extends StubElement<PascalTypeDefinition> {
      */
     @NotNull
     List<String> getTypeParameters();
+
+    /**
+     * Get the name of the direct superclass (for classes) or parent interface.
+     * For "TMyClass = class(TBase)", returns "TBase".
+     * For types without a parent, returns null.
+     * This is stored in the stub to enable fast inheritance chain resolution
+     * without loading the full PSI tree.
+     */
+    @Nullable
+    String getSuperClassName();
 }

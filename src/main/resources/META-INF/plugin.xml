@@ -83,6 +83,10 @@
         <lang.foldingBuilder language="ObjectPascal"
                             implementationClass="nl.akiar.pascal.PascalFoldingBuilder"/>
 
+        <!-- Register Pascal Commenter (line and block comments) -->
+        <lang.commenter language="ObjectPascal"
+                        implementationClass="nl.akiar.pascal.PascalCommenter"/>
+
         <!-- Pascal Color Settings Page -->
         <colorSettingsPage implementation="nl.akiar.pascal.PascalColorSettingsPage"/>
 

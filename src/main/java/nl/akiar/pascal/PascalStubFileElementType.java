@@ -33,7 +33,7 @@ public class PascalStubFileElementType extends IStubFileElementType<PsiFileStub<
 
     @Override
     public int getStubVersion() {
-        // Bump to force reindex after changing stub structure (added returnTypeName to routine stub)
-        return super.getStubVersion() + 5;
+        // Bump to force reindex after adding attribute stub support
+        return super.getStubVersion() + 6;
     }
 }

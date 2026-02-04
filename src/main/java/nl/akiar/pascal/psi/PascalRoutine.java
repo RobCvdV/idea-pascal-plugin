@@ -8,7 +8,7 @@ import org.jetbrains.annotations.Nullable;
 /**
  * Interface for Pascal routine definitions (procedures, functions, methods).
  */
-public interface PascalRoutine extends PsiNameIdentifierOwner, StubBasedPsiElement<PascalRoutineStub> {
+public interface PascalRoutine extends PsiNameIdentifierOwner, StubBasedPsiElement<PascalRoutineStub>, PascalAttributable {
     /**
      * Check if this is an implementation (has a body).
      */

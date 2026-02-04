@@ -10,7 +10,7 @@ import org.jetbrains.annotations.Nullable;
  * PSI element interface for Pascal variable definitions.
  * Represents: var declarations, parameters, fields, constants.
  */
-public interface PascalVariableDefinition extends PsiNameIdentifierOwner, StubBasedPsiElement<PascalVariableStub> {
+public interface PascalVariableDefinition extends PsiNameIdentifierOwner, StubBasedPsiElement<PascalVariableStub>, PascalAttributable {
 
     /**
      * Get the variable name.

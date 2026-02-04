@@ -13,7 +13,7 @@ import java.util.List;
  * PSI element interface for Pascal type definitions.
  * Represents: TMyClass = class, TMyRecord = record, IMyInterface = interface
  */
-public interface PascalTypeDefinition extends PsiNameIdentifierOwner, StubBasedPsiElement<PascalTypeStub> {
+public interface PascalTypeDefinition extends PsiNameIdentifierOwner, StubBasedPsiElement<PascalTypeStub>, PascalAttributable {
     @Override
     @Nullable
     String getName();
@@ -69,4 +69,18 @@ public interface PascalTypeDefinition extends PsiNameIdentifierOwner, StubBasedP
 
     @NotNull
     String getUnitName();
+
+    /**
+     * Get the GUID for an interface type.
+     * In Delphi, interfaces can have a GUID attribute like:
+     * <pre>
+     *   IMyInterface = interface
+     *     ['{285DEA8A-B865-11D1-AAA7-00C04FB17A72}']
+     *   end;
+     * </pre>
+     *
+     * @return The GUID string (without quotes or brackets), or null if not an interface or no GUID specified
+     */
+    @Nullable
+    String getGUID();
 }

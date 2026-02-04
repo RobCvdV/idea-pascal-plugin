@@ -9,6 +9,7 @@ import com.intellij.psi.stubs.IStubElementType;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
 import nl.akiar.pascal.PascalTokenTypes;
+import nl.akiar.pascal.psi.PascalAttribute;
 import nl.akiar.pascal.psi.PascalElementTypes;
 import nl.akiar.pascal.psi.PascalRoutine;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
@@ -17,6 +18,7 @@ import nl.akiar.pascal.stubs.PascalRoutineStub;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
@@ -42,23 +44,98 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
     @Override
     @Nullable
     public PsiElement getNameIdentifier() {
-        // For qualified names TClass.Method, we want the last identifier before the parameters/body starts.
-        // We must avoid identifiers inside parameters or the return type.
-        // Also accept keywords that can be used as identifiers (like "Index", "Name", "Read", etc.)
+        // The routine name is the IDENTIFIER that appears AFTER the routine keyword
+        // (procedure, function, constructor, destructor) and BEFORE the parameter list.
+        //
+        // When attributes are present, they appear BEFORE the routine keyword:
+        // [Authenticate(...)]
+        // function PackagingBalancesByClientIds(...)
+        //
+        // Strategy:
+        // 1. Find the routine keyword (procedure, function, constructor, destructor)
+        // 2. Find the first identifier AFTER the routine keyword
 
+        ASTNode node = getNode();
+        int routineKeywordOffset = -1;
+
+        // Find the position of the routine keyword
+        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            IElementType type = child.getElementType();
+            if (type == PascalTokenTypes.KW_PROCEDURE ||
+                type == PascalTokenTypes.KW_FUNCTION ||
+                type == PascalTokenTypes.KW_CONSTRUCTOR ||
+                type == PascalTokenTypes.KW_DESTRUCTOR) {
+                routineKeywordOffset = child.getStartOffset() + child.getTextLength();
+                break;
+            }
+        }
+
+        if (routineKeywordOffset < 0) {
+            // No routine keyword found - fall back to original logic
+            return findNameIdentifierFallback();
+        }
+
+        // Find the first identifier AFTER the routine keyword
+        List<ASTNode> allIds = nl.akiar.pascal.psi.PsiUtil.findAllRecursiveAnyOf(
+            node,
+            nl.akiar.pascal.psi.PsiUtil.IDENTIFIER_LIKE_TYPES
+        );
+
+        // Find cutoff: first LPAREN or COLON or SEMI AFTER the routine keyword
+        int cutoffOffset = Integer.MAX_VALUE;
+        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            IElementType type = child.getElementType();
+            int offset = child.getStartOffset();
+            if (offset > routineKeywordOffset) {
+                if (type == PascalTokenTypes.LPAREN || type == PascalTokenTypes.COLON || type == PascalTokenTypes.SEMI) {
+                    cutoffOffset = offset;
+                    break;
+                }
+            }
+        }
+
+        ASTNode bestId = null;
+        for (ASTNode idNode : allIds) {
+            int idOffset = idNode.getStartOffset();
+
+            // Must be after routine keyword
+            if (idOffset < routineKeywordOffset) {
+                continue;
+            }
+
+            // Must be before cutoff
+            if (idOffset >= cutoffOffset) {
+                continue;
+            }
+
+            // Skip identifiers inside parameters
+            PsiElement psi = idNode.getPsi();
+            if (nl.akiar.pascal.psi.PsiUtil.hasParent(psi, nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER)) {
+                continue;
+            }
+
+            // For qualified names (TClass.Method), keep the last one
+            bestId = idNode;
+        }
+
+        return bestId != null ? bestId.getPsi() : null;
+    }
+
+    /**
+     * Fallback method for finding name identifier when no routine keyword is found.
+     */
+    @Nullable
+    private PsiElement findNameIdentifierFallback() {
         ASTNode node = getNode();
         List<ASTNode> allIds = nl.akiar.pascal.psi.PsiUtil.findAllRecursiveAnyOf(
             node,
             nl.akiar.pascal.psi.PsiUtil.IDENTIFIER_LIKE_TYPES
         );
 
-        // Find the position of the opening parenthesis (start of parameters)
-        // or colon (return type) or semicolon (end of declaration)
         int parenOffset = findFirstTokenOffset(node, nl.akiar.pascal.PascalTokenTypes.LPAREN);
         int colonOffset = findFirstTokenOffset(node, nl.akiar.pascal.PascalTokenTypes.COLON);
         int semiOffset = findFirstTokenOffset(node, nl.akiar.pascal.PascalTokenTypes.SEMI);
 
-        // The routine name must appear before any of these
         int cutoffOffset = Integer.MAX_VALUE;
         if (parenOffset >= 0) cutoffOffset = Math.min(cutoffOffset, parenOffset);
         if (colonOffset >= 0) cutoffOffset = Math.min(cutoffOffset, colonOffset);
@@ -67,20 +144,13 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         ASTNode bestId = null;
         for (ASTNode idNode : allIds) {
             PsiElement psi = idNode.getPsi();
-
-            // Skip identifiers inside parameters
             if (nl.akiar.pascal.psi.PsiUtil.hasParent(psi, nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER)) {
                 continue;
             }
-
-            // Skip identifiers that appear after the cutoff (parameters, return type)
             int idOffset = idNode.getStartOffset();
             if (idOffset >= cutoffOffset) {
                 continue;
             }
-
-            // This identifier appears before parameters/return type, it's the routine name
-            // For qualified names (TClass.Method), keep the last one
             bestId = idNode;
         }
 
@@ -388,5 +458,60 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         // Fallback: if we have an interface declaration inside a type, use the type's name
         nl.akiar.pascal.psi.PascalTypeDefinition td = getContainingClass();
         return td != null ? td.getName() : null;
+    }
+
+    @Override
+    @NotNull
+    public List<PascalAttribute> getAttributes() {
+        // Attributes can be either:
+        // 1. Direct children in an ATTRIBUTE_LIST (synthesized by PascalSonarParser when
+        //    sonar-delphi doesn't create AttributeListNode)
+        // 2. Preceding siblings (for methods in visibility sections where sonar-delphi
+        //    properly creates AttributeListNode)
+        //
+        // First, look for DIRECT child ATTRIBUTE_LIST elements
+        List<PascalAttribute> directAttrs = new ArrayList<>();
+        for (PsiElement child = getFirstChild(); child != null; child = child.getNextSibling()) {
+            if (child.getNode().getElementType() == PascalElementTypes.ATTRIBUTE_LIST) {
+                // Found an attribute list, collect its attributes
+                directAttrs.addAll(PsiTreeUtil.findChildrenOfType(child, PascalAttribute.class));
+            }
+            // Stop at routine keywords - anything after is the routine itself
+            IElementType type = child.getNode().getElementType();
+            if (type == PascalTokenTypes.KW_PROCEDURE || type == PascalTokenTypes.KW_FUNCTION ||
+                type == PascalTokenTypes.KW_CONSTRUCTOR || type == PascalTokenTypes.KW_DESTRUCTOR) {
+                break;
+            }
+        }
+        if (!directAttrs.isEmpty()) {
+            return directAttrs;
+        }
+
+        // Fallback: look for preceding sibling attributes (original behavior)
+        List<PascalAttribute> attributes = new ArrayList<>();
+        PsiElement prev = getPrevSibling();
+        while (prev != null) {
+            if (prev instanceof PascalAttribute) {
+                // Insert at beginning to maintain source order
+                attributes.add(0, (PascalAttribute) prev);
+            } else if (prev.getNode().getElementType() != PascalTokenTypes.WHITE_SPACE
+                    && !(prev.getNode().getElementType() == PascalElementTypes.ATTRIBUTE_LIST)) {
+                // Stop at non-whitespace, non-attribute elements
+                break;
+            }
+            prev = prev.getPrevSibling();
+        }
+        return attributes;
+    }
+
+    @Override
+    @Nullable
+    public PascalAttribute findAttribute(@NotNull String name) {
+        for (PascalAttribute attr : getAttributes()) {
+            if (name.equalsIgnoreCase(attr.getName())) {
+                return attr;
+            }
+        }
+        return null;
     }
 }

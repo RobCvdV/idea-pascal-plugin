@@ -11,6 +11,7 @@ import com.intellij.psi.util.PsiTreeUtil;
 import nl.akiar.pascal.PascalLanguage;
 import nl.akiar.pascal.PascalPsiElement;
 import nl.akiar.pascal.PascalTokenTypes;
+import nl.akiar.pascal.psi.PascalAttribute;
 import nl.akiar.pascal.psi.PascalElementTypes;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
 import org.jetbrains.annotations.NotNull;
@@ -48,6 +49,12 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
                         }
                     }
 
+                    // If inside an attribute, treat as attribute reference
+                    PascalAttribute attribute = findContainingAttribute(element);
+                    if (attribute != null && !attribute.isGUID()) {
+                        return new PsiReference[]{new PascalAttributeReference(element, attribute)};
+                    }
+
                     // If inside a UNIT_REFERENCE (header or uses), treat as unit reference
                     if (parent != null && parent.getNode() != null && parent.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
                         return new PsiReference[]{new PascalUnitReference(element)};
@@ -81,5 +88,26 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
                 PlatformPatterns.psiElement().withElementType(PascalElementTypes.UNIT_REFERENCE),
                 provider);
         LOG.info("[PascalNav] Registration complete (broad pattern for debugging)");
+    }
+
+    /**
+     * Find the PascalAttribute containing the given element, if any.
+     */
+    private static PascalAttribute findContainingAttribute(PsiElement element) {
+        PsiElement current = element;
+        while (current != null) {
+            if (current instanceof PascalAttribute) {
+                return (PascalAttribute) current;
+            }
+            // Stop at type/routine boundaries
+            if (current instanceof PascalTypeDefinition ||
+                current instanceof nl.akiar.pascal.psi.PascalRoutine ||
+                current instanceof nl.akiar.pascal.psi.PascalProperty ||
+                current instanceof nl.akiar.pascal.psi.PascalVariableDefinition) {
+                break;
+            }
+            current = current.getParent();
+        }
+        return null;
     }
 }

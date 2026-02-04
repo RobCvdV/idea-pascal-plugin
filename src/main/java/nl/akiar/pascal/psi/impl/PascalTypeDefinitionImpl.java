@@ -10,6 +10,7 @@ import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
 import nl.akiar.pascal.PascalTokenTypes;
+import nl.akiar.pascal.psi.PascalAttribute;
 import nl.akiar.pascal.psi.PascalProperty;
 import nl.akiar.pascal.psi.PascalRoutine;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
@@ -157,8 +158,34 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
     @Override
     @Nullable
     public PsiElement getNameIdentifier() {
-        // The name identifier is the first IDENTIFIER token in the node
-        // Use recursive search because Sonar nests identifiers
+        // The name identifier is the IDENTIFIER that appears BEFORE '=' and AFTER any attribute brackets.
+        // Attributes are in format: [AttrName] or [AttrName(args)]
+        // When attributes are present, they appear as direct children of the type declaration node
+        // because sonar-delphi doesn't wrap them in AttributeListNode for type declarations.
+        //
+        // Strategy: Find IDENTIFIER that is NOT inside brackets
+        // - If we see '[', we're in an attribute - skip until ']'
+        // - First IDENTIFIER after all ']' brackets is the type name
+
+        ASTNode node = getNode();
+        boolean inBracket = false;
+
+        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            IElementType type = child.getElementType();
+
+            if (type == PascalTokenTypes.LBRACKET) {
+                inBracket = true;
+            } else if (type == PascalTokenTypes.RBRACKET) {
+                inBracket = false;
+            } else if (type == PascalTokenTypes.IDENTIFIER && !inBracket) {
+                return child.getPsi();
+            } else if (type == PascalTokenTypes.EQ) {
+                // Reached '=' without finding identifier - shouldn't happen in valid code
+                break;
+            }
+        }
+
+        // Fallback: use recursive search (original behavior)
         ASTNode identifierNode = nl.akiar.pascal.psi.PsiUtil.findFirstRecursive(getNode(), nl.akiar.pascal.PascalTokenTypes.IDENTIFIER);
         if (identifierNode != null) {
             return identifierNode.getPsi();
@@ -496,5 +523,77 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
     @NotNull
     public String getUnitName() {
         return nl.akiar.pascal.psi.PsiUtil.getUnitName(this);
+    }
+
+    @Override
+    @NotNull
+    public List<PascalAttribute> getAttributes() {
+        // Attributes can be either:
+        // 1. Direct children of this type definition (synthesized by PascalSonarParser for type declarations)
+        // 2. Preceding siblings (for some edge cases)
+        //
+        // First, look for DIRECT child ATTRIBUTE_LIST elements (not in nested routines)
+        List<PascalAttribute> directAttrs = new ArrayList<>();
+        for (PsiElement child = getFirstChild(); child != null; child = child.getNextSibling()) {
+            if (child.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.ATTRIBUTE_LIST) {
+                // Found an attribute list, collect its attributes
+                directAttrs.addAll(PsiTreeUtil.findChildrenOfType(child, PascalAttribute.class));
+            }
+            // Stop at major structural elements (we don't want to descend into the class body)
+            if (child.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.CLASS_TYPE ||
+                child.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.RECORD_TYPE ||
+                child.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_TYPE) {
+                break;
+            }
+        }
+        if (!directAttrs.isEmpty()) {
+            return directAttrs;
+        }
+
+        // Fallback: look for preceding sibling attributes (original behavior)
+        List<PascalAttribute> attributes = new ArrayList<>();
+        PsiElement prev = getPrevSibling();
+        while (prev != null) {
+            if (prev instanceof PascalAttribute) {
+                // Insert at beginning to maintain source order
+                attributes.add(0, (PascalAttribute) prev);
+            } else if (prev.getNode().getElementType() != PascalTokenTypes.WHITE_SPACE
+                    && !(prev.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.ATTRIBUTE_LIST)) {
+                // Stop at non-whitespace, non-attribute elements
+                break;
+            }
+            prev = prev.getPrevSibling();
+        }
+        return attributes;
+    }
+
+    @Override
+    @Nullable
+    public PascalAttribute findAttribute(@NotNull String name) {
+        for (PascalAttribute attr : getAttributes()) {
+            if (name.equalsIgnoreCase(attr.getName())) {
+                return attr;
+            }
+        }
+        return null;
+    }
+
+    @Override
+    @Nullable
+    public String getGUID() {
+        // GUIDs only apply to interfaces
+        if (getTypeKind() != TypeKind.INTERFACE) {
+            return null;
+        }
+
+        // For interfaces, look for GUID attributes inside the interface body
+        // The GUID looks like ['{GUID-STRING}']
+        Collection<PascalAttribute> attrs = PsiTreeUtil.findChildrenOfType(this, PascalAttribute.class);
+        for (PascalAttribute attr : attrs) {
+            if (attr.isGUID()) {
+                return attr.getGUIDValue();
+            }
+        }
+        return null;
     }
 }

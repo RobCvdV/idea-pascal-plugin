@@ -98,6 +98,9 @@
         <!-- Pascal Stub Index for property definitions -->
         <stubIndex implementation="nl.akiar.pascal.stubs.PascalPropertyIndex"/>
 
+        <!-- Pascal Stub Index for attribute definitions -->
+        <stubIndex implementation="nl.akiar.pascal.stubs.PascalAttributeIndex"/>
+
         <!-- Pascal Stub Element Types Holder -->
         <stubElementTypeHolder class="nl.akiar.pascal.psi.PascalElementTypes"/>
 

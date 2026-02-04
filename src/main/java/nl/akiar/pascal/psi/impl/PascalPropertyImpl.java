@@ -8,8 +8,13 @@ import com.intellij.psi.stubs.IStubElementType;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
 import nl.akiar.pascal.PascalTokenTypes;
+import nl.akiar.pascal.psi.PascalAttribute;
+import nl.akiar.pascal.psi.PascalElementTypes;
 import nl.akiar.pascal.psi.PascalProperty;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
+
+import java.util.ArrayList;
+import java.util.List;
 import nl.akiar.pascal.stubs.PascalPropertyStub;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -154,5 +159,35 @@ public class PascalPropertyImpl extends StubBasedPsiElementBase<PascalPropertySt
     @Override
     public String toString() {
         return "PascalProperty(" + getName() + ")";
+    }
+
+    @Override
+    @NotNull
+    public List<PascalAttribute> getAttributes() {
+        List<PascalAttribute> attributes = new ArrayList<>();
+        PsiElement prev = getPrevSibling();
+        while (prev != null) {
+            if (prev instanceof PascalAttribute) {
+                // Insert at beginning to maintain source order
+                attributes.add(0, (PascalAttribute) prev);
+            } else if (prev.getNode().getElementType() != PascalTokenTypes.WHITE_SPACE
+                    && !(prev.getNode().getElementType() == PascalElementTypes.ATTRIBUTE_LIST)) {
+                // Stop at non-whitespace, non-attribute elements
+                break;
+            }
+            prev = prev.getPrevSibling();
+        }
+        return attributes;
+    }
+
+    @Override
+    @Nullable
+    public PascalAttribute findAttribute(@NotNull String name) {
+        for (PascalAttribute attr : getAttributes()) {
+            if (name.equalsIgnoreCase(attr.getName())) {
+                return attr;
+            }
+        }
+        return null;
     }
 }

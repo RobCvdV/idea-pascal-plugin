@@ -204,4 +204,19 @@ public interface PascalElementTypes {
      * Element type for enum type definitions.
      */
     com.intellij.psi.tree.IElementType ENUM_TYPE = new nl.akiar.pascal.PascalTokenType("ENUM_TYPE");
+
+    // ============================================================================
+    // Attribute Element Types
+    // ============================================================================
+
+    /**
+     * Element type for attribute definitions [AttrName] or [AttrName(args)].
+     */
+    com.intellij.psi.stubs.IStubElementType<nl.akiar.pascal.stubs.PascalAttributeStub, PascalAttribute> ATTRIBUTE_DEFINITION =
+            new nl.akiar.pascal.stubs.PascalAttributeStubElementType();
+
+    /**
+     * Element type for attribute list (container for multiple attributes).
+     */
+    com.intellij.psi.tree.IElementType ATTRIBUTE_LIST = new nl.akiar.pascal.PascalTokenType("ATTRIBUTE_LIST");
 }

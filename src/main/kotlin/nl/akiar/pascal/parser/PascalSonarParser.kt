@@ -294,7 +294,19 @@ class PascalSonarParser : PsiParser {
             node.javaClass.simpleName.contains("EnumType", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.ENUM_TYPE
             // Generic type declaration (fallback)
             node is org.sonar.plugins.communitydelphi.api.ast.TypeDeclarationNode -> nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION
+
             node is org.sonar.plugins.communitydelphi.api.ast.TypeParameterNode -> nl.akiar.pascal.psi.PascalElementTypes.GENERIC_PARAMETER
+
+            // ============================================================================
+            // Attributes/Decorators
+            // ============================================================================
+            // AttributeNode is the actual attribute (name + optional args) - brackets stripped
+            node is org.sonar.plugins.communitydelphi.api.ast.AttributeNode -> nl.akiar.pascal.psi.PascalElementTypes.ATTRIBUTE_DEFINITION
+            // AttributeListNode is the container for ALL attribute groups - this becomes ATTRIBUTE_LIST
+            node is org.sonar.plugins.communitydelphi.api.ast.AttributeListNode -> nl.akiar.pascal.psi.PascalElementTypes.ATTRIBUTE_LIST
+            // AttributeGroupNode represents a single [...] group - skip it (just process children)
+            // The brackets become siblings of ATTRIBUTE_DEFINITION inside ATTRIBUTE_LIST
+            node is org.sonar.plugins.communitydelphi.api.ast.AttributeGroupNode -> null
 
             // ============================================================================
             // Scope/Body Sections (for variable scope checking)
@@ -393,6 +405,18 @@ class PascalSonarParser : PsiParser {
                 nodeStartOffset++
             }
 
+            // Special handling for ATTRIBUTE_DEFINITION: strip leading '[' and whitespace
+            // sonar-delphi's AttributeNode includes the bracket, but we only want the name + args
+            if (markerType == nl.akiar.pascal.psi.PascalElementTypes.ATTRIBUTE_DEFINITION) {
+                while (nodeStartOffset < text.length && (text[nodeStartOffset] == '[' || text[nodeStartOffset].isWhitespace())) {
+                    nodeStartOffset++
+                }
+                // Also strip trailing ']' and whitespace
+                while (nodeEndOffset > nodeStartOffset && nodeEndOffset <= text.length && (text[nodeEndOffset - 1] == ']' || text[nodeEndOffset - 1].isWhitespace())) {
+                    nodeEndOffset--
+                }
+            }
+
             // Global strip of trailing punctuation
             while (nodeEndOffset > nodeStartOffset && nodeEndOffset <= text.length && (text[nodeEndOffset - 1] == ')' || text[nodeEndOffset - 1] == ',' || text[nodeEndOffset - 1] == ';' || text[nodeEndOffset - 1] == '<' || text[nodeEndOffset - 1] == '>' || text[nodeEndOffset - 1].isWhitespace())) {
                 nodeEndOffset--
@@ -431,6 +455,13 @@ class PascalSonarParser : PsiParser {
             marker = builder.mark()
         }
 
+        // Special handling for TYPE_DEFINITION and ROUTINE_DECLARATION: synthesize ATTRIBUTE_LIST/ATTRIBUTE_DEFINITION
+        // for leading attribute brackets that sonar-delphi doesn't wrap in AttributeListNode
+        if (markerType == nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION ||
+            markerType == nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION) {
+            synthesizeAttributesForDeclaration(builder, nodeStartOffset, nodeEndOffset)
+        }
+
         for (child in node.children) {
             mapNode(child, builder, lineOffsets)
         }
@@ -450,5 +481,102 @@ class PascalSonarParser : PsiParser {
         while (!builder.eof()) {
             builder.advanceLexer()
         }
+    }
+
+    /**
+     * Synthesize ATTRIBUTE_LIST and ATTRIBUTE_DEFINITION PSI elements for declarations.
+     *
+     * Sonar-delphi doesn't always create AttributeListNode for type declarations and some routine
+     * declarations. The attribute tokens ([AttrName] or [AttrName(args)]) are absorbed directly
+     * into the declaration node span. This function detects such attributes and creates proper
+     * PSI structure for them.
+     *
+     * @param builder The PsiBuilder positioned at the start of the declaration
+     * @param nodeStartOffset The start offset of the declaration node (includes attributes)
+     * @param nodeEndOffset The end offset of the declaration node
+     */
+    private fun synthesizeAttributesForDeclaration(builder: PsiBuilder, nodeStartOffset: Int, nodeEndOffset: Int) {
+        val text = builder.originalText
+        var pos = builder.currentOffset
+
+        // Look for attribute pattern: [AttrName] or [AttrName(args)]
+        // Collect all consecutive attribute groups starting from current position
+        data class AttrRange(val bracketStart: Int, val contentStart: Int, val contentEnd: Int, val bracketEnd: Int)
+        val attributeRanges = mutableListOf<AttrRange>()
+
+        var scanPos = pos
+        while (scanPos < nodeEndOffset) {
+            // Skip whitespace
+            while (scanPos < nodeEndOffset && text[scanPos].isWhitespace()) scanPos++
+
+            if (scanPos >= nodeEndOffset || text[scanPos] != '[') break
+
+            // Found '[', look for matching ']'
+            val bracketStart = scanPos
+            scanPos++ // skip '['
+            val contentStart = scanPos
+
+            var bracketDepth = 1
+            var parenDepth = 0
+
+            while (scanPos < nodeEndOffset && bracketDepth > 0) {
+                when (text[scanPos]) {
+                    '[' -> bracketDepth++
+                    ']' -> {
+                        bracketDepth--
+                        if (bracketDepth == 0) {
+                            val contentEnd = scanPos
+                            scanPos++ // skip ']'
+                            attributeRanges.add(AttrRange(bracketStart, contentStart, contentEnd, scanPos))
+                        }
+                    }
+                    '(' -> parenDepth++
+                    ')' -> parenDepth--
+                }
+                if (bracketDepth > 0) scanPos++
+            }
+        }
+
+        if (attributeRanges.isEmpty()) return
+
+        diag("synthesizing ${attributeRanges.size} attributes for type declaration")
+
+        // Create ATTRIBUTE_LIST marker containing all attributes
+        // First, advance to the first bracket
+        while (!builder.eof() && builder.currentOffset < attributeRanges.first().bracketStart) {
+            builder.advanceLexer()
+        }
+
+        val listMarker = builder.mark()
+
+        // Create ATTRIBUTE_DEFINITION for each [attr]
+        for (attrRange in attributeRanges) {
+            // Advance to bracket start (skip whitespace between attributes)
+            while (!builder.eof() && builder.currentOffset < attrRange.bracketStart) {
+                builder.advanceLexer()
+            }
+
+            // Consume the '['
+            if (!builder.eof()) {
+                builder.advanceLexer()
+            }
+
+            // Create marker for ATTRIBUTE_DEFINITION (the content without brackets)
+            val defMarker = builder.mark()
+
+            // Advance to the content end (before ']')
+            while (!builder.eof() && builder.currentOffset < attrRange.contentEnd) {
+                builder.advanceLexer()
+            }
+
+            defMarker.done(nl.akiar.pascal.psi.PascalElementTypes.ATTRIBUTE_DEFINITION)
+
+            // Consume the ']'
+            if (!builder.eof() && builder.currentOffset < attrRange.bracketEnd) {
+                builder.advanceLexer()
+            }
+        }
+
+        listMarker.done(nl.akiar.pascal.psi.PascalElementTypes.ATTRIBUTE_LIST)
     }
 }

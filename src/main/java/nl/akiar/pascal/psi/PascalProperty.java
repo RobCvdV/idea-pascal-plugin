@@ -9,7 +9,7 @@ import org.jetbrains.annotations.Nullable;
 /**
  * PSI element interface for Pascal property definitions.
  */
-public interface PascalProperty extends PsiNameIdentifierOwner, StubBasedPsiElement<PascalPropertyStub> {
+public interface PascalProperty extends PsiNameIdentifierOwner, StubBasedPsiElement<PascalPropertyStub>, PascalAttributable {
 
     @Override
     @Nullable

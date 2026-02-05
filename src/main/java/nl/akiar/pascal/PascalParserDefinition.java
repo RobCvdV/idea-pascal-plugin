@@ -90,6 +90,9 @@ public class PascalParserDefinition implements ParserDefinition {
         if (node.getElementType() == PascalElementTypes.ATTRIBUTE_DEFINITION) {
             return new nl.akiar.pascal.psi.impl.PascalAttributeImpl(node);
         }
+        if (node.getElementType() == PascalElementTypes.TYPE_REFERENCE) {
+            return new nl.akiar.pascal.psi.impl.PascalTypeReferenceElement(node);
+        }
         return new PascalPsiElement(node);
     }
 

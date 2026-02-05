@@ -31,8 +31,23 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
                 IElementType type = node != null ? node.getElementType() : null;
                 
                 if (type == PascalTokenTypes.IDENTIFIER) {
-                    // Skip definition names
                     PsiElement parent = element.getParent();
+
+                    // NEW: Check if parent is TYPE_REFERENCE
+                    if (parent instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
+                        nl.akiar.pascal.psi.impl.PascalTypeReferenceElement typeRef =
+                            (nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) parent;
+
+                        // For SIMPLE_TYPE, skip resolution (always valid, no navigation needed)
+                        if (typeRef.getKind() == nl.akiar.pascal.psi.TypeReferenceKind.SIMPLE_TYPE) {
+                            return PsiReference.EMPTY_ARRAY;
+                        }
+
+                        // For USER_TYPE, create specific type reference
+                        return new PsiReference[]{new PascalTypeReference(element, new TextRange(0, text.length()))};
+                    }
+
+                    // Skip definition names
                     if (parent instanceof PascalTypeDefinition) {
                         if (((PascalTypeDefinition) parent).getNameIdentifier() == element) {
                             return PsiReference.EMPTY_ARRAY;

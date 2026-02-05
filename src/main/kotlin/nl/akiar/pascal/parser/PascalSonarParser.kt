@@ -297,6 +297,7 @@ class PascalSonarParser : PsiParser {
 
             node is org.sonar.plugins.communitydelphi.api.ast.TypeParameterNode -> nl.akiar.pascal.psi.PascalElementTypes.GENERIC_PARAMETER
 
+
             // ============================================================================
             // Attributes/Decorators
             // ============================================================================

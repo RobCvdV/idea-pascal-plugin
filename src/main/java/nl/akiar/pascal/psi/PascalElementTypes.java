@@ -33,6 +33,13 @@ public interface PascalElementTypes {
     com.intellij.psi.tree.IElementType UNIT_REFERENCE = new nl.akiar.pascal.PascalTokenType("UNIT_REFERENCE");
 
     /**
+     * Element type for type references in variable declarations, parameters, return types, etc.
+     * Wraps identifiers that refer to types (both built-in and user-defined).
+     * Enables fast highlighting without resolution for built-in types.
+     */
+    com.intellij.psi.tree.IElementType TYPE_REFERENCE = new nl.akiar.pascal.PascalTokenType("TYPE_REFERENCE");
+
+    /**
      * Element type for interface section.
      */
     com.intellij.psi.tree.IElementType INTERFACE_SECTION = new nl.akiar.pascal.PascalTokenType("INTERFACE_SECTION");

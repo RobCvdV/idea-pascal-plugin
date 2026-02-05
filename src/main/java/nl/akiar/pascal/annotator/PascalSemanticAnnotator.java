@@ -5,6 +5,8 @@ import com.intellij.lang.annotation.Annotator;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiReference;
+import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
 import nl.akiar.pascal.PascalSyntaxHighlighter;
 import nl.akiar.pascal.PascalTokenTypes;
@@ -59,6 +61,14 @@ public class PascalSemanticAnnotator implements Annotator {
 
     @Override
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
+        // Fast path for type reference identifiers detected by context
+        if (element.getNode() != null && element.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
+            if (isTypeReferenceContext(element)) {
+                annotateTypeReferenceIdentifier(element, holder);
+                return;
+            }
+        }
+
         // Color generic parameters
         if (element.getNode() != null && element.getNode().getElementType() == PascalElementTypes.GENERIC_PARAMETER) {
             annotateGenericParameter(element, holder);
@@ -431,5 +441,146 @@ public class PascalSemanticAnnotator implements Annotator {
         }
 
         // If not found in class, don't highlight (will show as regular identifier)
+    }
+
+    /**
+     * Check if an identifier is in a type reference context (after colon in var/param/return type).
+     */
+    private boolean isTypeReferenceContext(PsiElement element) {
+        if (!(element.getNode().getElementType() == PascalTokenTypes.IDENTIFIER)) {
+            return false;
+        }
+
+        // Look backwards for a colon
+        PsiElement prev = element.getPrevSibling();
+        while (prev != null) {
+            if (prev.getNode() == null) {
+                prev = prev.getPrevSibling();
+                continue;
+            }
+
+            IElementType type = prev.getNode().getElementType();
+            if (type == PascalTokenTypes.COLON) {
+                // Found colon - this is likely a type reference
+                // Check if we're in a variable, parameter, or function context
+                return PsiUtil.hasParent(element, PascalElementTypes.VARIABLE_DEFINITION) ||
+                       PsiUtil.hasParent(element, PascalElementTypes.FORMAL_PARAMETER) ||
+                       PsiUtil.hasParent(element, PascalElementTypes.ROUTINE_DECLARATION);
+            }
+
+            if (type == PascalTokenTypes.WHITE_SPACE ||
+                type == PascalTokenTypes.LINE_COMMENT ||
+                type == PascalTokenTypes.BLOCK_COMMENT) {
+                prev = prev.getPrevSibling();
+                continue;
+            }
+
+            // Hit something else before colon
+            break;
+        }
+
+        return false;
+    }
+
+    /**
+     * Annotate an identifier that's in a type reference context with fast built-in type detection.
+     */
+    private void annotateTypeReferenceIdentifier(PsiElement element, AnnotationHolder holder) {
+        String typeName = element.getText();
+        if (typeName == null) return;
+
+        // Check if it's a built-in simple type (zero-cost highlighting!)
+        if (nl.akiar.pascal.parser.PascalBuiltInTypes.INSTANCE.isSimpleType(typeName)) {
+            applyHighlight(element, holder, PascalSyntaxHighlighter.TYPE_SIMPLE);
+            return;
+        }
+
+        // Check if it's a keyword type
+        if (nl.akiar.pascal.parser.PascalBuiltInTypes.INSTANCE.isKeywordType(typeName)) {
+            applyHighlight(element, holder, PascalSyntaxHighlighter.KEYWORD);
+            return;
+        }
+
+        // For user types, try to resolve and get specific color
+        TextAttributesKey key = resolveIdentifierAsTypeAndGetColor(element);
+        if (key != null) {
+            applyHighlight(element, holder, key);
+        }
+        // If null, let default highlighting handle it
+    }
+
+    /**
+     * Resolve an identifier as a type reference and determine its color.
+     */
+    private TextAttributesKey resolveIdentifierAsTypeAndGetColor(PsiElement element) {
+        PsiReference[] refs = element.getReferences();
+        if (refs.length == 0) return null;
+
+        for (PsiReference ref : refs) {
+            PsiElement resolved = ref.resolve();
+            if (resolved instanceof PascalTypeDefinition) {
+                TypeKind typeKind = ((PascalTypeDefinition) resolved).getTypeKind();
+                return getColorForTypeKind(typeKind);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Annotate TYPE_REFERENCE elements with fast path for built-in types.
+     * This is called for type references in variable declarations, parameters, return types, etc.
+     */
+    private void annotateTypeReference(nl.akiar.pascal.psi.impl.PascalTypeReferenceElement typeRef,
+                                      AnnotationHolder holder) {
+        PsiElement nameElement = typeRef.getNameIdentifier();
+        if (nameElement == null) return;
+
+        nl.akiar.pascal.psi.TypeReferenceKind kind = typeRef.getKind();
+        TextAttributesKey key;
+
+        switch (kind) {
+            case SIMPLE_TYPE:
+                // Built-in simple type - no resolution needed!
+                key = PascalSyntaxHighlighter.TYPE_SIMPLE;
+                break;
+
+            case KEYWORD_TYPE:
+                // Keywords used as types (string, array, etc.)
+                key = PascalSyntaxHighlighter.KEYWORD;
+                break;
+
+            case USER_TYPE:
+                // User-defined type - need to resolve to determine exact kind
+                key = resolveAndGetTypeColor(typeRef);
+                break;
+
+            case UNKNOWN:
+            default:
+                // Fallback - try to resolve
+                key = resolveAndGetTypeColor(typeRef);
+                if (key == null) {
+                    key = PascalSyntaxHighlighter.IDENTIFIER;
+                }
+                break;
+        }
+
+        applyHighlight(nameElement, holder, key);
+    }
+
+    /**
+     * Resolve a type reference and determine its color based on the resolved type kind.
+     */
+    private TextAttributesKey resolveAndGetTypeColor(nl.akiar.pascal.psi.impl.PascalTypeReferenceElement typeRef) {
+        PsiReference[] refs = typeRef.getReferences();
+        if (refs.length == 0) return null;
+
+        PsiElement resolved = refs[0].resolve();
+        if (resolved instanceof PascalTypeDefinition) {
+            TypeKind typeKind = ((PascalTypeDefinition) resolved).getTypeKind();
+            return getColorForTypeKind(typeKind);
+        }
+
+        return null;
     }
 }

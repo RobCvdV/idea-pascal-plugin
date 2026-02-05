@@ -9,6 +9,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -53,6 +54,11 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
             new AttributesDescriptor("Routine//Routine call", PascalSyntaxHighlighter.ROUTINE_CALL),
             new AttributesDescriptor("Routine//Method call", PascalSyntaxHighlighter.METHOD_CALL),
             new AttributesDescriptor("Routine//Property declaration", PascalSyntaxHighlighter.PROPERTY_DECLARATION),
+            // Additional tags mapping
+            new AttributesDescriptor("Functions//Function call", PascalSyntaxHighlighter.ROUTINE_CALL),
+            new AttributesDescriptor("Functions//Procedure call", PascalSyntaxHighlighter.ROUTINE_CALL),
+            new AttributesDescriptor("Variables//Constant (tag)", PascalSyntaxHighlighter.VAR_CONSTANT),
+            new AttributesDescriptor("Attributes//Attribute name", PascalSyntaxHighlighter.ATTRIBUTE),
     };
 
     @Nullable
@@ -103,9 +109,9 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
                "  end;\n" +
                "\n" +
                "const\n" +
-               "  MAX_VALUE = 100;\n" +
-               "  PI_VALUE = 3.14159;\n" +
-               "  HEX_VALUE = $FF00;\n" +
+               "  <constant>MAX_VALUE</constant> = 100;\n" +
+               "  <constant>PI_VALUE</constant> = 3.14159;\n" +
+               "  <constant>HEX_VALUE</constant> = $FF00;\n" +
                "\n" +
                "implementation\n" +
                "\n" +
@@ -144,7 +150,7 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
                "      raise Exception.Create('Invalid count');\n" +
                "  except\n" +
                "    on E: Exception do\n" +
-               "      WriteLn(E.Message);\n" +
+               "      <function_call>WriteLn</function_call>(E.Message);\n" +
                "  end;\n" +
                "\n" +
                "  case Count of\n" +
@@ -158,6 +164,13 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
                "function TSampleClass.Calculate(X, Y: Double): Double;\n" +
                "begin\n" +
                "  Result := X * Y + 1.5E10;\n" +
+               "  <method_call>Self.Calculate</method_call>(X, Y); // recursive example\n" +
+               "end;\n" +
+               "\n" +
+               "procedure Caller;\n" +
+               "begin\n" +
+               "  <function_call>GetMem</function_call>(nil, <constant>MAX_VALUE</constant>);\n" +
+               "  <procedure_call>P1</procedure_call>;\n" +
                "end;\n" +
                "\n" +
                "end.\n";
@@ -166,7 +179,13 @@ public class PascalColorSettingsPage implements ColorSettingsPage {
     @Nullable
     @Override
     public Map<String, TextAttributesKey> getAdditionalHighlightingTagToDescriptorMap() {
-        return null;
+        Map<String, TextAttributesKey> map = new HashMap<>();
+        map.put("function_call", PascalSyntaxHighlighter.ROUTINE_CALL);
+        map.put("procedure_call", PascalSyntaxHighlighter.ROUTINE_CALL);
+        map.put("method_call", PascalSyntaxHighlighter.METHOD_CALL);
+        map.put("constant", PascalSyntaxHighlighter.VAR_CONSTANT);
+        map.put("attribute", PascalSyntaxHighlighter.ATTRIBUTE);
+        return map;
     }
 
     @NotNull

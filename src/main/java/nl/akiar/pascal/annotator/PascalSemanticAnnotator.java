@@ -63,6 +63,12 @@ public class PascalSemanticAnnotator implements Annotator {
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
         // Fast path for type reference identifiers detected by context
         if (element.getNode() != null && element.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
+            // If identifier is inside an attribute definition, highlight it as attribute name
+            PsiElement parent = element.getParent();
+            if (parent != null && parent.getNode() != null && parent.getNode().getElementType() == PascalElementTypes.ATTRIBUTE_DEFINITION) {
+                applyHighlight(element, holder, nl.akiar.pascal.PascalSyntaxHighlighter.ATTRIBUTE);
+                return;
+            }
             if (isTypeReferenceContext(element)) {
                 annotateTypeReferenceIdentifier(element, holder);
                 return;
@@ -109,6 +115,21 @@ public class PascalSemanticAnnotator implements Annotator {
         if (element instanceof PascalProperty) {
             annotateProperty((PascalProperty) element, holder);
             return;
+        }
+
+        // Attribute definitions: highlight attribute name
+        if (element.getNode() != null && element.getNode().getElementType() == PascalElementTypes.ATTRIBUTE_DEFINITION) {
+            PsiElement nameId = null;
+            for (PsiElement child : element.getChildren()) {
+                if (child.getNode() != null && child.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
+                    nameId = child;
+                    break;
+                }
+            }
+            if (nameId != null) {
+                applyHighlight(nameId, holder, nl.akiar.pascal.PascalSyntaxHighlighter.ATTRIBUTE);
+                return;
+            }
         }
 
         // Handle identifiers (usages) - also handle keyword tokens that can be used as identifiers

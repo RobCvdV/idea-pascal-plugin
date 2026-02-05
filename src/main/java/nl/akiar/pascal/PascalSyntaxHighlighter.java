@@ -114,6 +114,9 @@ public class PascalSyntaxHighlighter extends SyntaxHighlighterBase {
     public static final TextAttributesKey PROPERTY_DECLARATION =
             createTextAttributesKey("PASCAL_PROPERTY_DECLARATION", DefaultLanguageHighlighterColors.INSTANCE_FIELD);
 
+    public static final TextAttributesKey ATTRIBUTE =
+            createTextAttributesKey("PASCAL_ATTRIBUTE", DefaultLanguageHighlighterColors.METADATA);
+
     private static final TextAttributesKey[] KEYWORD_KEYS = new TextAttributesKey[]{KEYWORD};
     private static final TextAttributesKey[] STRING_KEYS = new TextAttributesKey[]{STRING};
     private static final TextAttributesKey[] NUMBER_KEYS = new TextAttributesKey[]{NUMBER};

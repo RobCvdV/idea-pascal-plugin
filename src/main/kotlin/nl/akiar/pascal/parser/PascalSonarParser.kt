@@ -456,10 +456,12 @@ class PascalSonarParser : PsiParser {
             marker = builder.mark()
         }
 
-        // Special handling for TYPE_DEFINITION and ROUTINE_DECLARATION: synthesize ATTRIBUTE_LIST/ATTRIBUTE_DEFINITION
+        // Special handling for declarations: synthesize ATTRIBUTE_LIST/ATTRIBUTE_DEFINITION
         // for leading attribute brackets that sonar-delphi doesn't wrap in AttributeListNode
         if (markerType == nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION ||
-            markerType == nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION) {
+            markerType == nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION ||
+            markerType == nl.akiar.pascal.psi.PascalElementTypes.FIELD_DEFINITION ||
+            markerType == nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_DEFINITION) {
             synthesizeAttributesForDeclaration(builder, nodeStartOffset, nodeEndOffset)
         }
 
@@ -498,14 +500,13 @@ class PascalSonarParser : PsiParser {
      */
     private fun synthesizeAttributesForDeclaration(builder: PsiBuilder, nodeStartOffset: Int, nodeEndOffset: Int) {
         val text = builder.originalText
-        var pos = builder.currentOffset
+        // Start scanning from the beginning of the declaration span to ensure we detect brackets
+        var scanPos = nodeStartOffset
 
         // Look for attribute pattern: [AttrName] or [AttrName(args)]
-        // Collect all consecutive attribute groups starting from current position
         data class AttrRange(val bracketStart: Int, val contentStart: Int, val contentEnd: Int, val bracketEnd: Int)
         val attributeRanges = mutableListOf<AttrRange>()
 
-        var scanPos = pos
         while (scanPos < nodeEndOffset) {
             // Skip whitespace
             while (scanPos < nodeEndOffset && text[scanPos].isWhitespace()) scanPos++
@@ -540,40 +541,33 @@ class PascalSonarParser : PsiParser {
 
         if (attributeRanges.isEmpty()) return
 
-        diag("synthesizing ${attributeRanges.size} attributes for type declaration")
+        diag("synthesizing ${attributeRanges.size} attributes for declaration")
 
-        // Create ATTRIBUTE_LIST marker containing all attributes
-        // First, advance to the first bracket
+        // Advance lexer to the first bracket position
         while (!builder.eof() && builder.currentOffset < attributeRanges.first().bracketStart) {
             builder.advanceLexer()
         }
 
         val listMarker = builder.mark()
 
-        // Create ATTRIBUTE_DEFINITION for each [attr]
+        // Emit ATTRIBUTE_DEFINITION markers for each attribute range
         for (attrRange in attributeRanges) {
             // Advance to bracket start (skip whitespace between attributes)
             while (!builder.eof() && builder.currentOffset < attrRange.bracketStart) {
                 builder.advanceLexer()
             }
+            // Consume '['
+            if (!builder.eof()) builder.advanceLexer()
 
-            // Consume the '['
-            if (!builder.eof()) {
-                builder.advanceLexer()
-            }
-
-            // Create marker for ATTRIBUTE_DEFINITION (the content without brackets)
             val defMarker = builder.mark()
-
-            // Advance to the content end (before ']')
+            // Advance through the attribute content up to contentEnd (before ']')
             while (!builder.eof() && builder.currentOffset < attrRange.contentEnd) {
                 builder.advanceLexer()
             }
-
             defMarker.done(nl.akiar.pascal.psi.PascalElementTypes.ATTRIBUTE_DEFINITION)
 
-            // Consume the ']'
-            if (!builder.eof() && builder.currentOffset < attrRange.bracketEnd) {
+            // Consume ']'
+            while (!builder.eof() && builder.currentOffset < attrRange.bracketEnd) {
                 builder.advanceLexer()
             }
         }

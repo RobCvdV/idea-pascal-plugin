@@ -168,7 +168,7 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
 
     @Override
     public boolean shouldCreateStub(ASTNode node) {
-        PsiElement psi = node.getPsi();
-        return psi instanceof PascalTypeDefinition;
+        // Avoid calling node.getPsi() during indexing
+        return node.getElementType() == nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION;
     }
 }

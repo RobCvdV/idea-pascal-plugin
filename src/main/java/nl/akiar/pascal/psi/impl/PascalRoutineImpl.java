@@ -14,15 +14,19 @@ import nl.akiar.pascal.psi.PascalElementTypes;
 import nl.akiar.pascal.psi.PascalRoutine;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
 import nl.akiar.pascal.psi.PascalVariableDefinition;
+import nl.akiar.pascal.psi.VariableKind;
 import nl.akiar.pascal.stubs.PascalRoutineStub;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub> implements PascalRoutine {
+    private static final ThreadLocal<Set<String>> DECL_IMPL_VISITED = ThreadLocal.withInitial(HashSet::new);
 
     public PascalRoutineImpl(@NotNull ASTNode node) {
         super(node);
@@ -41,7 +45,6 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         return nameId != null ? nameId.getText() : null;
     }
 
-    @Override
     @Nullable
     public PsiElement getNameIdentifier() {
         // The routine name is the IDENTIFIER that appears AFTER the routine keyword
@@ -189,37 +192,110 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
     @Override
     @Nullable
     public PascalRoutine getDeclaration() {
-        if (!isImplementation()) return null;
+        if (!isImplementation()) return this;
         String name = getName();
-        if (name == null) return null;
-
-        // Search in interface section of the same file
-        PsiFile file = getContainingFile();
-        Collection<PascalRoutine> routines = PsiTreeUtil.findChildrenOfType(file, PascalRoutine.class);
-        for (PascalRoutine routine : routines) {
-            if (!routine.isImplementation() && matchesSignature(routine)) {
-                return routine;
+        String keySig = getUnitName() + "#" + normalize(getContainingClassName()) + "#" + normalize(name) + "#" + normalize(getSignatureHash());
+        Set<String> visited = DECL_IMPL_VISITED.get();
+        if (visited.contains(keySig)) return null;
+        visited.add(keySig);
+        try {
+            // ...existing code for scoped index and fallback...
+            String unit = getUnitName();
+            String owner = getContainingClassName();
+            if (name == null) return null;
+            if (unit != null && owner != null) {
+                String key = (unit + "#" + owner + "#" + name).toLowerCase();
+                java.util.Collection<nl.akiar.pascal.psi.PascalRoutine> candidates = nl.akiar.pascal.stubs.PascalScopedRoutineIndex.find(key, getProject());
+                String sig = getSignatureHash();
+                for (nl.akiar.pascal.psi.PascalRoutine r : candidates) {
+                    if (!r.isImplementation()) {
+                        String otherSig = ((PascalRoutineImpl) r).getSignatureHash();
+                        if (normalize(sig).equals(normalize(otherSig))) {
+                            return r;
+                        }
+                    }
+                }
             }
+            com.intellij.psi.PsiFile file = getContainingFile();
+            nl.akiar.pascal.stubs.PascalRoutineIndex.RoutineLookupResult result = nl.akiar.pascal.stubs.PascalRoutineIndex.findRoutinesWithUsesValidation(name, file, getTextOffset());
+            java.util.List<nl.akiar.pascal.psi.PascalRoutine> inScope = result.getInScopeRoutines();
+            if (!inScope.isEmpty()) {
+                for (nl.akiar.pascal.psi.PascalRoutine r : inScope) {
+                    if (!r.isImplementation()) return r;
+                }
+            }
+            return null;
+        } finally {
+            visited.remove(keySig);
         }
-        return null;
     }
 
     @Override
     @Nullable
     public PascalRoutine getImplementation() {
-        if (isImplementation()) return null;
+        if (isImplementation()) return this;
         String name = getName();
-        if (name == null) return null;
+        String keySig = getUnitName() + "#" + normalize(getContainingClassName()) + "#" + normalize(name) + "#" + normalize(getSignatureHash()) + "#impl";
+        Set<String> visited = DECL_IMPL_VISITED.get();
+        if (visited.contains(keySig)) return null;
+        visited.add(keySig);
+        try {
+            String unit = getUnitName();
+            String owner = getContainingClassName();
+            if (name == null) return null;
+            if (unit != null && owner != null) {
+                String key = (unit + "#" + owner + "#" + name).toLowerCase();
+                java.util.Collection<nl.akiar.pascal.psi.PascalRoutine> candidates = nl.akiar.pascal.stubs.PascalScopedRoutineIndex.find(key, getProject());
+                String sig = getSignatureHash();
+                for (nl.akiar.pascal.psi.PascalRoutine r : candidates) {
+                    if (r.isImplementation()) {
+                        String otherSig = ((PascalRoutineImpl) r).getSignatureHash();
+                        if (normalize(sig).equals(normalize(otherSig))) {
+                            return r;
+                        }
+                    }
+                }
+            }
+            com.intellij.psi.PsiFile file = getContainingFile();
+            nl.akiar.pascal.stubs.PascalRoutineIndex.RoutineLookupResult result = nl.akiar.pascal.stubs.PascalRoutineIndex.findRoutinesWithUsesValidation(name, file, getTextOffset());
+            java.util.List<nl.akiar.pascal.psi.PascalRoutine> inScope = result.getInScopeRoutines();
+            if (!inScope.isEmpty()) {
+                for (nl.akiar.pascal.psi.PascalRoutine r : inScope) {
+                    if (r.isImplementation()) return r;
+                }
+            }
+            return null;
+        } finally {
+            visited.remove(keySig);
+        }
+    }
 
-        // Search in implementation section of the same file
+    private static String normalize(String s) {
+        return s == null ? "" : s.toLowerCase();
+    }
+
+    @Override
+    @NotNull
+    public String getUnitName() {
+        PascalRoutineStub stub = getGreenStub();
+        if (stub != null && stub.getUnitName() != null) return stub.getUnitName();
         PsiFile file = getContainingFile();
-        Collection<PascalRoutine> routines = PsiTreeUtil.findChildrenOfType(file, PascalRoutine.class);
-        for (PascalRoutine routine : routines) {
-            if (routine.isImplementation() && matchesSignature(routine)) {
-                return routine;
+        String base = file.getName();
+        int dot = base.lastIndexOf('.');
+        return dot > 0 ? base.substring(0, dot) : base;
+    }
+
+    public String getSignatureHash() {
+        PascalRoutineStub stub = getGreenStub();
+        if (stub != null && stub.getSignatureHash() != null) return stub.getSignatureHash();
+        StringBuilder sb = new StringBuilder();
+        for (PsiElement child = getFirstChild(); child != null; child = child.getNextSibling()) {
+            if (child instanceof PascalVariableDefinition p && p.getVariableKind() == VariableKind.PARAMETER) {
+                String tn = p.getTypeName();
+                if (tn != null) sb.append(tn.toLowerCase()).append(";");
             }
         }
-        return null;
+        return sb.toString();
     }
 
     private boolean matchesSignature(PascalRoutine other) {
@@ -359,11 +435,6 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         return comment.trim();
     }
 
-    @Override
-    @NotNull
-    public String getUnitName() {
-        return nl.akiar.pascal.psi.PsiUtil.getUnitName(this);
-    }
 
     @Override
     @org.jetbrains.annotations.Nullable

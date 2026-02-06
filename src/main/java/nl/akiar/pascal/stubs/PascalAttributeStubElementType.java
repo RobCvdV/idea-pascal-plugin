@@ -8,6 +8,7 @@ import nl.akiar.pascal.PascalLanguage;
 import nl.akiar.pascal.PascalTokenTypes;
 import nl.akiar.pascal.psi.AttributeTargetType;
 import nl.akiar.pascal.psi.PascalAttribute;
+import nl.akiar.pascal.psi.PascalElementTypes;
 import nl.akiar.pascal.psi.impl.PascalAttributeImpl;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -32,11 +33,14 @@ public class PascalAttributeStubElementType extends IStubElementType<PascalAttri
     @NotNull
     @Override
     public PascalAttributeStub createStub(@NotNull PascalAttribute psi, StubElement<?> parentStub) {
+        // Avoid PSI tree traversal during stub building. Target type can be computed lazily on PSI.
+        String name = psi.getName();
+        String args = psi.getArguments();
         return new PascalAttributeStubImpl(
             parentStub,
-            psi.getName(),
-            psi.getArguments(),
-            psi.getTargetType()
+            name != null ? name : "",
+            args,
+            AttributeTargetType.UNKNOWN
         );
     }
 
@@ -74,7 +78,7 @@ public class PascalAttributeStubElementType extends IStubElementType<PascalAttri
 
     @Override
     public boolean shouldCreateStub(ASTNode node) {
-        PsiElement psi = node.getPsi();
-        return psi instanceof PascalAttribute;
+        // Avoid calling node.getPsi() during indexing
+        return node.getElementType() == PascalElementTypes.ATTRIBUTE_DEFINITION;
     }
 }

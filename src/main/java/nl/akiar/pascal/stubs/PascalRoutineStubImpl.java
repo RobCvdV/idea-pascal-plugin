@@ -11,14 +11,19 @@ public class PascalRoutineStubImpl extends StubBase<PascalRoutine> implements Pa
     private final boolean isImplementation;
     private final @Nullable String containingClassName;
     private final @Nullable String returnTypeName;
+    private final @Nullable String unitName;
+    private final @Nullable String signatureHash;
 
     public PascalRoutineStubImpl(StubElement parent, String name, boolean isImplementation,
-                                  @Nullable String containingClassName, @Nullable String returnTypeName) {
+                                  @Nullable String containingClassName, @Nullable String returnTypeName,
+                                  @Nullable String unitName, @Nullable String signatureHash) {
         super(parent, PascalElementTypes.ROUTINE_DECLARATION);
         this.name = name;
         this.isImplementation = isImplementation;
         this.containingClassName = containingClassName;
         this.returnTypeName = returnTypeName;
+        this.unitName = unitName;
+        this.signatureHash = signatureHash;
     }
 
     @Override
@@ -32,4 +37,10 @@ public class PascalRoutineStubImpl extends StubBase<PascalRoutine> implements Pa
 
     @Override
     public @Nullable String getReturnTypeName() { return returnTypeName; }
+
+    @Override
+    public @Nullable String getUnitName() { return unitName; }
+
+    @Override
+    public @Nullable String getSignatureHash() { return signatureHash; }
 }

@@ -17,4 +17,12 @@ public interface PascalRoutineStub extends StubElement<PascalRoutine> {
      */
     @Nullable
     String getReturnTypeName();
+
+    /** Unit name where this routine is declared (e.g., "System.Classes"). */
+    @Nullable
+    String getUnitName();
+
+    /** Lightweight signature hash for decl/impl pairing and overload selection. */
+    @Nullable
+    String getSignatureHash();
 }

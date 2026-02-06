@@ -75,7 +75,7 @@ public class PascalVariableStubElementType extends IStubElementType<PascalVariab
 
     @Override
     public boolean shouldCreateStub(ASTNode node) {
-        PsiElement psi = node.getPsi();
-        return psi instanceof PascalVariableDefinition;
+        // Avoid calling node.getPsi() during indexing
+        return node.getElementType() == nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_DEFINITION;
     }
 }

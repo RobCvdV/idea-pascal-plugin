@@ -425,9 +425,43 @@ class PascalSonarParser : PsiParser {
                 }
             }
 
-            // Global strip of trailing punctuation
-            while (nodeEndOffset > nodeStartOffset && nodeEndOffset <= text.length && (text[nodeEndOffset - 1] == ')' || text[nodeEndOffset - 1] == ',' || text[nodeEndOffset - 1] == ';' || text[nodeEndOffset - 1] == '<' || text[nodeEndOffset - 1] == '>' || text[nodeEndOffset - 1].isWhitespace())) {
-                nodeEndOffset--
+            // Special handling for TYPE_REFERENCE: extend range to include matching closing '>' for generics
+            // Sonar-delphi's TypeReferenceNode doesn't include the closing '>' in its range, so we need to extend it
+            if (markerType == nl.akiar.pascal.psi.PascalElementTypes.TYPE_REFERENCE) {
+                // Count '<' tokens to find matching '>'
+                var depth = 0
+                var pos = nodeStartOffset
+                while (pos < text.length && pos < nodeEndOffset) {
+                    when (text[pos]) {
+                        '<' -> depth++
+                        '>' -> depth--
+                    }
+                    pos++
+                }
+
+                // If we have unmatched '<', extend end offset to include matching '>'
+                while (depth > 0 && nodeEndOffset < text.length) {
+                    if (text[nodeEndOffset] == '>') {
+                        depth--
+                        nodeEndOffset++
+                        if (depth == 0) break
+                    } else if (text[nodeEndOffset] == '<') {
+                        // Nested generic, increase depth
+                        depth++
+                        nodeEndOffset++
+                    } else if (!text[nodeEndOffset].isWhitespace()) {
+                        // Non-whitespace, non-bracket - include it
+                        nodeEndOffset++
+                    } else {
+                        // Whitespace - skip
+                        nodeEndOffset++
+                    }
+                }
+            } else {
+                // Global strip of trailing punctuation for non-TYPE_REFERENCE nodes
+                while (nodeEndOffset > nodeStartOffset && nodeEndOffset <= text.length && (text[nodeEndOffset - 1] == ')' || text[nodeEndOffset - 1] == ',' || text[nodeEndOffset - 1] == ';' || text[nodeEndOffset - 1] == '<' || text[nodeEndOffset - 1] == '>' || text[nodeEndOffset - 1].isWhitespace())) {
+                    nodeEndOffset--
+                }
             }
 
             // Collect stats and a few samples

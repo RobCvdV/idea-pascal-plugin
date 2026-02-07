@@ -586,8 +586,14 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
             return null;
         }
 
-        // For interfaces, look for GUID attributes inside the interface body
+        // For interfaces, look for INTERFACE_GUID elements inside the interface body
         // The GUID looks like ['{GUID-STRING}']
+        Collection<nl.akiar.pascal.psi.PascalInterfaceGuid> guids = PsiTreeUtil.findChildrenOfType(this, nl.akiar.pascal.psi.PascalInterfaceGuid.class);
+        if (!guids.isEmpty()) {
+            return guids.iterator().next().getGuidValue();
+        }
+
+        // Fallback: Check for old-style GUID attributes (for backward compatibility during transition)
         Collection<PascalAttribute> attrs = PsiTreeUtil.findChildrenOfType(this, PascalAttribute.class);
         for (PascalAttribute attr : attrs) {
             if (attr.isGUID()) {

@@ -226,4 +226,9 @@ public interface PascalElementTypes {
      * Element type for attribute list (container for multiple attributes).
      */
     com.intellij.psi.tree.IElementType ATTRIBUTE_LIST = new nl.akiar.pascal.PascalTokenType("ATTRIBUTE_LIST");
+
+    /**
+     * Element type for interface GUID declarations ['{GUID-STRING}'].
+     */
+    com.intellij.psi.tree.IElementType INTERFACE_GUID = new nl.akiar.pascal.PascalTokenType("INTERFACE_GUID");
 }

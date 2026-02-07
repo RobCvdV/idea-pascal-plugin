@@ -407,14 +407,21 @@ class PascalAttributeParserTest : BasePlatformTestCase() {
         """.trimIndent()
 
         val psiFile = myFixture.configureByText("test.pas", code)
+
+        // GUIDs are now PascalInterfaceGuid elements, not PascalAttribute
+        val guids = com.intellij.openapi.application.runReadAction {
+            PsiTreeUtil.findChildrenOfType(psiFile, nl.akiar.pascal.psi.PascalInterfaceGuid::class.java)
+        }
+        assertEquals("Should have 1 GUID element", 1, guids.size)
+
+        val guid = guids.first()
+        assertEquals("Should extract GUID value", "285DEA8A-B865-11D1-AAA7-00C04FB17A72", guid.guidValue)
+
+        // Verify there are NO PascalAttribute elements (GUID is not an attribute anymore)
         val attributes = com.intellij.openapi.application.runReadAction {
             PsiTreeUtil.findChildrenOfType(psiFile, PascalAttribute::class.java)
         }
-        assertEquals("Should have 1 GUID attribute", 1, attributes.size)
-
-        val guidAttr = attributes.first()
-        assertTrue("Should be a GUID attribute", guidAttr.isGUID)
-        assertEquals("Should extract GUID value", "285DEA8A-B865-11D1-AAA7-00C04FB17A72", guidAttr.guidValue)
+        assertEquals("Should have 0 attributes (GUID is separate)", 0, attributes.size)
     }
 
     // ============================================================================

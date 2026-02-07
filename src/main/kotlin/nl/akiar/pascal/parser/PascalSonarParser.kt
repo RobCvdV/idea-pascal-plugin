@@ -456,13 +456,24 @@ class PascalSonarParser : PsiParser {
             marker = builder.mark()
         }
 
-        // Special handling for declarations: synthesize ATTRIBUTE_LIST/ATTRIBUTE_DEFINITION
-        // for leading attribute brackets that sonar-delphi doesn't wrap in AttributeListNode
-        if (markerType == nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION ||
+        // Special handling for interface types: look for GUID inside the body (after 'interface' keyword)
+        // The GUID follows the interface keyword: "interface ['{GUID}'] methods..."
+        if (markerType == nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_TYPE ||
+            (markerType == nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION &&
+             node.javaClass.simpleName.contains("InterfaceType", ignoreCase = true))) {
+            synthesizeInterfaceGuid(builder, nodeStartOffset, nodeEndOffset)
+        }
+        // For other declarations: synthesize ATTRIBUTE_LIST/ATTRIBUTE_DEFINITION
+        // Attributes precede their target, so we look BEFORE the declaration
+        else if (markerType == nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION ||
             markerType == nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION ||
             markerType == nl.akiar.pascal.psi.PascalElementTypes.FIELD_DEFINITION ||
             markerType == nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_DEFINITION) {
-            synthesizeAttributesForDeclaration(builder, nodeStartOffset, nodeEndOffset)
+            // Important: If the builder is already past nodeStartOffset (because we consumed tokens
+            // in a parent scope, like a GUID in the interface), adjust the start offset to avoid
+            // re-scanning already-consumed tokens
+            val adjustedStartOffset = maxOf(nodeStartOffset, builder.currentOffset)
+            synthesizeAttributesForDeclaration(builder, adjustedStartOffset, nodeEndOffset)
         }
 
         for (child in node.children) {
@@ -487,12 +498,71 @@ class PascalSonarParser : PsiParser {
     }
 
     /**
+     * Synthesize INTERFACE_GUID element for interface types.
+     * The GUID appears INSIDE the interface body, after the 'interface' keyword.
+     * Format: interface ['{GUID}'] methods...
+     */
+    private fun synthesizeInterfaceGuid(builder: PsiBuilder, nodeStartOffset: Int, nodeEndOffset: Int) {
+        val text = builder.originalText
+        var scanPos = nodeStartOffset
+
+        // GUID pattern: ['{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}']
+        val guidRegex = Regex("""^\s*'\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}'\s*$""")
+
+        // Look for ['{GUID}'] pattern inside the interface body
+        while (scanPos < nodeEndOffset) {
+            // Skip whitespace
+            while (scanPos < nodeEndOffset && text[scanPos].isWhitespace()) scanPos++
+
+            if (scanPos >= nodeEndOffset || text[scanPos] != '[') {
+                scanPos++
+                continue
+            }
+
+            // Found '[', check if it's a GUID
+            val bracketStart = scanPos
+            scanPos++ // skip '['
+            val contentStart = scanPos
+
+            var bracketDepth = 1
+            while (scanPos < nodeEndOffset && bracketDepth > 0) {
+                when (text[scanPos]) {
+                    '[' -> bracketDepth++
+                    ']' -> {
+                        bracketDepth--
+                        if (bracketDepth == 0) {
+                            val contentEnd = scanPos
+                            val bracketEnd = scanPos + 1
+                            // Check if this is a GUID
+                            val content = text.substring(contentStart, contentEnd)
+                            if (guidRegex.matches(content)) {
+                                // Found a GUID! Create INTERFACE_GUID element
+                                diag("Found GUID in interface at offset $bracketStart")
+
+                                // Advance builder to the GUID start
+                                while (!builder.eof() && builder.currentOffset < bracketStart) {
+                                    builder.advanceLexer()
+                                }
+
+                                // Create INTERFACE_GUID element (includes brackets)
+                                val guidMarker = builder.mark()
+                                while (!builder.eof() && builder.currentOffset < bracketEnd) {
+                                    builder.advanceLexer()
+                                }
+                                guidMarker.done(nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_GUID)
+                                return  // Only one GUID per interface
+                            }
+                        }
+                    }
+                }
+                if (bracketDepth > 0) scanPos++
+            }
+        }
+    }
+
+    /**
      * Synthesize ATTRIBUTE_LIST and ATTRIBUTE_DEFINITION PSI elements for declarations.
-     *
-     * Sonar-delphi doesn't always create AttributeListNode for type declarations and some routine
-     * declarations. The attribute tokens ([AttrName] or [AttrName(args)]) are absorbed directly
-     * into the declaration node span. This function detects such attributes and creates proper
-     * PSI structure for them.
+     * Attributes precede their target, so we look BEFORE the declaration.
      *
      * @param builder The PsiBuilder positioned at the start of the declaration
      * @param nodeStartOffset The start offset of the declaration node (includes attributes)
@@ -500,10 +570,10 @@ class PascalSonarParser : PsiParser {
      */
     private fun synthesizeAttributesForDeclaration(builder: PsiBuilder, nodeStartOffset: Int, nodeEndOffset: Int) {
         val text = builder.originalText
-        // Start scanning from the beginning of the declaration span to ensure we detect brackets
         var scanPos = nodeStartOffset
 
         // Look for attribute pattern: [AttrName] or [AttrName(args)]
+        // Note: We do NOT look for GUIDs here - those are handled separately for interfaces
         data class AttrRange(val bracketStart: Int, val contentStart: Int, val contentEnd: Int, val bracketEnd: Int)
         val attributeRanges = mutableListOf<AttrRange>()
 

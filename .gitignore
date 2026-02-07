@@ -34,6 +34,8 @@ libs/*.jar
 *.hprof
 
 # ai noodles
+/*_*.md
+/plan-*.md
 /*.prompt.md
 /CLAUDE.md
 /.ai/mcp/mcp.json

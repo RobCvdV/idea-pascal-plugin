@@ -69,6 +69,7 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
             String base = file.getName();
             int dot = base.lastIndexOf('.');
             unitName = dot > 0 ? base.substring(0, dot) : base;
+            unitName = unitName.toLowerCase(); // Normalize to lowercase
         }
         if (unitName == null) unitName = "";
 
@@ -182,6 +183,7 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
         String visibility = dataStream.readNameString();
         String section = dataStream.readNameString();
         if (unitName == null) unitName = "";
+        else unitName = unitName.toLowerCase(); // Normalize to lowercase
         if (signatureHash == null) signatureHash = "";
         if (visibility == null || visibility.isEmpty()) visibility = null;
         if (section == null || section.isEmpty()) section = null;

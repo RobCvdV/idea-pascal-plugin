@@ -276,11 +276,11 @@ class PascalSonarParser : PsiParser {
             // ============================================================================
             // Uses Clause / Unit References
             // ============================================================================
+            // Map only the actual reference nodes, not the container nodes
             node.javaClass.simpleName.contains("QualifiedNameDeclaration", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
-            node.javaClass.simpleName.contains("Namespace", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
-            node.javaClass.simpleName.contains("UnitReference", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
-            node.javaClass.simpleName.contains("UnitImport", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
-            node.javaClass.simpleName.contains("UsesItem", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
+            node.javaClass.simpleName.contains("NamespaceNameDeclaration", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
+            // Skip UsesItem - it's a container that contains the actual reference
+            // node.javaClass.simpleName.contains("UsesItem", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.UNIT_REFERENCE
             node.javaClass.simpleName.contains("UsesClause", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.USES_SECTION
 
             // ============================================================================

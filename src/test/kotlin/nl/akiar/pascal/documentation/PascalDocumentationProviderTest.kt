@@ -158,6 +158,9 @@ class PascalDocumentationProviderTest : BasePlatformTestCase() {
             element is PascalRoutine)
         
         val routine = element as PascalRoutine
+        println("DEBUG: routine.getUnitName() = '${routine.getUnitName()}'")
+        println("DEBUG: routine.containingFile.name = '${routine.containingFile.name}'")
+        println("DEBUG: routine.docComment = '${routine.docComment}'")
         assertEquals("unitb", routine.getUnitName())
         assertEquals("Doc for UnitB.MyRoutine", routine.docComment)
     }

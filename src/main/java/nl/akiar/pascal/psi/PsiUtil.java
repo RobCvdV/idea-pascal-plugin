@@ -108,7 +108,11 @@ public class PsiUtil {
     public static String getVisibility(@NotNull PsiElement element) {
         // Find the containing TYPE_DEFINITION
         PsiElement typeDefParent = element.getParent();
-        while (typeDefParent != null && typeDefParent.getNode().getElementType() != nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION) {
+        while (typeDefParent != null) {
+            ASTNode node = typeDefParent.getNode();
+            if (node != null && node.getElementType() == nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION) {
+                break;
+            }
             typeDefParent = typeDefParent.getParent();
         }
 

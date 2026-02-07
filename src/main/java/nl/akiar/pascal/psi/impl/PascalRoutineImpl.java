@@ -278,11 +278,14 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
     @NotNull
     public String getUnitName() {
         PascalRoutineStub stub = getGreenStub();
-        if (stub != null && stub.getUnitName() != null) return stub.getUnitName();
+        if (stub != null && stub.getUnitName() != null) {
+            return stub.getUnitName().toLowerCase(); // Normalize to lowercase
+        }
         PsiFile file = getContainingFile();
         String base = file.getName();
         int dot = base.lastIndexOf('.');
-        return dot > 0 ? base.substring(0, dot) : base;
+        String unitName = dot > 0 ? base.substring(0, dot) : base;
+        return unitName.toLowerCase();
     }
 
     public String getSignatureHash() {
@@ -526,9 +529,16 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
     public String getContainingClassName() {
         nl.akiar.pascal.stubs.PascalRoutineStub stub = getGreenStub();
         if (stub != null) return stub.getContainingClassName();
-        // Fallback: if we have an interface declaration inside a type, use the type's name
-        nl.akiar.pascal.psi.PascalTypeDefinition td = getContainingClass();
-        return td != null ? td.getName() : null;
+
+        // Fallback: traverse parent chain to find containing type definition (local AST only - no getContainingClass() call!)
+        PsiElement parent = getParent();
+        while (parent != null) {
+            if (parent instanceof nl.akiar.pascal.psi.PascalTypeDefinition) {
+                return ((nl.akiar.pascal.psi.PascalTypeDefinition) parent).getName();
+            }
+            parent = parent.getParent();
+        }
+        return null;
     }
 
     @Override

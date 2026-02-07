@@ -105,6 +105,11 @@
         <!-- Pascal Stub Index for attribute definitions -->
         <stubIndex implementation="nl.akiar.pascal.stubs.PascalAttributeIndex"/>
 
+        <!-- Pascal Scoped Indexes (Milestone A) -->
+        <stubIndex implementation="nl.akiar.pascal.stubs.PascalScopedRoutineIndex"/>
+        <stubIndex implementation="nl.akiar.pascal.stubs.PascalScopedPropertyIndex"/>
+        <stubIndex implementation="nl.akiar.pascal.stubs.PascalScopedFieldIndex"/>
+
         <!-- Pascal Stub Element Types Holder -->
         <stubElementTypeHolder class="nl.akiar.pascal.psi.PascalElementTypes"/>
 

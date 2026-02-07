@@ -127,6 +127,15 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
     @Nullable
     private String buildTypeName(ASTNode child) {
         IElementType type = child.getElementType();
+
+        // Handle TYPE_REFERENCE PSI elements created by parser
+        if (type == PascalElementTypes.TYPE_REFERENCE) {
+            PsiElement typeRefElement = child.getPsi();
+            if (typeRefElement instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
+                return ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) typeRefElement).getReferencedTypeName();
+            }
+        }
+
         if (type == PascalTokenTypes.IDENTIFIER ||
             type == PascalTokenTypes.KW_STRING ||
             type == PascalTokenTypes.KW_ARRAY ||

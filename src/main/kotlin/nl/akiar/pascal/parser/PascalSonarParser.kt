@@ -297,6 +297,13 @@ class PascalSonarParser : PsiParser {
 
             node is org.sonar.plugins.communitydelphi.api.ast.TypeParameterNode -> nl.akiar.pascal.psi.PascalElementTypes.GENERIC_PARAMETER
 
+            // ============================================================================
+            // Type References (identifiers referring to types)
+            // ============================================================================
+            // TypeReferenceNode represents an identifier that references a type (not defines it)
+            // This appears in variable types, parameter types, return types, inheritance, etc.
+            // Exclude type declarations (those are TYPE_DEFINITION) and type parameters (GENERIC_PARAMETER)
+            node is org.sonar.plugins.communitydelphi.api.ast.TypeReferenceNode -> nl.akiar.pascal.psi.PascalElementTypes.TYPE_REFERENCE
 
             // ============================================================================
             // Attributes/Decorators

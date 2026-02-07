@@ -4,11 +4,14 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import org.junit.Test
 
 /**
- * Tests for built-in type detection and highlighting.
- * Verifies that type references are correctly identified and highlighted at annotation time.
+ * Tests for TYPE_REFERENCE PSI element creation and type detection.
+ * Verifies that the parser creates TYPE_REFERENCE PSI elements for type references
+ * in variable declarations, parameters, return types, fields, etc.
  *
- * NOTE: This is Phase 0 "lite" - type detection happens in the annotator via context analysis
- * rather than creating TYPE_REFERENCE PSI elements during parsing.
+ * This tests the full parser-level implementation where TypeReferenceNode from
+ * sonar-delphi AST is mapped to PascalElementTypes.TYPE_REFERENCE, creating
+ * PascalTypeReferenceElement instances with proper kind detection (SIMPLE_TYPE,
+ * USER_TYPE, KEYWORD_TYPE).
  */
 class TypeReferenceParserTest : BasePlatformTestCase() {
 
@@ -23,12 +26,21 @@ class TypeReferenceParserTest : BasePlatformTestCase() {
         """.trimIndent()
 
         val psiFile = myFixture.configureByText("Test.pas", code)
-        // Just verify it parses without error
         assertNotNull("File should parse", psiFile)
 
-        // Verify the built-in type registry recognizes Integer
-        assertTrue("Integer should be recognized as simple type",
-                  PascalBuiltInTypes.isSimpleType("Integer"))
+        // Verify TYPE_REFERENCE PSI element is created
+        val typeRefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile,
+                                                       nl.akiar.pascal.psi.impl.PascalTypeReferenceElement::class.java)
+        assertTrue("Should have at least one TYPE_REFERENCE element", typeRefs.isNotEmpty())
+
+        // Verify it references "Integer"
+        val integerRef = typeRefs.firstOrNull { it.getReferencedTypeName() == "Integer" }
+        assertNotNull("Should find TYPE_REFERENCE for Integer", integerRef)
+
+        // Verify kind is SIMPLE_TYPE
+        assertEquals("Integer should be SIMPLE_TYPE kind",
+                    nl.akiar.pascal.psi.TypeReferenceKind.SIMPLE_TYPE,
+                    integerRef?.getKind())
     }
 
     @Test
@@ -38,7 +50,7 @@ class TypeReferenceParserTest : BasePlatformTestCase() {
             interface
             var 
               X: Integer;
-              Y: String;
+              Y: Cardinal;
               Z: Boolean;
             implementation
             end.
@@ -47,10 +59,16 @@ class TypeReferenceParserTest : BasePlatformTestCase() {
         val psiFile = myFixture.configureByText("Test.pas", code)
         assertNotNull("File should parse", psiFile)
 
-        // Verify built-in types are recognized
-        assertTrue(PascalBuiltInTypes.isSimpleType("Integer"))
-        assertTrue(PascalBuiltInTypes.isSimpleType("String"))
-        assertTrue(PascalBuiltInTypes.isSimpleType("Boolean"))
+        // Verify TYPE_REFERENCE elements are created for each type
+        val typeRefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile,
+                                                       nl.akiar.pascal.psi.impl.PascalTypeReferenceElement::class.java)
+        assertTrue("Should have at least 3 TYPE_REFERENCE elements", typeRefs.size >= 3)
+
+        // Verify all three types are present
+        val typeNames = typeRefs.map { it.getReferencedTypeName() }.toSet()
+        assertTrue("Should have Integer", typeNames.contains("Integer"))
+        assertTrue("Should have Cardinal", typeNames.contains("Cardinal"))
+        assertTrue("Should have Boolean", typeNames.contains("Boolean"))
     }
 
     @Test
@@ -66,9 +84,16 @@ class TypeReferenceParserTest : BasePlatformTestCase() {
         val psiFile = myFixture.configureByText("Test.pas", code)
         assertNotNull("File should parse", psiFile)
 
-        // TMyClass follows user type naming (T* prefix)
-        assertFalse("TMyClass should not be a built-in type",
-                   PascalBuiltInTypes.isSimpleType("TMyClass"))
+        // Verify TYPE_REFERENCE element is created for user type
+        val typeRefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile,
+                                                       nl.akiar.pascal.psi.impl.PascalTypeReferenceElement::class.java)
+        val tmyClassRef = typeRefs.firstOrNull { it.getReferencedTypeName() == "TMyClass" }
+        assertNotNull("Should find TYPE_REFERENCE for TMyClass", tmyClassRef)
+
+        // Verify kind is USER_TYPE (not SIMPLE_TYPE)
+        assertEquals("TMyClass should be USER_TYPE kind",
+                    nl.akiar.pascal.psi.TypeReferenceKind.USER_TYPE,
+                    tmyClassRef?.getKind())
     }
 
     @Test
@@ -84,9 +109,19 @@ class TypeReferenceParserTest : BasePlatformTestCase() {
         val psiFile = myFixture.configureByText("Test.pas", code)
         assertNotNull("File should parse", psiFile)
 
-        // lowercase "string" is a keyword type
+        // NOTE: Keyword types like "string", "array", "set", "file" do NOT get TYPE_REFERENCE
+        // elements from the parser because sonar-delphi treats them as grammar keywords
+        // rather than type identifiers. They are handled by the context-based fallback in
+        // the annotator (isTypeReferenceContext + annotateTypeReferenceIdentifier).
+
+        // Verify the built-in type registry recognizes it
         assertTrue("string should be recognized as keyword type",
                   PascalBuiltInTypes.isKeywordType("string"))
+
+        // The TYPE_REFERENCE count will be 0 for keyword-only code
+        val typeRefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile,
+                                                       nl.akiar.pascal.psi.impl.PascalTypeReferenceElement::class.java)
+        assertEquals("Keyword types don't get TYPE_REFERENCE from parser", 0, typeRefs.size)
     }
 
     @Test
@@ -105,8 +140,19 @@ class TypeReferenceParserTest : BasePlatformTestCase() {
         val psiFile = myFixture.configureByText("Test.pas", code)
         assertNotNull("File should parse", psiFile)
 
-        assertTrue(PascalBuiltInTypes.isSimpleType("Integer"))
-        assertFalse(PascalBuiltInTypes.isSimpleType("TObject"))
+        // Verify TYPE_REFERENCE elements are created for parameter types
+        val typeRefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile,
+                                                       nl.akiar.pascal.psi.impl.PascalTypeReferenceElement::class.java)
+        val typeNames = typeRefs.map { it.getReferencedTypeName() }.toSet()
+
+        assertTrue("Should have Integer type reference", typeNames.contains("Integer"))
+        assertTrue("Should have TObject type reference", typeNames.contains("TObject"))
+
+        // Verify at least one Integer reference is SIMPLE_TYPE
+        val integerRefs = typeRefs.filter { it.getReferencedTypeName() == "Integer" }
+        assertTrue("Should have Integer references", integerRefs.isNotEmpty())
+        assertTrue("Integer should be SIMPLE_TYPE",
+                  integerRefs.any { it.getKind() == nl.akiar.pascal.psi.TypeReferenceKind.SIMPLE_TYPE })
     }
 
     @Test
@@ -125,7 +171,14 @@ class TypeReferenceParserTest : BasePlatformTestCase() {
 
         val psiFile = myFixture.configureByText("Test.pas", code)
         assertNotNull("File should parse", psiFile)
-        assertTrue(PascalBuiltInTypes.isSimpleType("Integer"))
+
+        // Verify TYPE_REFERENCE element is created for return type
+        val typeRefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile,
+                                                       nl.akiar.pascal.psi.impl.PascalTypeReferenceElement::class.java)
+        val integerRefs = typeRefs.filter { it.getReferencedTypeName() == "Integer" }
+        assertTrue("Should have Integer type references for return types", integerRefs.isNotEmpty())
+        assertTrue("Integer should be SIMPLE_TYPE",
+                  integerRefs.all { it.getKind() == nl.akiar.pascal.psi.TypeReferenceKind.SIMPLE_TYPE })
     }
 
     @Test
@@ -137,7 +190,7 @@ class TypeReferenceParserTest : BasePlatformTestCase() {
               TMyClass = class
               private
                 FValue: Integer;
-                FName: string;
+                FName: AnsiString;
               end;
             implementation
             end.
@@ -146,8 +199,24 @@ class TypeReferenceParserTest : BasePlatformTestCase() {
         val psiFile = myFixture.configureByText("Test.pas", code)
         assertNotNull("File should parse", psiFile)
 
-        assertTrue(PascalBuiltInTypes.isSimpleType("Integer"))
-        assertTrue(PascalBuiltInTypes.isKeywordType("string"))
+        // Verify TYPE_REFERENCE elements are created for field types
+        val typeRefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile,
+                                                       nl.akiar.pascal.psi.impl.PascalTypeReferenceElement::class.java)
+        val typeNames = typeRefs.map { it.getReferencedTypeName() }.toSet()
+
+        assertTrue("Should have Integer type reference", typeNames.contains("Integer"))
+        assertTrue("Should have AnsiString type reference", typeNames.contains("AnsiString"))
+
+        // Verify kinds
+        val integerRef = typeRefs.firstOrNull { it.getReferencedTypeName() == "Integer" }
+        assertEquals("Integer should be SIMPLE_TYPE",
+                    nl.akiar.pascal.psi.TypeReferenceKind.SIMPLE_TYPE,
+                    integerRef?.getKind())
+
+        val ansiStringRef = typeRefs.firstOrNull { it.getReferencedTypeName() == "AnsiString" }
+        assertEquals("AnsiString should be SIMPLE_TYPE",
+                    nl.akiar.pascal.psi.TypeReferenceKind.SIMPLE_TYPE,
+                    ansiStringRef?.getKind())
     }
 
     @Test

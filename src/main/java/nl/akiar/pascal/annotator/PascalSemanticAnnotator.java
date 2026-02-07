@@ -61,7 +61,13 @@ public class PascalSemanticAnnotator implements Annotator {
 
     @Override
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
-        // Fast path for type reference identifiers detected by context
+        // Fast path for TYPE_REFERENCE PSI elements created by parser
+        if (element instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
+            annotateTypeReference((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) element, holder);
+            return;
+        }
+
+        // Fast path for type reference identifiers detected by context (fallback for older approach)
         if (element.getNode() != null && element.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
             // If identifier is inside an attribute definition, highlight it as attribute name
             PsiElement parent = element.getParent();

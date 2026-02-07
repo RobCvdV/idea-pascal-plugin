@@ -63,8 +63,18 @@ public class PascalPropertyImpl extends StubBasedPsiElementBase<PascalPropertySt
             while (next != null && (next.getElementType() == PascalTokenTypes.WHITE_SPACE)) {
                 next = next.getTreeNext();
             }
-            if (next != null && next.getElementType() == PascalTokenTypes.IDENTIFIER) {
-                return next.getText();
+            if (next != null) {
+                // Handle TYPE_REFERENCE PSI elements created by parser
+                if (next.getElementType() == PascalElementTypes.TYPE_REFERENCE) {
+                    PsiElement typeRefElement = next.getPsi();
+                    if (typeRefElement instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
+                        return ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) typeRefElement).getReferencedTypeName();
+                    }
+                }
+                // Fallback to IDENTIFIER for keyword types that don't get TYPE_REFERENCE
+                if (next.getElementType() == PascalTokenTypes.IDENTIFIER) {
+                    return next.getText();
+                }
             }
         }
         return null;

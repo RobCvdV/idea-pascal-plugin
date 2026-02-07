@@ -401,6 +401,18 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
                 next = next.getTreeNext();
                 continue;
             }
+            // Handle TYPE_REFERENCE elements created by parser
+            if (type == nl.akiar.pascal.psi.PascalElementTypes.TYPE_REFERENCE) {
+                PsiElement typeRefElement = next.getPsi();
+                if (typeRefElement instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
+                    String typeName = ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) typeRefElement).getReferencedTypeName();
+                    if (typeName != null) {
+                        return typeName;
+                    }
+                }
+                next = next.getTreeNext();
+                continue;
+            }
             if (type == PascalTokenTypes.IDENTIFIER) {
                 superName.append(next.getText());
                 next = next.getTreeNext();

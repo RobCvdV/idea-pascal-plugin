@@ -27,7 +27,7 @@ lib/
 .intellijPlatform/
 
 # Transient output logs
-.output.txt
+.output*.txt
 
 # external libraries
 libs/*.jar

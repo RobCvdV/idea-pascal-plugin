@@ -12,7 +12,7 @@ import java.io.IOException;
 
 public class PascalPropertyStubElementType extends IStubElementType<PascalPropertyStub, PascalProperty> {
     public PascalPropertyStubElementType() {
-        super("PASCAL_PROPERTY_DEFINITION", PascalLanguage.INSTANCE);
+        super("PROPERTY_DEFINITION", PascalLanguage.INSTANCE);
     }
 
     @Override
@@ -23,18 +23,38 @@ public class PascalPropertyStubElementType extends IStubElementType<PascalProper
     @NotNull
     @Override
     public PascalPropertyStub createStub(@NotNull PascalProperty psi, StubElement parentStub) {
-        return new PascalPropertyStubImpl(
-                parentStub,
-                psi.getName(),
-                psi.getTypeName(),
-                psi.getContainingClassName()
-        );
+        String name = psi.getName();
+        String typeName = psi.getTypeName();
+        String owner = psi.getContainingClassName();
+
+        // Extract unit name from file name directly (local AST only)
+        String unitName = null;
+        try {
+            com.intellij.psi.PsiFile file = psi.getContainingFile();
+            if (file != null) {
+                String fileName = file.getName();
+                int dotIndex = fileName.lastIndexOf('.');
+                unitName = dotIndex > 0 ? fileName.substring(0, dotIndex) : fileName;
+            }
+        } catch (Exception ignored) {
+            // Guard against any exceptions during stub creation
+        }
+
+        // Extract visibility from local AST only
+        String visibility = null;
+        try {
+            visibility = nl.akiar.pascal.psi.PsiUtil.getVisibility(psi);
+        } catch (Exception ignored) {
+            // Guard against any exceptions during stub creation
+        }
+
+        return new PascalPropertyStubImpl(parentStub, name, typeName, owner, unitName, visibility);
     }
 
     @NotNull
     @Override
     public String getExternalId() {
-        return "pascal.propertyDefinition";
+        return "pascal.property.definition";
     }
 
     @Override
@@ -42,6 +62,8 @@ public class PascalPropertyStubElementType extends IStubElementType<PascalProper
         dataStream.writeName(stub.getName());
         dataStream.writeName(stub.getTypeName());
         dataStream.writeName(stub.getContainingClassName());
+        dataStream.writeName(stub.getUnitName() == null ? "" : stub.getUnitName());
+        dataStream.writeName(stub.getVisibility() == null ? "" : stub.getVisibility());
     }
 
     @NotNull
@@ -49,8 +71,10 @@ public class PascalPropertyStubElementType extends IStubElementType<PascalProper
     public PascalPropertyStub deserialize(@NotNull StubInputStream dataStream, StubElement parentStub) throws IOException {
         String name = dataStream.readNameString();
         String typeName = dataStream.readNameString();
-        String containingClassName = dataStream.readNameString();
-        return new PascalPropertyStubImpl(parentStub, name, typeName, containingClassName);
+        String owner = dataStream.readNameString();
+        String unitName = dataStream.readNameString();
+        String visibility = dataStream.readNameString();
+        return new PascalPropertyStubImpl(parentStub, name, typeName, owner, unitName, visibility);
     }
 
     @Override
@@ -58,6 +82,8 @@ public class PascalPropertyStubElementType extends IStubElementType<PascalProper
         String name = stub.getName();
         if (name != null) {
             sink.occurrence(PascalPropertyIndex.KEY, name.toLowerCase());
+            String key = PascalScopedMemberIndex.compositeKey(stub.getUnitName(), stub.getContainingClassName(), name, "property");
+            sink.occurrence(PascalScopedMemberIndex.PROPERTY_KEY, key);
         }
     }
 

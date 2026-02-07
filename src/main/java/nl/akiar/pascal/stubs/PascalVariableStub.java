@@ -36,4 +36,10 @@ public interface PascalVariableStub extends StubElement<PascalVariableDefinition
      */
     @Nullable
     String getContainingScopeName();
+
+    @Nullable
+    String getOwnerTypeName();
+
+    @Nullable
+    String getVisibility();
 }

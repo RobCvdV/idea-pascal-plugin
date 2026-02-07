@@ -1,7 +1,6 @@
 package nl.akiar.pascal.stubs;
 
 import com.intellij.lang.ASTNode;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.stubs.*;
 import nl.akiar.pascal.PascalLanguage;
@@ -17,10 +16,9 @@ import java.io.IOException;
  * Handles serialization/deserialization and indexing.
  */
 public class PascalVariableStubElementType extends IStubElementType<PascalVariableStub, PascalVariableDefinition> {
-    private static final Logger LOG = Logger.getInstance(PascalVariableStubElementType.class);
 
     public PascalVariableStubElementType() {
-        super("PASCAL_VARIABLE_DEFINITION", PascalLanguage.INSTANCE);
+        super("VARIABLE_DEFINITION", PascalLanguage.INSTANCE);
     }
 
     @Override
@@ -31,19 +29,37 @@ public class PascalVariableStubElementType extends IStubElementType<PascalVariab
     @Override
     @NotNull
     public PascalVariableStub createStub(@NotNull PascalVariableDefinition psi, StubElement<?> parentStub) {
-        return new PascalVariableStubImpl(
-                parentStub,
-                psi.getName(),
-                psi.getTypeName(),
-                psi.getVariableKind(),
-                psi.getContainingScopeName()
-        );
+        String name = psi.getName();
+        String typeName = psi.getTypeName();
+        VariableKind kind = psi.getVariableKind();
+        String containingScopeName = psi.getContainingScopeName();
+
+        // Extract owner type name safely (local AST only)
+        String ownerTypeName = null;
+        try {
+            nl.akiar.pascal.psi.PascalTypeDefinition owner = psi.getContainingClass();
+            if (owner != null) {
+                ownerTypeName = owner.getName();
+            }
+        } catch (Exception ignored) {
+            // Guard against any exceptions during stub creation
+        }
+
+        // Extract visibility safely (local AST only)
+        String visibility = null;
+        try {
+            visibility = psi.getVisibility();
+        } catch (Exception ignored) {
+            // Guard against any exceptions during stub creation
+        }
+
+        return new PascalVariableStubImpl(parentStub, name, typeName, kind, containingScopeName, ownerTypeName, visibility);
     }
 
     @Override
     @NotNull
     public String getExternalId() {
-        return "pascal.variableDefinition";
+        return "pascal.variable.definition";
     }
 
     @Override
@@ -52,6 +68,8 @@ public class PascalVariableStubElementType extends IStubElementType<PascalVariab
         dataStream.writeName(stub.getTypeName());
         dataStream.writeInt(stub.getVariableKind().ordinal());
         dataStream.writeName(stub.getContainingScopeName());
+        dataStream.writeName(stub.getOwnerTypeName());
+        dataStream.writeName(stub.getVisibility());
     }
 
     @Override
@@ -62,7 +80,9 @@ public class PascalVariableStubElementType extends IStubElementType<PascalVariab
         int kindOrdinal = dataStream.readInt();
         VariableKind kind = VariableKind.values()[kindOrdinal];
         String containingScopeName = dataStream.readNameString();
-        return new PascalVariableStubImpl(parentStub, name, typeName, kind, containingScopeName);
+        String ownerTypeName = dataStream.readNameString();
+        String visibility = dataStream.readNameString();
+        return new PascalVariableStubImpl(parentStub, name, typeName, kind, containingScopeName, ownerTypeName, visibility);
     }
 
     @Override
@@ -70,12 +90,20 @@ public class PascalVariableStubElementType extends IStubElementType<PascalVariab
         String name = stub.getName();
         if (name != null) {
             sink.occurrence(PascalVariableIndex.KEY, name.toLowerCase());
+            if (stub.getVariableKind() == nl.akiar.pascal.psi.VariableKind.FIELD) {
+                String key = PascalScopedMemberIndex.compositeKey(
+                        stub.getContainingScopeName(),
+                        stub.getOwnerTypeName(),
+                        name,
+                        "field");
+                sink.occurrence(PascalScopedMemberIndex.FIELD_KEY, key);
+            }
         }
     }
 
     @Override
     public boolean shouldCreateStub(ASTNode node) {
-        // Avoid calling node.getPsi() during indexing
-        return node.getElementType() == nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_DEFINITION;
+        PsiElement psi = node.getPsi();
+        return psi instanceof PascalVariableDefinition;
     }
 }

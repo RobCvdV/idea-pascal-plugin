@@ -238,6 +238,27 @@ public class PsiUtil {
         return null;
     }
 
+    @Nullable
+    public static String getSection(@NotNull PsiElement element) {
+        // Walk up the PSI tree to find containing interface or implementation section
+        PsiElement current = element;
+        while (current != null) {
+            ASTNode node = current.getNode();
+            if (node != null) {
+                IElementType type = node.getElementType();
+                // Check for interface and implementation section markers
+                if (type == nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_SECTION) {
+                    return "interface";
+                }
+                if (type == nl.akiar.pascal.psi.PascalElementTypes.IMPLEMENTATION_SECTION) {
+                    return "implementation";
+                }
+            }
+            current = current.getParent();
+        }
+        return null;
+    }
+
     public static boolean isAncestor(@NotNull PsiElement ancestor, @NotNull PsiElement element) {
         if (ancestor == element) return true;
         PsiElement parent = element.getParent();

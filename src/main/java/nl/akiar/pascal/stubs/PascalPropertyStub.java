@@ -17,4 +17,10 @@ public interface PascalPropertyStub extends StubElement<PascalProperty> {
 
     @Nullable
     String getContainingClassName();
+
+    @Nullable
+    String getUnitName();
+
+    @Nullable
+    String getVisibility();
 }

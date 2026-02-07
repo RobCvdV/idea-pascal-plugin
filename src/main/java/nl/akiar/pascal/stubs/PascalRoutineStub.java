@@ -25,4 +25,12 @@ public interface PascalRoutineStub extends StubElement<PascalRoutine> {
     /** Lightweight signature hash for decl/impl pairing and overload selection. */
     @Nullable
     String getSignatureHash();
+
+    /** Visibility (public, private, protected, published) for class methods; null for global routines. */
+    @Nullable
+    String getVisibility();
+
+    /** Section (interface, implementation) where the routine is declared; null if not determined. */
+    @Nullable
+    String getSection();
 }

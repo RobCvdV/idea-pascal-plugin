@@ -17,41 +17,47 @@ public class PascalVariableStubImpl extends StubBase<PascalVariableDefinition> i
     private final String typeName;
     private final VariableKind variableKind;
     private final String containingScopeName;
+    private final String ownerTypeName;
+    private final String visibility;
 
     public PascalVariableStubImpl(
             @Nullable StubElement<?> parent,
             @Nullable String name,
             @Nullable String typeName,
             @NotNull VariableKind variableKind,
-            @Nullable String containingScopeName) {
+            @Nullable String containingScopeName,
+            @Nullable String ownerTypeName,
+            @Nullable String visibility) {
         super(parent, PascalElementTypes.VARIABLE_DEFINITION);
         this.name = name;
         this.typeName = typeName;
         this.variableKind = variableKind;
         this.containingScopeName = containingScopeName;
+        this.ownerTypeName = ownerTypeName;
+        this.visibility = visibility;
     }
 
     @Override
     @Nullable
-    public String getName() {
-        return name;
-    }
+    public String getName() { return name; }
 
     @Override
     @Nullable
-    public String getTypeName() {
-        return typeName;
-    }
+    public String getTypeName() { return typeName; }
 
     @Override
     @NotNull
-    public VariableKind getVariableKind() {
-        return variableKind;
-    }
+    public VariableKind getVariableKind() { return variableKind; }
 
     @Override
     @Nullable
-    public String getContainingScopeName() {
-        return containingScopeName;
-    }
+    public String getContainingScopeName() { return containingScopeName; }
+
+    @Override
+    @Nullable
+    public String getOwnerTypeName() { return ownerTypeName; }
+
+    @Override
+    @Nullable
+    public String getVisibility() { return visibility; }
 }

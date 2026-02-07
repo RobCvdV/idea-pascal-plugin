@@ -76,7 +76,17 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
         String signatureHash = computeSignatureHashFromParams(psi);
         if (signatureHash == null) signatureHash = "";
 
-        return new PascalRoutineStubImpl(parentStub, psi.getName(), psi.isImplementation(), ownerName, returnTypeName, unitName, signatureHash);
+        // Visibility and section from PSI via local AST inspection
+        String visibility = null;
+        String section = null;
+        try {
+            visibility = nl.akiar.pascal.psi.PsiUtil.getVisibility(psi);
+            section = nl.akiar.pascal.psi.PsiUtil.getSection(psi);
+        } catch (Exception ignored) {
+            // Guard null-safety during stub creation
+        }
+
+        return new PascalRoutineStubImpl(parentStub, psi.getName(), psi.isImplementation(), ownerName, returnTypeName, unitName, signatureHash, visibility, section);
     }
 
     @org.jetbrains.annotations.Nullable
@@ -156,6 +166,8 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
         dataStream.writeName(stub.getReturnTypeName());
         dataStream.writeName(stub.getUnitName() == null ? "" : stub.getUnitName());
         dataStream.writeName(stub.getSignatureHash() == null ? "" : stub.getSignatureHash());
+        dataStream.writeName(stub.getVisibility() == null ? "" : stub.getVisibility());
+        dataStream.writeName(stub.getSection() == null ? "" : stub.getSection());
     }
 
     @NotNull
@@ -167,9 +179,13 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
         String returnTypeName = dataStream.readNameString();
         String unitName = dataStream.readNameString();
         String signatureHash = dataStream.readNameString();
+        String visibility = dataStream.readNameString();
+        String section = dataStream.readNameString();
         if (unitName == null) unitName = "";
         if (signatureHash == null) signatureHash = "";
-        return new PascalRoutineStubImpl(parentStub, name, isImplementation, ownerName, returnTypeName, unitName, signatureHash);
+        if (visibility == null || visibility.isEmpty()) visibility = null;
+        if (section == null || section.isEmpty()) section = null;
+        return new PascalRoutineStubImpl(parentStub, name, isImplementation, ownerName, returnTypeName, unitName, signatureHash, visibility, section);
     }
 
     @Override
@@ -178,8 +194,15 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
             sink.occurrence(PascalRoutineIndex.KEY, stub.getName().toLowerCase());
             String unit = stub.getUnitName();
             String owner = stub.getContainingClassName();
+            String sig = stub.getSignatureHash();
             if (unit != null && owner != null) {
-                sink.occurrence(nl.akiar.pascal.stubs.PascalScopedRoutineIndex.KEY, (unit + "#" + owner + "#" + stub.getName()).toLowerCase());
+                String scopedKey = (unit + "#" + owner + "#" + stub.getName()).toLowerCase();
+                sink.occurrence(nl.akiar.pascal.stubs.PascalScopedRoutineIndex.KEY, scopedKey);
+                // Add overload-aware key with signature if present
+                if (sig != null && !sig.isEmpty()) {
+                    String scopedKeyWithSig = (unit + "#" + owner + "#" + stub.getName() + "#" + sig).toLowerCase();
+                    sink.occurrence(nl.akiar.pascal.stubs.PascalScopedRoutineIndex.KEY, scopedKeyWithSig);
+                }
             }
         }
     }

@@ -33,7 +33,7 @@ public class PascalStubFileElementType extends IStubFileElementType<PsiFileStub<
 
     @Override
     public int getStubVersion() {
-        // Bump to force reindex after adding attribute stub support
-        return super.getStubVersion() + 6;
+        // Bump to force reindex after adding visibility/section/ownerTypeName fields (Milestone A)
+        return super.getStubVersion() + 7;
     }
 }

@@ -34,6 +34,20 @@ object MemberChainResolver {
     @Volatile private var lastMemoClearTs: Long = System.currentTimeMillis()
     private const val MEMO_TTL_MS = 2000L
 
+    private object ResolverConfig {
+        @JvmField val enablePerformanceMetrics: Boolean = java.lang.Boolean.getBoolean("pascal.resolver.metrics")
+        @JvmField val enableDebugLogs: Boolean = java.lang.Boolean.getBoolean("pascal.resolver.debug")
+    }
+
+    object PerformanceMetrics {
+        private val timings = mutableListOf<Pair<String, Long>>()
+        @Synchronized fun record(label: String, nanos: Long) {
+            if (ResolverConfig.enablePerformanceMetrics) timings.add(label to nanos)
+        }
+        @Synchronized fun snapshot(): List<Pair<String, Long>> = timings.toList()
+        @Synchronized fun clear() { timings.clear() }
+    }
+
     private fun maybeLog(msg: String, file: PsiFile? = null) {
         if (LOG_ENABLED && (file == null || nl.akiar.pascal.log.UnitLogFilter.shouldLog(file))) LOG.info(msg)
     }
@@ -135,37 +149,42 @@ object MemberChainResolver {
      */
     @JvmStatic
     fun resolveElement(element: PsiElement): PsiElement? {
-        if (element.getUserData(RESOLVE_IN_PROGRESS) == true) {
-            maybeLog("[MemberTraversal] resolveElement: reentrancy guard active; skipping for '${element.text}'", element.containingFile)
-            return null
-        }
-        element.putUserData(RESOLVE_IN_PROGRESS, true)
+        val start = System.nanoTime()
         try {
-            val chain = collectChain(element)
-            if (chain.isEmpty()) return null
-            val filePath = element.containingFile?.virtualFile?.path
-            val chainText = chain.joinToString(".") { it.text }
-            val key = ChainKey(filePath, chain.first().textOffset, chainText)
-            clearExpiredMemo()
-            chainMemo[key]?.let { return it }
-
-            maybeLog("[MemberTraversal] resolveChain start element='${element.text}' file='${element.containingFile.name}'", element.containingFile)
-            maybeLog("[MemberTraversal] collected chain size=${chain.size} parts=${chain.map { it.text }}", element.containingFile)
-            val resolved = resolveChainElements(chain, element.containingFile)
-            val myIndex = chain.indexOf(element)
-            val targetIndex = if (myIndex >= 0) myIndex else chain.lastIndex
-            val target = resolved.getOrNull(targetIndex)
-            if (target != null) {
-                maybeLog("[MemberTraversal] resolved chain parts=${resolved.filterNotNull().map { it.javaClass.simpleName }}", element.containingFile)
-                // Only cache non-null targets to avoid NPE in ConcurrentHashMap
-                // Avoid caching partial results in dumb mode to prevent sticky under-resolution
-                if (!DumbService.isDumb(element.project)) {
-                    chainMemo[key] = target
-                }
+            if (element.getUserData(RESOLVE_IN_PROGRESS) == true) {
+                maybeLog("[MemberTraversal] resolveElement: reentrancy guard active; skipping for '${element.text}'", element.containingFile)
+                return null
             }
-            return target
+            element.putUserData(RESOLVE_IN_PROGRESS, true)
+            try {
+                val chain = collectChain(element)
+                if (chain.isEmpty()) return null
+                val filePath = element.containingFile?.virtualFile?.path
+                val chainText = chain.joinToString(".") { it.text }
+                val key = ChainKey(filePath, chain.first().textOffset, chainText)
+                clearExpiredMemo()
+                chainMemo[key]?.let { return it }
+
+                maybeLog("[MemberTraversal] resolveChain start element='${element.text}' file='${element.containingFile.name}'", element.containingFile)
+                maybeLog("[MemberTraversal] collected chain size=${chain.size} parts=${chain.map { it.text }}", element.containingFile)
+                val resolved = resolveChainElements(chain, element.containingFile)
+                val myIndex = chain.indexOf(element)
+                val targetIndex = if (myIndex >= 0) myIndex else chain.lastIndex
+                val target = resolved.getOrNull(targetIndex)
+                if (target != null) {
+                    maybeLog("[MemberTraversal] resolved chain parts=${resolved.filterNotNull().map { it.javaClass.simpleName }}", element.containingFile)
+                    // Only cache non-null targets to avoid NPE in ConcurrentHashMap
+                    // Avoid caching partial results in dumb mode to prevent sticky under-resolution
+                    if (!DumbService.isDumb(element.project)) {
+                        chainMemo[key] = target
+                    }
+                }
+                return target
+            } finally {
+                element.putUserData(RESOLVE_IN_PROGRESS, null)
+            }
         } finally {
-            element.putUserData(RESOLVE_IN_PROGRESS, null)
+            PerformanceMetrics.record("MemberChainResolver.resolveElement", System.nanoTime() - start)
         }
     }
 
@@ -207,98 +226,142 @@ object MemberChainResolver {
      * @return ChainResolutionResult containing resolved elements for each part
      */
     private fun resolveChainElements(chain: List<PsiElement>, originFile: PsiFile): List<PsiElement?> {
-        val results = MutableList<PsiElement?>(chain.size) { null }
-        if (chain.isEmpty()) return results
+        val start = System.nanoTime()
+        try {
+            val results = MutableList<PsiElement?>(chain.size) { null }
+            if (chain.isEmpty()) return results
 
-        val first = chain.first()
-        maybeLog("[MemberTraversal] resolving first '${first.text}' at offset=${first.textOffset}", originFile)
+            val first = chain.first()
+            maybeLog("[MemberTraversal] resolving first '${first.text}' at offset=${first.textOffset}", originFile)
 
-        val usesInfo = nl.akiar.pascal.uses.PascalUsesClauseInfo.parse(originFile)
-        val availableUnitsAtOffset = usesInfo.getAvailableUnits(first.textOffset)
-        maybeLog("[MemberTraversal] uses at offset=${first.textOffset} size=${availableUnitsAtOffset.size} sample=${availableUnitsAtOffset.take(10)}", originFile)
+            val usesInfo = nl.akiar.pascal.uses.PascalUsesClauseInfo.parse(originFile)
+            val availableUnitsAtOffset = usesInfo.getAvailableUnits(first.textOffset)
+            maybeLog("[MemberTraversal] uses at offset=${first.textOffset} size=${availableUnitsAtOffset.size} sample=${availableUnitsAtOffset.take(10)}", originFile)
 
-        val varResult = nl.akiar.pascal.stubs.PascalVariableIndex.findVariablesWithUsesValidation(first.text, originFile, first.textOffset)
-        val resolvedFirst: PsiElement? = when {
-            varResult.inScopeVariables.isNotEmpty() -> {
-                maybeLog("[MemberTraversal] first resolve refs=${varResult.inScopeVariables.size} for '${first.text}'", originFile)
-                varResult.inScopeVariables.first().also {
-                    maybeLog("[MemberTraversal] first resolved as variable '${first.text}'", originFile)
-                    maybeLog("[MemberTraversal] first resolved -> ${it.javaClass.simpleName}", originFile)
-                }
-            }
-            else -> {
-                val typeResult = nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(first.text, originFile, first.textOffset)
-                typeResult.inScopeTypes.firstOrNull()?.also { maybeLog("[MemberTraversal] first resolved as type '${first.text}' -> ${it.name}", originFile) }
-            }
-        }
-        results[0] = resolvedFirst
-
-        var currentType: PascalTypeDefinition? = getTypeOf(resolvedFirst, originFile)
-        var currentOwnerName: String? = when (resolvedFirst) {
-            is PascalVariableDefinition -> resolvedFirst.typeName
-            is PascalProperty -> resolvedFirst.typeName
-            else -> null
-        }
-        if (resolvedFirst != null) {
-            maybeLog("[MemberTraversal] getTypeOf element='${resolvedFirst.javaClass.simpleName}' typeName='${(resolvedFirst as? PascalVariableDefinition)?.typeName ?: (resolvedFirst as? PascalProperty)?.typeName ?: "<null>"}'", originFile)
-        }
-        if (currentType != null) {
-            maybeLog("[MemberTraversal] typeOf lookup '${currentType.name}' in-scope=[${currentType.name}] out-of-scope=[]", originFile)
-            maybeLog("[MemberTraversal] first type -> ${currentType.name}", originFile)
-            maybeLog("[MemberTraversal] confirm type index for '${currentType.name}': in-scope=[${currentType.name}] out-of-scope=[]", originFile)
-            currentOwnerName = currentType.name
-        }
-
-        // Resolve subsequent chain parts using member lookup on currentType
-        for (i in 1 until chain.size) {
-            val name = chain[i].text
-            if (name.equals("Add", ignoreCase = true)) {
-                if (nl.akiar.pascal.log.UnitLogFilter.shouldLog(originFile)) {
-                    LOG.info("[MemberTraversal][Diag] resolving member 'Add' step=${i} currentType=${currentType?.name} currentOwnerName=${currentOwnerName}")
-                }
-            }
-            var member: PsiElement? = null
-            if (currentType != null) {
-                member = findMemberInType(currentType, name, originFile, includeAncestors = true)
-                if (name.equals("Add", ignoreCase = true)) {
-                    if (nl.akiar.pascal.log.UnitLogFilter.shouldLog(originFile)) {
-                        LOG.info("[MemberTraversal][Diag] findMemberInType(owner=${currentType.name}) -> ${member?.javaClass?.simpleName ?: "<none>"}")
+            val varResult = nl.akiar.pascal.stubs.PascalVariableIndex.findVariablesWithUsesValidation(first.text, originFile, first.textOffset)
+            val resolvedFirst: PsiElement? = when {
+                varResult.inScopeVariables.isNotEmpty() -> {
+                    maybeLog("[MemberTraversal] first resolve refs=${varResult.inScopeVariables.size} for '${first.text}'", originFile)
+                    varResult.inScopeVariables.first().also {
+                        maybeLog("[MemberTraversal] first resolved as variable '${first.text}'", originFile)
+                        maybeLog("[MemberTraversal] first resolved -> ${it.javaClass.simpleName}", originFile)
                     }
                 }
-            } else if (!currentOwnerName.isNullOrBlank()) {
-                val props = PascalPropertyIndex.findProperties(name, originFile.project)
-                member = props.firstOrNull { p -> p.containingClass?.name.equals(currentOwnerName, ignoreCase = true) }
-                if (member == null) {
-                    val routines = PascalRoutineIndex.findRoutines(name, originFile.project)
-                    member = routines.firstOrNull { r -> r.containingClassName != null && r.containingClassName.equals(currentOwnerName, ignoreCase = true) }
+                else -> {
+                    val typeResult = nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(first.text, originFile, first.textOffset)
+                    typeResult.inScopeTypes.firstOrNull()?.also { maybeLog("[MemberTraversal] first resolved as type '${first.text}' -> ${it.name}", originFile) }
                 }
-                if (member == null) {
-                    member = resolveMemberByOwnerScan(currentOwnerName!!, name, originFile)
+            }
+            results[0] = resolvedFirst
+
+            var currentType: PascalTypeDefinition? = getTypeOf(resolvedFirst, originFile)
+            var currentOwnerName: String? = when (resolvedFirst) {
+                is PascalVariableDefinition -> resolvedFirst.typeName
+                is PascalProperty -> resolvedFirst.typeName
+                else -> null
+            }
+            if (resolvedFirst != null) {
+                maybeLog("[MemberTraversal] getTypeOf element='${resolvedFirst.javaClass.simpleName}' typeName='${(resolvedFirst as? PascalVariableDefinition)?.typeName ?: (resolvedFirst as? PascalProperty)?.typeName ?: "<null>"}'", originFile)
+            }
+            if (currentType != null) {
+                maybeLog("[MemberTraversal] typeOf lookup '${currentType.name}' in-scope=[${currentType.name}] out-of-scope=[]", originFile)
+                maybeLog("[MemberTraversal] first type -> ${currentType.name}", originFile)
+                maybeLog("[MemberTraversal] confirm type index for '${currentType.name}': in-scope=[${currentType.name}] out-of-scope=[]", originFile)
+                currentOwnerName = currentType.name
+            }
+
+            // Resolve subsequent chain parts using member lookup on currentType
+            for (i in 1 until chain.size) {
+                val name = chain[i].text
+                if (name.equals("Add", ignoreCase = true)) {
                     if (nl.akiar.pascal.log.UnitLogFilter.shouldLog(originFile)) {
-                        LOG.info("[MemberTraversal][Diag] resolveMemberByOwnerScan(owner=${currentOwnerName}, name=${name}) -> ${member?.javaClass?.simpleName ?: "<none>"}")
+                        LOG.info("[MemberTraversal][Diag] resolving member 'Add' step=${i} currentType=${currentType?.name} currentOwnerName=${currentOwnerName}")
+                    }
+                }
+                var member: PsiElement? = null
+                if (currentType != null) {
+                    member = findMemberInType(currentType, name, originFile, includeAncestors = true)
+                    if (name.equals("Add", ignoreCase = true)) {
+                        if (nl.akiar.pascal.log.UnitLogFilter.shouldLog(originFile)) {
+                            LOG.info("[MemberTraversal][Diag] findMemberInType(owner=${currentType.name}) -> ${member?.javaClass?.simpleName ?: "<none>"}")
+                        }
+                    }
+                } else if (!currentOwnerName.isNullOrBlank()) {
+                    val props = PascalPropertyIndex.findProperties(name, originFile.project)
+                    member = props.firstOrNull { p -> p.containingClass?.name.equals(currentOwnerName, ignoreCase = true) }
+                    if (member == null) {
+                        val routines = PascalRoutineIndex.findRoutines(name, originFile.project)
+                        member = routines.firstOrNull { r -> r.containingClassName != null && r.containingClassName.equals(currentOwnerName, ignoreCase = true) }
+                    }
+                    if (member == null) {
+                        member = resolveMemberByOwnerScan(currentOwnerName!!, name, originFile)
+                        if (nl.akiar.pascal.log.UnitLogFilter.shouldLog(originFile)) {
+                            LOG.info("[MemberTraversal][Diag] resolveMemberByOwnerScan(owner=${currentOwnerName}, name=${name}) -> ${member?.javaClass?.simpleName ?: "<none>"}")
+                        }
+                    }
+                    if (member != null) {
+                        maybeLog("[MemberTraversal] member '$name' by owner='$currentOwnerName' -> ${member.javaClass.simpleName}", originFile)
                     }
                 }
                 if (member != null) {
-                    maybeLog("[MemberTraversal] member '$name' by owner='$currentOwnerName' -> ${member.javaClass.simpleName}", originFile)
+                    maybeLog("[MemberTraversal] member '$name' -> ${member.javaClass.simpleName}", originFile)
+                }
+                results[i] = member
+                currentType = getTypeOf(member, originFile)
+                currentOwnerName = when (member) {
+                    is PascalVariableDefinition -> member.typeName
+                    is PascalProperty -> member.typeName
+                    else -> currentType?.name
+                }
+                if (name.equals("Add", ignoreCase = true)) {
+                    if (nl.akiar.pascal.log.UnitLogFilter.shouldLog(originFile)) {
+                        LOG.info("[MemberTraversal][Diag] post 'Add' getTypeOf -> ${currentType?.name ?: "<none>"} ownerName=${currentOwnerName}")
+                    }
                 }
             }
-            if (member != null) {
-                maybeLog("[MemberTraversal] member '$name' -> ${member.javaClass.simpleName}", originFile)
-            }
-            results[i] = member
-            currentType = getTypeOf(member, originFile)
-            currentOwnerName = when (member) {
-                is PascalVariableDefinition -> member.typeName
-                is PascalProperty -> member.typeName
-                else -> currentType?.name
-            }
-            if (name.equals("Add", ignoreCase = true)) {
-                if (nl.akiar.pascal.log.UnitLogFilter.shouldLog(originFile)) {
-                    LOG.info("[MemberTraversal][Diag] post 'Add' getTypeOf -> ${currentType?.name ?: "<none>"} ownerName=${currentOwnerName}")
-                }
-            }
+            return results
+        } finally {
+            PerformanceMetrics.record("MemberChainResolver.resolveChainElements", System.nanoTime() - start)
         }
-        return results
+    }
+
+    private fun resolveMemberChain(element: PsiElement): PsiElement? {
+        val start = System.nanoTime()
+        try {
+            // Skip resolution for already resolved elements
+            val cached = chainMemo.values.find { it?.textRange == element.textRange }
+            if (cached != null) {
+                maybeLog("[MemberTraversal] resolveMemberChain: using cached result for '${element.text}'", element.containingFile)
+                return cached
+            }
+
+            // Proceed with normal resolution
+            val chain = collectChain(element)
+            if (chain.isEmpty()) return null
+            val filePath = element.containingFile?.virtualFile?.path
+            val chainText = chain.joinToString(".") { it.text }
+            val key = ChainKey(filePath, chain.first().textOffset, chainText)
+            clearExpiredMemo()
+            chainMemo[key]?.let { return it }
+
+            maybeLog("[MemberTraversal] resolveChain start element='${element.text}' file='${element.containingFile.name}'", element.containingFile)
+            maybeLog("[MemberTraversal] collected chain size=${chain.size} parts=${chain.map { it.text }}", element.containingFile)
+            val resolved = resolveChainElements(chain, element.containingFile)
+            val myIndex = chain.indexOf(element)
+            val targetIndex = if (myIndex >= 0) myIndex else chain.lastIndex
+            val target = resolved.getOrNull(targetIndex)
+            if (target != null) {
+                maybeLog("[MemberTraversal] resolved chain parts=${resolved.filterNotNull().map { it.javaClass.simpleName }}", element.containingFile)
+                // Only cache non-null targets to avoid NPE in ConcurrentHashMap
+                // Avoid caching partial results in dumb mode to prevent sticky under-resolution
+                if (!DumbService.isDumb(element.project)) {
+                    chainMemo[key] = target
+                }
+            }
+            return target
+        } finally {
+            PerformanceMetrics.record("MemberChainResolver.resolveMemberChain", System.nanoTime() - start)
+        }
     }
 
     private fun resolveTypeByUnitScan(typeName: String, originFile: PsiFile): PascalTypeDefinition? {

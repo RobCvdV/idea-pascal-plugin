@@ -91,6 +91,21 @@ public interface PascalElementTypes {
     com.intellij.psi.tree.IElementType FORMAL_PARAMETER = new nl.akiar.pascal.PascalTokenType("FORMAL_PARAMETER");
 
     /**
+     * Element type for routine signature.
+     * Wraps the complete signature including parentheses, parameters, and return type.
+     * Structure: (param1: Type; param2: Type): ResultType
+     * or for procedures: (param1: Type; param2: Type)
+     */
+    com.intellij.psi.tree.IElementType ROUTINE_SIGNATURE = new nl.akiar.pascal.PascalTokenType("ROUTINE_SIGNATURE");
+
+    /**
+     * Element type for method name reference in qualified method implementations.
+     * Example: In "TClass.MethodName", "MethodName" is marked as METHOD_NAME_REFERENCE.
+     * This distinguishes method names from regular identifiers or property names.
+     */
+    com.intellij.psi.tree.IElementType METHOD_NAME_REFERENCE = new nl.akiar.pascal.PascalTokenType("METHOD_NAME_REFERENCE");
+
+    /**
      * Element type for constant section.
      */
     com.intellij.psi.tree.IElementType CONST_SECTION = new nl.akiar.pascal.PascalTokenType("CONST_SECTION");

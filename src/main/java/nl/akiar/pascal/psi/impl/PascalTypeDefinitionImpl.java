@@ -80,8 +80,17 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
         if (nodeType == PascalTokenTypes.KW_RECORD) return TypeKind.RECORD;
         if (nodeType == PascalTokenTypes.KW_INTERFACE || nodeType == PascalTokenTypes.KW_DISPINTERFACE) return TypeKind.INTERFACE;
         if (nodeType == PascalTokenTypes.KW_REFERENCE || nodeType == PascalTokenTypes.KW_PROCEDURE || nodeType == PascalTokenTypes.KW_FUNCTION) return TypeKind.PROCEDURAL;
-        if (nodeType == PascalTokenTypes.LPAREN) return TypeKind.ENUM;
         if (nodeType == PascalTokenTypes.KW_ARRAY) return TypeKind.ALIAS;
+
+        // Skip ATTRIBUTE_DEFINITION and ATTRIBUTE_LIST nodes - don't scan their children
+        // Attributes can contain LPAREN tokens that shouldn't affect type classification
+        if (nodeType == nl.akiar.pascal.psi.PascalElementTypes.ATTRIBUTE_DEFINITION ||
+            nodeType == nl.akiar.pascal.psi.PascalElementTypes.ATTRIBUTE_LIST) {
+            return TypeKind.UNKNOWN; // Skip attributes entirely
+        }
+
+        // LPAREN indicates enum type ONLY if we're past any attributes
+        if (nodeType == PascalTokenTypes.LPAREN) return TypeKind.ENUM;
 
         for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
             TypeKind kind = findTypeKindInNode(child);

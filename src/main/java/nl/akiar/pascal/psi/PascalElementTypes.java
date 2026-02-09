@@ -91,6 +91,26 @@ public interface PascalElementTypes {
     com.intellij.psi.tree.IElementType FORMAL_PARAMETER = new nl.akiar.pascal.PascalTokenType("FORMAL_PARAMETER");
 
     /**
+     * Element type for formal parameter list (includes parentheses).
+     * Maps to sonar-delphi's RoutineParametersNode.
+     * Structure: ( param1: Type; param2: Type )
+     */
+    com.intellij.psi.tree.IElementType FORMAL_PARAMETER_LIST = new nl.akiar.pascal.PascalTokenType("FORMAL_PARAMETER_LIST");
+
+    /**
+     * Element type for function return type.
+     * Applies to ALL functions (standalone, methods, anonymous).
+     * Links to Result variable and Exit() function.
+     */
+    com.intellij.psi.tree.IElementType RETURN_TYPE = new nl.akiar.pascal.PascalTokenType("RETURN_TYPE");
+
+    /**
+     * Element type for class type reference in method implementations.
+     * Example: In "procedure TClassName.MethodName", "TClassName" is marked as CLASS_TYPE_REFERENCE.
+     */
+    com.intellij.psi.tree.IElementType CLASS_TYPE_REFERENCE = new nl.akiar.pascal.PascalTokenType("CLASS_TYPE_REFERENCE");
+
+    /**
      * Element type for routine signature.
      * Wraps the complete signature including parentheses, parameters, and return type.
      * Structure: (param1: Type; param2: Type): ResultType

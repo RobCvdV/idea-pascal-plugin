@@ -332,14 +332,27 @@ class PascalSonarParser : PsiParser {
             // ============================================================================
             node.javaClass.simpleName.contains("FieldDeclaration", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.FIELD_DEFINITION
 
+
             // ============================================================================
             // Parameters
             // ============================================================================
+            // RoutineParametersNode → FORMAL_PARAMETER_LIST (includes parentheses)
+            node is org.sonar.plugins.communitydelphi.api.ast.RoutineParametersNode ->
+                nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER_LIST
+
+            // FormalParameterNode → FORMAL_PARAMETER (individual parameter group)
             node.javaClass.simpleName.contains("FormalParameter", ignoreCase = true) &&
                 !node.javaClass.simpleName.contains("List", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER
             node.javaClass.simpleName.contains("Parameter", ignoreCase = true) &&
                 !node.javaClass.simpleName.contains("TypeParameter", ignoreCase = true) &&
                 !node.javaClass.simpleName.contains("List", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER
+
+            // ============================================================================
+            // Return Type
+            // ============================================================================
+            // RoutineReturnTypeNode → RETURN_TYPE (for all functions)
+            node is org.sonar.plugins.communitydelphi.api.ast.RoutineReturnTypeNode ->
+                nl.akiar.pascal.psi.PascalElementTypes.RETURN_TYPE
 
             // ============================================================================
             // Variable/Constant Definitions with Context
@@ -390,10 +403,60 @@ class PascalSonarParser : PsiParser {
             // Note: We use the stub-based ROUTINE_DECLARATION for proper indexing.
             // The PascalRoutine implementation can determine specific routine type
             // (standalone, method, constructor, etc.) based on context.
-            node is org.sonar.plugins.communitydelphi.api.ast.RoutineDeclarationNode ||
-                node is org.sonar.plugins.communitydelphi.api.ast.RoutineImplementationNode ||
-                node is org.sonar.plugins.communitydelphi.api.ast.RoutineNode ->
-                    nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION
+            node is org.sonar.plugins.communitydelphi.api.ast.RoutineImplementationNode ||
+                node is org.sonar.plugins.communitydelphi.api.ast.RoutineDeclarationNode ||
+                node is org.sonar.plugins.communitydelphi.api.ast.RoutineNode -> {
+                // Check if this is a qualified method name (TClass.MethodName)
+                // by looking for a qualified name pattern in the routine heading
+                val heading = node.getChild(0)
+                val headingText = if (heading != null) {
+                    val startOff = getOffset(heading.firstToken.beginLine, heading.firstToken.beginColumn, lineOffsets)
+                    val endOff = getOffset(heading.lastToken.endLine, heading.lastToken.endColumn, lineOffsets) + 1
+                    try {
+                        builder.originalText.subSequence(startOff, endOff).toString()
+                    } catch (e: Exception) {
+                        ""
+                    }
+                } else ""
+
+                // If heading contains a dot (qualified name), we'll handle method name marking in child processing
+                // For now, just create the routine
+                nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_DECLARATION
+            }
+
+            // ============================================================================
+            // Method Name References (in qualified routine implementations)
+            // ============================================================================
+            // Detect method names in qualified implementations: procedure TClass.Method
+            // For qualified names, we return null here and synthesize CLASS_TYPE_REFERENCE + METHOD_NAME_REFERENCE
+            // during child processing in mapNode
+            node.javaClass.simpleName.contains("RoutineName", ignoreCase = true) -> {
+                // Check if parent is RoutineImplementation or RoutineHeading and if name is qualified
+                val parent = node.parent
+                val isRoutineContext = parent?.javaClass?.simpleName?.contains("Implementation", ignoreCase = true) == true ||
+                    parent?.javaClass?.simpleName?.contains("RoutineHeading", ignoreCase = true) == true
+
+                if (isRoutineContext) {
+                    // Get the text of this routine name node
+                    val nodeText = try {
+                        val startOff = getOffset(node.firstToken.beginLine, node.firstToken.beginColumn, lineOffsets)
+                        val endOff = getOffset(node.lastToken.endLine, node.lastToken.endColumn, lineOffsets) + 1
+                        builder.originalText.subSequence(startOff, Math.min(builder.originalText.length, endOff)).toString()
+                    } catch (e: Exception) {
+                        ""
+                    }
+
+                    if (nodeText.contains('.')) {
+                        // Will synthesize CLASS_TYPE_REFERENCE and METHOD_NAME_REFERENCE in special handling below
+                        // Return null here to skip automatic marker creation
+                        null
+                    } else {
+                        null // Simple name, will use default identifier handling
+                    }
+                } else {
+                    null
+                }
+            }
 
             // ============================================================================
             // Labels
@@ -408,9 +471,12 @@ class PascalSonarParser : PsiParser {
 
         if (markerType != null) {
             // Global skip of leading punctuation for any mapped node
+            // EXCEPT FORMAL_PARAMETER_LIST which needs to include parentheses
             val text = builder.originalText
-            while (nodeStartOffset < text.length && (text[nodeStartOffset] == '(' || text[nodeStartOffset] == ',' || text[nodeStartOffset] == ';' || text[nodeStartOffset] == '<' || text[nodeStartOffset] == '>' || text[nodeStartOffset].isWhitespace())) {
-                nodeStartOffset++
+            if (markerType != nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER_LIST) {
+                while (nodeStartOffset < text.length && (text[nodeStartOffset] == '(' || text[nodeStartOffset] == ',' || text[nodeStartOffset] == ';' || text[nodeStartOffset] == '<' || text[nodeStartOffset] == '>' || text[nodeStartOffset].isWhitespace())) {
+                    nodeStartOffset++
+                }
             }
 
             // Special handling for ATTRIBUTE_DEFINITION: strip leading '[' and whitespace
@@ -457,8 +523,8 @@ class PascalSonarParser : PsiParser {
                         nodeEndOffset++
                     }
                 }
-            } else {
-                // Global strip of trailing punctuation for non-TYPE_REFERENCE nodes
+            } else if (markerType != nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER_LIST) {
+                // Global strip of trailing punctuation for non-TYPE_REFERENCE and non-FORMAL_PARAMETER_LIST nodes
                 while (nodeEndOffset > nodeStartOffset && nodeEndOffset <= text.length && (text[nodeEndOffset - 1] == ')' || text[nodeEndOffset - 1] == ',' || text[nodeEndOffset - 1] == ';' || text[nodeEndOffset - 1] == '<' || text[nodeEndOffset - 1] == '>' || text[nodeEndOffset - 1].isWhitespace())) {
                     nodeEndOffset--
                 }
@@ -515,6 +581,31 @@ class PascalSonarParser : PsiParser {
             // re-scanning already-consumed tokens
             val adjustedStartOffset = maxOf(nodeStartOffset, builder.currentOffset)
             synthesizeAttributesForDeclaration(builder, adjustedStartOffset, nodeEndOffset)
+        }
+
+        // Special handling for RoutineNameNode with qualified names (TClassName.MethodName)
+        // Since we returned null for markerType, we need to synthesize CLASS_TYPE_REFERENCE and METHOD_NAME_REFERENCE here
+        if (markerType == null && node.javaClass.simpleName.contains("RoutineName", ignoreCase = true)) {
+            val parent = node.parent
+            val parentName = parent?.javaClass?.simpleName ?: "null"
+            val isRoutineContext = parentName.contains("Implementation", ignoreCase = true) ||
+                parentName.contains("RoutineHeading", ignoreCase = true)
+
+            val nodeText = try {
+                builder.originalText.subSequence(nodeStartOffset, Math.min(nodeEndOffset, builder.originalText.length)).toString()
+            } catch (e: Exception) {
+                ""
+            }
+
+            diag("RoutineNameNode: parentName=$parentName isRoutineContext=$isRoutineContext nodeText='$nodeText' hasDot=${nodeText.contains('.')}")
+
+            if (isRoutineContext && nodeText.contains('.')) {
+                diag("Synthesizing CLASS_TYPE_REFERENCE and METHOD_NAME_REFERENCE for: $nodeText")
+                // Synthesize CLASS_TYPE_REFERENCE and METHOD_NAME_REFERENCE
+                synthesizeQualifiedMethodName(builder, nodeStartOffset, nodeEndOffset)
+                // Return early - we've handled this node completely
+                return
+            }
         }
 
         for (child in node.children) {
@@ -684,5 +775,76 @@ class PascalSonarParser : PsiParser {
         }
 
         listMarker.done(nl.akiar.pascal.psi.PascalElementTypes.ATTRIBUTE_LIST)
+    }
+
+    /**
+     * Synthesize CLASS_TYPE_REFERENCE and METHOD_NAME_REFERENCE PSI elements for qualified routine names.
+     * Example: In "procedure TClassName.MethodName", creates:
+     * - CLASS_TYPE_REFERENCE for "TClassName"
+     * - METHOD_NAME_REFERENCE for "MethodName"
+     *
+     * @param builder The PsiBuilder
+     * @param nodeStartOffset The start offset of the routine name node
+     * @param nodeEndOffset The end offset of the routine name node
+     */
+    private fun synthesizeQualifiedMethodName(builder: PsiBuilder, nodeStartOffset: Int, nodeEndOffset: Int) {
+        val text = builder.originalText
+        if (nodeStartOffset >= nodeEndOffset || nodeStartOffset >= text.length) return
+
+        val routineNameText = text.subSequence(nodeStartOffset, Math.min(nodeEndOffset, text.length)).toString()
+        val dotIndex = routineNameText.lastIndexOf('.')
+
+        if (dotIndex <= 0 || dotIndex >= routineNameText.length - 1) {
+            // No dot, or dot at start/end - not a qualified name
+            return
+        }
+
+        // Trim leading whitespace from the text and adjust offsets accordingly
+        var leadingWhitespace = 0
+        while (leadingWhitespace < routineNameText.length && routineNameText[leadingWhitespace].isWhitespace()) {
+            leadingWhitespace++
+        }
+
+        // Recalculate dotIndex in trimmed text
+        val trimmedText = routineNameText.trimStart()
+        val trimmedDotIndex = trimmedText.indexOf('.')
+
+        if (trimmedDotIndex <= 0) return
+
+        // Calculate absolute offsets for class type and method name (adjusted for leading whitespace)
+        val classTypeStart = nodeStartOffset + leadingWhitespace
+        val classTypeEnd = classTypeStart + trimmedDotIndex  // Ends at the dot (exclusive)
+        val methodNameStart = classTypeEnd + 1  // Starts after the dot
+        val methodNameEnd = nodeEndOffset
+
+        diag("synthesizeQualifiedMethodName: classType=$classTypeStart..$classTypeEnd, methodName=$methodNameStart..$methodNameEnd")
+
+        // Advance to class type start
+        while (!builder.eof() && builder.currentOffset < classTypeStart) {
+            builder.advanceLexer()
+        }
+
+        // Create CLASS_TYPE_REFERENCE marker for the class name part
+        if (builder.currentOffset <= classTypeStart && classTypeEnd > classTypeStart) {
+            val classMarker = builder.mark()
+            while (!builder.eof() && builder.currentOffset < classTypeEnd) {
+                builder.advanceLexer()
+            }
+            classMarker.done(nl.akiar.pascal.psi.PascalElementTypes.CLASS_TYPE_REFERENCE)
+        }
+
+        // Skip the dot
+        while (!builder.eof() && builder.currentOffset < methodNameStart) {
+            builder.advanceLexer()
+        }
+
+        // Create METHOD_NAME_REFERENCE marker for the method name part
+        if (builder.currentOffset <= methodNameStart && methodNameEnd > methodNameStart) {
+            val methodMarker = builder.mark()
+            while (!builder.eof() && builder.currentOffset < methodNameEnd) {
+                builder.advanceLexer()
+            }
+            methodMarker.done(nl.akiar.pascal.psi.PascalElementTypes.METHOD_NAME_REFERENCE)
+        }
     }
 }

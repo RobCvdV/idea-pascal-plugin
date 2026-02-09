@@ -96,6 +96,21 @@ public class PascalParserDefinition implements ParserDefinition {
         if (node.getElementType() == PascalElementTypes.TYPE_REFERENCE) {
             return new nl.akiar.pascal.psi.impl.PascalTypeReferenceElement(node);
         }
+        if (node.getElementType() == PascalElementTypes.ROUTINE_SIGNATURE) {
+            return new nl.akiar.pascal.psi.impl.PascalRoutineSignatureImpl(node);
+        }
+        if (node.getElementType() == PascalElementTypes.METHOD_NAME_REFERENCE) {
+            return new nl.akiar.pascal.psi.impl.PascalMethodNameReferenceImpl(node);
+        }
+        if (node.getElementType() == PascalElementTypes.FORMAL_PARAMETER_LIST) {
+            return new nl.akiar.pascal.psi.impl.PascalFormalParameterListImpl(node);
+        }
+        if (node.getElementType() == PascalElementTypes.RETURN_TYPE) {
+            return new nl.akiar.pascal.psi.impl.PascalReturnTypeImpl(node);
+        }
+        if (node.getElementType() == PascalElementTypes.CLASS_TYPE_REFERENCE) {
+            return new nl.akiar.pascal.psi.impl.PascalClassTypeReferenceImpl(node);
+        }
         return new PascalPsiElement(node);
     }
 

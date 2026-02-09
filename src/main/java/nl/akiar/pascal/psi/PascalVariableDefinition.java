@@ -82,4 +82,53 @@ public interface PascalVariableDefinition extends PsiNameIdentifierOwner, StubBa
      */
     @Nullable
     PascalTypeDefinition getContainingClass();
+
+    /**
+     * Get the parameter modifier (var/const/out/in) for parameter variables.
+     * <p>
+     * Only applicable when {@link #getVariableKind()} returns {@link VariableKind#PARAMETER}.
+     * Returns {@link ParameterModifier#NONE} for non-parameter variables or parameters without modifiers.
+     * <p>
+     * Examples:
+     * <ul>
+     *   <li>{@code var AParam: Integer} returns VAR</li>
+     *   <li>{@code const AParam: Integer} returns CONST</li>
+     *   <li>{@code out AParam: Integer} returns OUT</li>
+     *   <li>{@code AParam: Integer} returns NONE (default)</li>
+     * </ul>
+     *
+     * @return the parameter modifier, never null
+     */
+    @NotNull
+    ParameterModifier getParameterModifier();
+
+    /**
+     * Check if this is a var parameter (pass by reference, mutable).
+     *
+     * @return true if this is a var parameter
+     */
+    boolean isVarParameter();
+
+    /**
+     * Check if this is a const parameter (pass by reference, immutable).
+     *
+     * @return true if this is a const parameter
+     */
+    boolean isConstParameter();
+
+    /**
+     * Check if this is an out parameter (pass by reference, write-only).
+     *
+     * @return true if this is an out parameter
+     */
+    boolean isOutParameter();
+
+    /**
+     * Check if this is a value parameter (pass by value, default).
+     * <p>
+     * Returns true if no modifier keyword is specified or if this is not a parameter.
+     *
+     * @return true if this is a value parameter
+     */
+    boolean isValueParameter();
 }

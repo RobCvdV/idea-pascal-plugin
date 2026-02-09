@@ -523,4 +523,74 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
         }
         return null;
     }
+
+    @Override
+    @NotNull
+    public nl.akiar.pascal.psi.ParameterModifier getParameterModifier() {
+        // Only parameters can have modifiers
+        if (getVariableKind() != VariableKind.PARAMETER) {
+            return nl.akiar.pascal.psi.ParameterModifier.VALUE;
+        }
+
+        // Scan backwards from this element to find modifier keyword
+        // Pattern: [var|const|out|in] ParameterName: Type
+        PsiElement sibling = getPrevSibling();
+        while (sibling != null) {
+            IElementType elementType = sibling.getNode().getElementType();
+
+            // Check for modifier keywords
+            if (elementType == PascalTokenTypes.KW_VAR) {
+                return nl.akiar.pascal.psi.ParameterModifier.VAR;
+            } else if (elementType == PascalTokenTypes.KW_CONST) {
+                return nl.akiar.pascal.psi.ParameterModifier.CONST;
+            } else if (elementType == PascalTokenTypes.KW_OUT) {
+                return nl.akiar.pascal.psi.ParameterModifier.OUT;
+            } else if (elementType == PascalTokenTypes.KW_IN) {
+                return nl.akiar.pascal.psi.ParameterModifier.IN;
+            }
+
+            // Stop at semicolon, comma, or lparen (reached boundary)
+            if (elementType == PascalTokenTypes.SEMI ||
+                elementType == PascalTokenTypes.COMMA ||
+                elementType == PascalTokenTypes.LPAREN) {
+                break;
+            }
+
+            // Skip whitespace and continue
+            if (elementType != PascalTokenTypes.WHITE_SPACE) {
+                // Hit another token that's not a modifier keyword or boundary
+                // Check if it's another variable definition (multiple params: A, B, C: Type)
+                if (sibling instanceof PascalVariableDefinition) {
+                    // Continue looking backwards
+                    sibling = sibling.getPrevSibling();
+                    continue;
+                }
+            }
+
+            sibling = sibling.getPrevSibling();
+        }
+
+        // No modifier found - default to VALUE (pass by value)
+        return nl.akiar.pascal.psi.ParameterModifier.VALUE;
+    }
+
+    @Override
+    public boolean isVarParameter() {
+        return getParameterModifier() == nl.akiar.pascal.psi.ParameterModifier.VAR;
+    }
+
+    @Override
+    public boolean isConstParameter() {
+        return getParameterModifier() == nl.akiar.pascal.psi.ParameterModifier.CONST;
+    }
+
+    @Override
+    public boolean isOutParameter() {
+        return getParameterModifier() == nl.akiar.pascal.psi.ParameterModifier.OUT;
+    }
+
+    @Override
+    public boolean isValueParameter() {
+        return getParameterModifier() == nl.akiar.pascal.psi.ParameterModifier.VALUE;
+    }
 }

@@ -117,6 +117,11 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
                 continue;
             }
 
+            // Skip identifiers inside return type
+            if (nl.akiar.pascal.psi.PsiUtil.hasParent(psi, nl.akiar.pascal.psi.PascalElementTypes.RETURN_TYPE)) {
+                continue;
+            }
+
             // For qualified names (TClass.Method), keep the last one
             bestId = idNode;
         }
@@ -148,6 +153,10 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         for (ASTNode idNode : allIds) {
             PsiElement psi = idNode.getPsi();
             if (nl.akiar.pascal.psi.PsiUtil.hasParent(psi, nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER)) {
+                continue;
+            }
+            // Skip identifiers inside return type
+            if (nl.akiar.pascal.psi.PsiUtil.hasParent(psi, nl.akiar.pascal.psi.PascalElementTypes.RETURN_TYPE)) {
                 continue;
             }
             int idOffset = idNode.getStartOffset();

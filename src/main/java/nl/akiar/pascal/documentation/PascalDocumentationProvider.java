@@ -56,6 +56,25 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     private static final Pattern PARAM_PATTERN = Pattern.compile("@param\\s+(\\w+)\\s+(.+?)(?=@|$)", Pattern.DOTALL);
     private static final Pattern RETURNS_PATTERN = Pattern.compile("@returns?\\s+(.+?)(?=@|$)", Pattern.DOTALL);
 
+    /**
+     * Find the best type definition from a list, preferring non-forward declarations.
+     * Forward declarations like "TMyClass = class;" should be skipped in favor of the actual declaration.
+     */
+    @Nullable
+    private static PascalTypeDefinition findBestTypeDefinition(List<PascalTypeDefinition> types) {
+        if (types == null || types.isEmpty()) return null;
+
+        // First pass: look for a non-forward declaration
+        for (PascalTypeDefinition typeDef : types) {
+            if (!typeDef.isForwardDeclaration()) {
+                return typeDef;
+            }
+        }
+
+        // Fallback: return the first one (even if it's a forward declaration)
+        return types.get(0);
+    }
+
     @Override
     @Nullable
     public PsiElement getCustomDocumentationElement(@NotNull Editor editor, @NotNull PsiFile file, @Nullable PsiElement contextElement, int targetOffset) {
@@ -123,8 +142,9 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             // Fallback to index lookups
             PascalTypeIndex.TypeLookupResult typeResult =
                     PascalTypeIndex.findTypesWithUsesValidation(name, contextElement.getContainingFile(), contextElement.getTextOffset());
-            if (!typeResult.getInScopeTypes().isEmpty()) {
-                return typeResult.getInScopeTypes().get(0);
+            PascalTypeDefinition bestType = findBestTypeDefinition(typeResult.getInScopeTypes());
+            if (bestType != null) {
+                return bestType;
             }
 
             PsiFile currentFile = contextElement.getContainingFile();
@@ -146,8 +166,9 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             }
 
             // Last resort: out-of-scope matches
-            if (!typeResult.getOutOfScopeTypes().isEmpty()) {
-                return typeResult.getOutOfScopeTypes().get(0);
+            PascalTypeDefinition outOfScopeType = findBestTypeDefinition(typeResult.getOutOfScopeTypes());
+            if (outOfScopeType != null) {
+                return outOfScopeType;
             }
             if (!routineResult.getOutOfScopeRoutines().isEmpty()) {
                 return routineResult.getOutOfScopeRoutines().get(0);
@@ -169,11 +190,13 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             String typeName = link.substring(LINK_TYPE.length());
             PascalTypeIndex.TypeLookupResult result =
                     PascalTypeIndex.findTypesWithUsesValidation(typeName, contextFile, offset);
-            if (!result.getInScopeTypes().isEmpty()) {
-                return result.getInScopeTypes().get(0);
+            PascalTypeDefinition bestInScope = findBestTypeDefinition(result.getInScopeTypes());
+            if (bestInScope != null) {
+                return bestInScope;
             }
-            if (!result.getOutOfScopeTypes().isEmpty()) {
-                return result.getOutOfScopeTypes().get(0);
+            PascalTypeDefinition bestOutOfScope = findBestTypeDefinition(result.getOutOfScopeTypes());
+            if (bestOutOfScope != null) {
+                return bestOutOfScope;
             }
             // Try built-in type documentation
             if (DelphiBuiltIns.isBuiltInType(typeName)) {

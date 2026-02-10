@@ -83,4 +83,17 @@ public interface PascalTypeDefinition extends PsiNameIdentifierOwner, StubBasedP
      */
     @Nullable
     String getGUID();
+
+    /**
+     * Check if this is a forward declaration.
+     * A forward declaration looks like:
+     * <pre>
+     *   TMyClass = class;
+     * </pre>
+     * It declares the type name but has no body (no members, no parent class).
+     * The actual declaration appears later in the same type section.
+     *
+     * @return true if this is a forward declaration, false otherwise
+     */
+    boolean isForwardDeclaration();
 }

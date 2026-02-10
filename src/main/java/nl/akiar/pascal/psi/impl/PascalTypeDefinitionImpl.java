@@ -623,4 +623,53 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
         }
         return null;
     }
+
+    @Override
+    public boolean isForwardDeclaration() {
+        // Forward declarations only apply to class, record, and interface types
+        TypeKind kind = getTypeKind();
+        if (kind != TypeKind.CLASS && kind != TypeKind.RECORD && kind != TypeKind.INTERFACE) {
+            return false;
+        }
+
+        // A forward declaration looks like: TMyClass = class;
+        // The type keyword is immediately followed by a semicolon (with possible whitespace)
+        // It has no parent class and no body.
+        //
+        // Strategy: After finding the type keyword (class/record/interface),
+        // check if the next non-whitespace token is a semicolon.
+        ASTNode node = getNode();
+        boolean foundTypeKeyword = false;
+
+        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            IElementType type = child.getElementType();
+
+            // Look for the type keyword
+            if (type == PascalTokenTypes.KW_CLASS ||
+                type == PascalTokenTypes.KW_RECORD ||
+                type == PascalTokenTypes.KW_INTERFACE ||
+                type == PascalTokenTypes.KW_DISPINTERFACE) {
+                foundTypeKeyword = true;
+                continue;
+            }
+
+            // Skip whitespace after keyword
+            if (foundTypeKeyword && type == PascalTokenTypes.WHITE_SPACE) {
+                continue;
+            }
+
+            // After keyword, if we hit a semicolon immediately, it's a forward declaration
+            if (foundTypeKeyword && type == PascalTokenTypes.SEMI) {
+                return true;
+            }
+
+            // If we hit anything else after the keyword (LPAREN for parent, body elements, etc.),
+            // it's not a forward declaration
+            if (foundTypeKeyword) {
+                return false;
+            }
+        }
+
+        return false;
+    }
 }

@@ -341,6 +341,26 @@ public class PascalLexer implements FlexLexer {
             return isFloat ? PascalTokenTypes.FLOAT_LITERAL : PascalTokenTypes.INTEGER_LITERAL;
         }
 
+        // Identifier with & prefix (keyword escape) - e.g., &Set, &Index
+        if (c == '&' && myTokenEnd < myBufferEnd) {
+            char next = myBuffer.charAt(myTokenEnd);
+            if (Character.isLetter(next) || next == '_') {
+                // Include the & in the identifier token
+                myTokenEnd++; // Move past the letter/underscore
+                while (myTokenEnd < myBufferEnd) {
+                    char ic = myBuffer.charAt(myTokenEnd);
+                    if (Character.isLetterOrDigit(ic) || ic == '_') {
+                        myTokenEnd++;
+                    } else {
+                        break;
+                    }
+                }
+                // Always return IDENTIFIER for &-prefixed names (never a keyword)
+                return PascalTokenTypes.IDENTIFIER;
+            }
+            // If & is not followed by letter/underscore, fall through to handle as AT operator
+        }
+
         // Identifier or keyword
         if (Character.isLetter(c) || c == '_') {
             while (myTokenEnd < myBufferEnd) {

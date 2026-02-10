@@ -35,7 +35,7 @@ public class PascalPropertyImpl extends StubBasedPsiElementBase<PascalPropertySt
         PascalPropertyStub stub = getGreenStub();
         if (stub != null) return stub.getName();
         PsiElement nameId = getNameIdentifier();
-        return nameId != null ? nameId.getText() : null;
+        return nameId != null ? nl.akiar.pascal.psi.PsiUtil.stripEscapePrefix(nameId.getText()) : null;
     }
 
     @Override

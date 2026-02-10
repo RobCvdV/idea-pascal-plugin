@@ -104,6 +104,24 @@ public class PsiUtil {
         nl.akiar.pascal.PascalTokenTypes.KW_DISPID,
     };
 
+    /**
+     * Strip the & escape prefix from an identifier name.
+     * Pascal allows using & to escape keywords so they can be used as identifiers.
+     * For example: &Set, &Index, &Type
+     * This method returns the actual name without the escape prefix.
+     *
+     * @param name The identifier name (possibly with & prefix)
+     * @return The name without & prefix, or the original name if no prefix exists
+     */
+    @Nullable
+    public static String stripEscapePrefix(@Nullable String name) {
+        if (name == null) return null;
+        if (name.startsWith("&") && name.length() > 1) {
+            return name.substring(1);
+        }
+        return name;
+    }
+
     @Nullable
     public static String getVisibility(@NotNull PsiElement element) {
         // Find the containing TYPE_DEFINITION

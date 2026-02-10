@@ -44,7 +44,7 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
         // Parse from AST - first IDENTIFIER is the name
         PsiElement nameElement = getNameIdentifier();
         if (nameElement != null) {
-            return nameElement.getText();
+            return nl.akiar.pascal.psi.PsiUtil.stripEscapePrefix(nameElement.getText());
         }
         return null;
     }

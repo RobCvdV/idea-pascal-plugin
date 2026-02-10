@@ -57,7 +57,7 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
         // Parse from AST
         PsiElement nameElement = getNameIdentifier();
         if (nameElement != null) {
-            return nameElement.getText();
+            return nl.akiar.pascal.psi.PsiUtil.stripEscapePrefix(nameElement.getText());
         }
         return null;
     }

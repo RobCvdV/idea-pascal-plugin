@@ -123,10 +123,45 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
             if (routine.getNameIdentifier() == sourceElement) {
                 if (routine.isImplementation()) {
                     PascalRoutine decl = routine.getDeclaration();
-                    if (decl != null) return new PsiElement[]{decl};
+                    if (decl != null) {
+                        return new PsiElement[]{decl};
+                    }
                 } else {
                     PascalRoutine impl = routine.getImplementation();
-                    if (impl != null) return new PsiElement[]{impl};
+                    if (impl != null) {
+                        return new PsiElement[]{impl};
+                    }
+                }
+            }
+        }
+        
+        // Handle routine implementation navigation when parent is PascalMethodNameReference
+        // This is the case for "procedure TMyClass.MyMethod" where MyMethod identifier
+        // is child of PascalMethodNameReference, which is child of PascalRoutine
+        if (parent != null && parent.getClass().getSimpleName().contains("MethodNameReference")) {
+            // Navigate up to find the PascalRoutine parent
+            PsiElement routineParent = parent.getParent();
+            if (routineParent instanceof PascalRoutine) {
+                PascalRoutine routine = (PascalRoutine) routineParent;
+                LOG.info("[PascalNav] Found routine via MethodNameReference: " + (routine.getName() != null ? routine.getName() : "<null>") + " impl=" + routine.isImplementation());
+                
+                // Check if sourceElement is part of the routine name
+                if (routine.getNameIdentifier() == sourceElement || 
+                    (routine.getNameIdentifier() != null && PsiTreeUtil.isAncestor(routine.getNameIdentifier(), sourceElement, false))) {
+                    
+                    if (routine.isImplementation()) {
+                        PascalRoutine decl = routine.getDeclaration();
+                        if (decl != null) {
+                            LOG.info("[PascalNav] -> Resolved to routine declaration: " + (decl.getName() != null ? decl.getName() : "<null>"));
+                            return new PsiElement[]{decl};
+                        }
+                    } else {
+                        PascalRoutine impl = routine.getImplementation();
+                        if (impl != null) {
+                            LOG.info("[PascalNav] -> Resolved to routine implementation: " + (impl.getName() != null ? impl.getName() : "<null>"));
+                            return new PsiElement[]{impl};
+                        }
+                    }
                 }
             }
         }

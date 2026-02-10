@@ -1,36 +1,60 @@
 package nl.akiar.pascal.documentation;
 
+import com.intellij.codeInsight.documentation.DocumentationManagerProtocol;
+import com.intellij.codeInsight.documentation.DocumentationManagerUtil;
+import com.intellij.lang.ASTNode;
 import com.intellij.lang.documentation.AbstractDocumentationProvider;
+import com.intellij.lang.documentation.DocumentationMarkup;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.editor.markup.TextAttributes;
+import com.intellij.openapi.editor.richcopy.HtmlSyntaxInfoUtil;
+import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.PsiWhiteSpace;
+import com.intellij.psi.tree.IElementType;
+import nl.akiar.pascal.PascalLanguage;
 import nl.akiar.pascal.PascalSyntaxHighlighter;
 import nl.akiar.pascal.PascalTokenType;
 import nl.akiar.pascal.PascalTokenTypes;
 import nl.akiar.pascal.psi.*;
 import nl.akiar.pascal.resolution.DelphiBuiltIns;
 import nl.akiar.pascal.resolution.MemberChainResolver;
-import nl.akiar.pascal.stubs.PascalVariableIndex;
 import nl.akiar.pascal.stubs.PascalPropertyIndex;
 import nl.akiar.pascal.stubs.PascalRoutineIndex;
-import com.intellij.lang.ASTNode;
-import com.intellij.psi.tree.IElementType;
+import nl.akiar.pascal.stubs.PascalTypeIndex;
+import nl.akiar.pascal.stubs.PascalVariableIndex;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
-import java.util.Collection;
+import java.util.*;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+/**
+ * Documentation provider for Pascal language elements.
+ * Uses IntelliJ's DocumentationMarkup for consistent styling and
+ * provides clickable type links for in-popup navigation.
+ */
 public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     private static final Logger LOG = Logger.getInstance(PascalDocumentationProvider.class);
+
+    // Link prefixes for different element types
+    private static final String LINK_TYPE = "type:";
+    private static final String LINK_ROUTINE = "routine:";
+    private static final String LINK_UNIT = "unit:";
+
+    // Patterns for parsing doc comments
+    private static final Pattern PARAM_PATTERN = Pattern.compile("@param\\s+(\\w+)\\s+(.+?)(?=@|$)", Pattern.DOTALL);
+    private static final Pattern RETURNS_PATTERN = Pattern.compile("@returns?\\s+(.+?)(?=@|$)", Pattern.DOTALL);
 
     @Override
     @Nullable
@@ -39,23 +63,21 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         if (contextElement != null && contextElement.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
             String name = contextElement.getText();
 
-            // 0. Check for built-in functions/types FIRST - return the identifier itself
-            // so generateDoc can create special documentation for built-ins
+            // Check for built-in functions/types FIRST
             if (DelphiBuiltIns.isBuiltIn(name)) {
                 LOG.info("[PascalDoc] Built-in identifier: " + name);
-                return contextElement; // Return the identifier, generateDoc will handle it
+                return contextElement;
             }
 
             PsiElement parent = contextElement.getParent();
 
-            // check if UNIT_REFERENCE and get complete name (can have dot notation and needing fill in by Unit Scope Names)
+            // Check if UNIT_REFERENCE
             if (parent != null && parent.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
                 LOG.info("[PascalDoc] Unit reference detected: " + parent.getText());
                 return parent;
             }
 
-            // 0b. Check if this is a member access (after a DOT) - if so, only use member resolution
-            // Don't fall back to global lookups for member access
+            // Check if this is a member access (after a DOT)
             boolean isMemberAccess = false;
             PsiElement prevLeaf = com.intellij.psi.util.PsiTreeUtil.prevLeaf(contextElement);
             while (prevLeaf != null && (prevLeaf instanceof PsiWhiteSpace || prevLeaf instanceof com.intellij.psi.PsiComment)) {
@@ -67,19 +89,17 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 LOG.info("[PascalDoc] Member access detected for: " + name);
             }
 
-            // 1. Check if the context element itself is a name identifier of a declaration
-            if (parent instanceof nl.akiar.pascal.psi.PascalVariableDefinition ||
-                parent instanceof nl.akiar.pascal.psi.PascalTypeDefinition ||
-                parent instanceof nl.akiar.pascal.psi.PascalRoutine ||
-                parent instanceof nl.akiar.pascal.psi.PascalProperty) {
-
-                // If the identifier is the name identifier of its parent, return the parent
+            // Check if the context element is a name identifier of a declaration
+            if (parent instanceof PascalVariableDefinition ||
+                parent instanceof PascalTypeDefinition ||
+                parent instanceof PascalRoutine ||
+                parent instanceof PascalProperty) {
                 if (((com.intellij.psi.PsiNameIdentifierOwner) parent).getNameIdentifier() == contextElement) {
                     return parent;
                 }
             }
 
-            // 2. Check if it resolves via reference (handles local vars, parameters, members)
+            // Check if it resolves via reference
             PsiReference[] refs = contextElement.getReferences();
             for (PsiReference ref : refs) {
                 PsiElement resolved = ref.resolve();
@@ -88,9 +108,7 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 }
             }
 
-            // For member access, don't fall back to global lookups - return unresolved
-            // This prevents showing wrong documentation for obj.member when member
-            // can't be found in obj's type
+            // For member access, use chain resolution
             if (isMemberAccess) {
                 LOG.info("[MemberTraversal] Doc: member access detected; attempting chain resolve");
                 PsiElement chainResolved = MemberChainResolver.resolveElement(contextElement);
@@ -99,12 +117,12 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                     return chainResolved;
                 }
                 LOG.info("[MemberTraversal] Doc: chain unresolved -> no global fallback");
-                return contextElement; // Will show as unresolved member
+                return contextElement;
             }
 
-            // 3. Fallback to in-scope index lookup (only for non-member access)
-            nl.akiar.pascal.stubs.PascalTypeIndex.TypeLookupResult typeResult =
-                    nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(name, contextElement.getContainingFile(), contextElement.getTextOffset());
+            // Fallback to index lookups
+            PascalTypeIndex.TypeLookupResult typeResult =
+                    PascalTypeIndex.findTypesWithUsesValidation(name, contextElement.getContainingFile(), contextElement.getTextOffset());
             if (!typeResult.getInScopeTypes().isEmpty()) {
                 return typeResult.getInScopeTypes().get(0);
             }
@@ -127,11 +145,10 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 return routineResult.getInScopeRoutines().get(0);
             }
 
-            // 4. Last resort: out-of-scope matches (but NOT for built-ins)
+            // Last resort: out-of-scope matches
             if (!typeResult.getOutOfScopeTypes().isEmpty()) {
                 return typeResult.getOutOfScopeTypes().get(0);
             }
-
             if (!routineResult.getOutOfScopeRoutines().isEmpty()) {
                 return routineResult.getOutOfScopeRoutines().get(0);
             }
@@ -141,408 +158,381 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
 
     @Override
     @Nullable
-    public String generateDoc(PsiElement element, @Nullable PsiElement originalElement) {
-        LOG.info("[PascalDoc] generateDoc called for element: " + element + " class: " + (element != null ? element.getClass().getName() : "null") + " (original: " + originalElement + ")");
+    public PsiElement getDocumentationElementForLink(PsiManager psiManager, String link, PsiElement context) {
+        if (link == null || context == null) return null;
 
-        // if element is UNIT_REFERENCE, generate doc for unit
-        if (element != null && element.getNode() != null &&
-            element.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
-            String unitName = element.getText();
-            LOG.info("[PascalDoc] Generating doc for unit reference: " + unitName);
-            StringBuilder sb = new StringBuilder();
-            sb.append("<b>Unit:</b> ").append(escapeHtml(unitName));
-            sb.append("<br/>&nbsp;");
-            return sb.toString();
+        Project project = context.getProject();
+        PsiFile contextFile = context.getContainingFile();
+        int offset = context.getTextOffset();
+
+        if (link.startsWith(LINK_TYPE)) {
+            String typeName = link.substring(LINK_TYPE.length());
+            PascalTypeIndex.TypeLookupResult result =
+                    PascalTypeIndex.findTypesWithUsesValidation(typeName, contextFile, offset);
+            if (!result.getInScopeTypes().isEmpty()) {
+                return result.getInScopeTypes().get(0);
+            }
+            if (!result.getOutOfScopeTypes().isEmpty()) {
+                return result.getOutOfScopeTypes().get(0);
+            }
+            // Try built-in type documentation
+            if (DelphiBuiltIns.isBuiltInType(typeName)) {
+                return context; // Will generate built-in doc
+            }
+        } else if (link.startsWith(LINK_ROUTINE)) {
+            String routineName = link.substring(LINK_ROUTINE.length());
+            PascalRoutineIndex.RoutineLookupResult result =
+                    PascalRoutineIndex.findRoutinesWithUsesValidation(routineName, contextFile, offset);
+            if (!result.getInScopeRoutines().isEmpty()) {
+                return result.getInScopeRoutines().get(0);
+            }
+            if (!result.getOutOfScopeRoutines().isEmpty()) {
+                return result.getOutOfScopeRoutines().get(0);
+            }
+        } else if (link.startsWith(LINK_UNIT)) {
+            // Unit navigation - find the unit file
+            String unitName = link.substring(LINK_UNIT.length());
+            // TODO: Navigate to unit file
         }
 
-        // Check if element is an identifier token (built-in or unresolved member)
-        if (element != null && element.getNode() != null &&
-            element.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
+        return null;
+    }
+
+    @Override
+    @Nullable
+    public String generateDoc(PsiElement element, @Nullable PsiElement originalElement) {
+        LOG.info("[PascalDoc] generateDoc called for element: " + element + " class: " + (element != null ? element.getClass().getName() : "null"));
+
+        if (element == null) return null;
+
+        // Unit reference documentation
+        if (element.getNode() != null && element.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
+            return generateUnitDoc(element.getText(), element);
+        }
+
+        // Built-in or unresolved identifier
+        if (element.getNode() != null && element.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
             String name = element.getText();
             if (DelphiBuiltIns.isBuiltIn(name)) {
-                return generateBuiltInDoc(name);
+                return generateBuiltInDoc(name, element);
             }
 
-            // Check if this is an unresolved member access
+            // Check for unresolved member access
             PsiElement prevLeaf = com.intellij.psi.util.PsiTreeUtil.prevLeaf(element);
             while (prevLeaf != null && (prevLeaf instanceof PsiWhiteSpace || prevLeaf instanceof com.intellij.psi.PsiComment)) {
                 prevLeaf = com.intellij.psi.util.PsiTreeUtil.prevLeaf(prevLeaf);
             }
             if (prevLeaf != null && prevLeaf.getNode() != null &&
                 prevLeaf.getNode().getElementType() == PascalTokenTypes.DOT) {
-                return generateUnresolvedMemberDoc(name, prevLeaf);
+                return generateUnresolvedMemberDoc(name, prevLeaf, element);
             }
         }
 
+        // Type definition documentation
         if (element instanceof PascalTypeDefinition) {
-            PascalTypeDefinition typeDef = (PascalTypeDefinition) element;
-            LOG.info("[PascalDoc] Generating doc for type definition: " + typeDef.getName());
-            StringBuilder sb = new StringBuilder();
-
-            EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-//            Color bgColor = scheme.getDefaultBackground();
-//            Color fgColor = scheme.getDefaultForeground();
-//            String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
-//            String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
-
-            // Type signature (header)
-//            sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
-//              .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
-            appendHighlightedTypeDefinition(sb, typeDef, scheme);
-//            sb.append("</div>");
-
-            // Generic parameters (only if present)
-            List<String> typeParams = typeDef.getTypeParameters();
-            if (!typeParams.isEmpty()) {
-                sb.append("<br/>Generic parameters: &lt;");
-                sb.append(escapeHtml(String.join(", ", typeParams)));
-                sb.append("&gt;");
-            }
-
-            // Unit and file location
-            String fileName = element.getContainingFile().getName();
-            String unitName = fileName;
-            int dotIndex = fileName.lastIndexOf('.');
-            if (dotIndex > 0) {
-                unitName = fileName.substring(0, dotIndex);
-            }
-            sb.append("<br/>Unit: <b>").append(escapeHtml(unitName)).append("</b>");
-            sb.append("<br/>File: <i>").append(escapeHtml(fileName)).append("</i>");
-
-            // Documentation comment (if present)
-            String docComment = typeDef.getDocComment();
-            if (docComment != null && !docComment.isEmpty()) {
-                sb.append("<hr/>");
-                // Convert newlines to <br/> and escape HTML
-                String formattedDoc = escapeHtml(docComment).replace("\n", "<br/>");
-                sb.append(formattedDoc);
-            }
-
-            // Add padding at bottom to prevent edit button overlap
-            sb.append("<br/>&nbsp;");
-
-            return sb.toString();
+            return generateTypeDoc((PascalTypeDefinition) element);
         }
 
-        // Generate documentation for variable definitions
+        // Variable definition documentation
         if (element instanceof PascalVariableDefinition) {
-            PascalVariableDefinition varDef = (PascalVariableDefinition) element;
-            LOG.info("[PascalDoc] Generating doc for variable definition: " + varDef.getName());
-            return generateVariableDoc(varDef);
+            return generateVariableDoc((PascalVariableDefinition) element);
         }
 
-        // Generate documentation for properties
+        // Property documentation
         if (element instanceof PascalProperty) {
-            PascalProperty prop = (PascalProperty) element;
-            LOG.info("[PascalDoc] Generating doc for property: " + prop.getName());
-            return generatePropertyDoc(prop);
+            return generatePropertyDoc((PascalProperty) element);
         }
 
-        // Generate documentation for routines
+        // Routine documentation
         if (element instanceof PascalRoutine) {
-            PascalRoutine routine = (PascalRoutine) element;
-            LOG.info("[PascalDoc] Generating doc for routine: " + routine.getName());
-            return generateRoutineDoc(routine);
+            return generateRoutineDoc((PascalRoutine) element);
         }
 
         return null;
     }
 
-    private String generatePropertyDoc(PascalProperty prop) {
+    // ==================== Document Generation Methods ====================
+
+    private String generateUnitDoc(String unitName, PsiElement element) {
         StringBuilder sb = new StringBuilder();
-        EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-//        Color bgColor = scheme.getDefaultBackground();
-//        Color fgColor = scheme.getDefaultForeground();
-//        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
-//        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
-//
-//        sb.append("<div style=' ").append(bgHex).append("; color: ").append(fgHex)
-//          .append("; padding: 5px; border-rbackground-color:adius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
-        
-        appendStyled(sb, "property ", PascalSyntaxHighlighter.KEYWORD, scheme, true);
-        appendStyled(sb, prop.getName(), PascalSyntaxHighlighter.VAR_FIELD, scheme, true);
-        
-        String typeName = prop.getTypeName();
-        if (typeName != null) {
-            sb.append(": ");
-            appendStyled(sb, typeName, PascalSyntaxHighlighter.IDENTIFIER, scheme, false);
-        }
-        
-        String read = prop.getReadSpecifier();
-        if (read != null) {
-            sb.append(" ");
-            appendStyled(sb, "read ", PascalSyntaxHighlighter.KEYWORD, scheme, false);
-            sb.append(escapeHtml(read));
-        }
-        
-        String write = prop.getWriteSpecifier();
-        if (write != null) {
-            sb.append(" ");
-            appendStyled(sb, "write ", PascalSyntaxHighlighter.KEYWORD, scheme, false);
-            sb.append(escapeHtml(write));
-        }
-        
-//        sb.append(";</div>");
 
-        String visibility = prop.getVisibility();
-        if (visibility != null && !visibility.isEmpty()) {
-            sb.append("<br/>Visibility: <b>").append(visibility).append("</b>");
-        }
+        // Definition section
+        sb.append(DocumentationMarkup.DEFINITION_START);
+        sb.append("<b>unit</b> ").append(escapeHtml(unitName));
+        sb.append(DocumentationMarkup.DEFINITION_END);
 
-        String className = prop.getContainingClassName();
-        if (className != null) {
-            sb.append("<br/>Class: <b>").append(escapeHtml(className)).append("</b>");
-        }
-        
-        sb.append("<br/>Unit: <b>").append(escapeHtml(prop.getUnitName())).append("</b>");
-
-        String doc = prop.getDocComment();
-        if (doc != null && !doc.isEmpty()) {
-            sb.append("<hr/>").append(escapeHtml(doc).replace("\n", "<br/>"));
-        }
+        // Source location
+        appendSourceLocation(sb, element);
 
         return sb.toString();
     }
 
-    private String generateRoutineDoc(PascalRoutine routine) {
+    private String generateTypeDoc(PascalTypeDefinition typeDef) {
         StringBuilder sb = new StringBuilder();
-        EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-        Color bgColor = scheme.getDefaultBackground();
-        Color fgColor = scheme.getDefaultForeground();
-//        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
-//        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
+        Project project = typeDef.getProject();
 
-//        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
-//          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
-        
-        // Better signature extraction
-        appendHighlightedRoutineDefinition(sb, routine, scheme);
-//        String text = routine.getText();
-//        String signature = text.split("begin|var|const|type|\\{|\\/\\/|\\(\\*", 2)[0].trim();
-//        sb.append(escapeHtml(signature));
-//        sb.append("</div>");
+        // Definition section with syntax highlighting
+        sb.append(DocumentationMarkup.DEFINITION_START);
+        appendHighlightedTypeSignature(sb, typeDef, project);
+        sb.append(DocumentationMarkup.DEFINITION_END);
 
-        String visibility = routine.getVisibility();
-        if (visibility != null && !visibility.isEmpty()) {
-            sb.append("<br/>Visibility: <b>").append(visibility).append("</b>");
+        // Content section (doc comment)
+        String docComment = typeDef.getDocComment();
+        if (docComment != null && !docComment.isEmpty()) {
+            sb.append(DocumentationMarkup.CONTENT_START);
+            sb.append(formatDocComment(docComment));
+            sb.append(DocumentationMarkup.CONTENT_END);
         }
 
-        PascalTypeDefinition containingClass = routine.getContainingClass();
-        if (containingClass != null) {
-            sb.append("<br/>Class: <b>").append(escapeHtml(containingClass.getName())).append("</b>");
+        // Sections (metadata)
+        sb.append(DocumentationMarkup.SECTIONS_START);
+
+        // Generic parameters
+        List<String> typeParams = typeDef.getTypeParameters();
+        if (!typeParams.isEmpty()) {
+            appendSection(sb, "Generic:", "&lt;" + escapeHtml(String.join(", ", typeParams)) + "&gt;");
         }
 
-        String fileName = routine.getContainingFile().getName();
-        sb.append("<br/>File: <i>").append(escapeHtml(fileName)).append("</i>");
-
-        String doc = routine.getDocComment();
-        if (doc == null) {
-            // Check counterpart
-            PascalRoutine counterpart = routine.isImplementation() ? routine.getDeclaration() : routine.getImplementation();
-            if (counterpart != null) {
-                doc = counterpart.getDocComment();
-            }
+        // Visibility (if any)
+        // Type kind
+        TypeKind kind = typeDef.getTypeKind();
+        if (kind != null) {
+            appendSection(sb, "Kind:", kind.name().toLowerCase());
         }
 
-        if (doc != null && !doc.isEmpty()) {
-            sb.append("<hr/>").append(escapeHtml(doc).replace("\n", "<br/>"));
-        }
+        sb.append(DocumentationMarkup.SECTIONS_END);
+
+        // Source location at bottom
+        appendSourceLocation(sb, typeDef);
 
         return sb.toString();
     }
 
     private String generateVariableDoc(PascalVariableDefinition varDef) {
         StringBuilder sb = new StringBuilder();
+        Project project = varDef.getProject();
 
-        EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-//        Color bgColor = scheme.getDefaultBackground();
-//        Color fgColor = scheme.getDefaultForeground();
-//        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
-//        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
-//
-//        // Variable signature (header)
-//        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
-//          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
-        appendVariableHeader(sb, varDef, scheme);
-//        sb.append("</div>");
+        // Definition section
+        sb.append(DocumentationMarkup.DEFINITION_START);
+        appendVariableSignature(sb, varDef, project);
+        sb.append(DocumentationMarkup.DEFINITION_END);
 
-        // Variable kind and visibility
+        // Content section (doc comment)
+        String docComment = varDef.getDocComment();
+        if (docComment != null && !docComment.isEmpty()) {
+            sb.append(DocumentationMarkup.CONTENT_START);
+            sb.append(formatDocComment(docComment));
+            sb.append(DocumentationMarkup.CONTENT_END);
+        }
+
+        // Sections
+        sb.append(DocumentationMarkup.SECTIONS_START);
+
         VariableKind kind = varDef.getVariableKind();
-        String kindLabel = getVariableKindLabel(kind);
         String visibility = varDef.getVisibility();
+        String kindLabel = getVariableKindLabel(kind);
+
         if (visibility != null && !visibility.isEmpty()) {
-            sb.append("<br/>Kind: <b>").append(visibility).append(" ").append(kindLabel.toLowerCase()).append("</b>");
+            appendSection(sb, "Kind:", visibility + " " + kindLabel.toLowerCase());
         } else {
-            sb.append("<br/>Kind: <b>").append(kindLabel).append("</b>");
+            appendSection(sb, "Kind:", kindLabel);
         }
 
-        // Type name
-        String typeName = varDef.getTypeName();
-        if (typeName != null && !typeName.isEmpty()) {
-            sb.append("<br/>Type: <code>").append(escapeHtml(typeName)).append("</code>");
-        }
-
-        // Owner information based on kind
+        // Owner information
         switch (kind) {
             case FIELD:
                 String className = varDef.getContainingClassName();
                 if (className != null && !className.isEmpty()) {
-                    sb.append("<br/>Class: <b>").append(escapeHtml(className)).append("</b>");
+                    appendSectionWithLink(sb, "Class:", className, LINK_TYPE + className);
                 }
                 break;
-
             case LOCAL:
             case LOOP_VAR:
                 String funcName = varDef.getContainingFunctionName();
                 if (funcName != null && !funcName.isEmpty()) {
-                    sb.append("<br/>Function: <b>").append(escapeHtml(funcName)).append("</b>");
+                    appendSection(sb, "Function:", funcName);
                 }
                 break;
-
             case PARAMETER:
                 String paramFunc = varDef.getContainingScopeName();
                 if (paramFunc != null && !paramFunc.isEmpty()) {
-                    sb.append("<br/>Parameter of: <b>").append(escapeHtml(paramFunc)).append("</b>");
+                    appendSection(sb, "Parameter of:", paramFunc);
                 }
                 break;
-
             default:
-                // Global, constant, threadvar - show scope if available
-                String scopeName = varDef.getContainingScopeName();
-                if (scopeName != null && !scopeName.isEmpty()) {
-                    sb.append("<br/>Scope: <i>").append(escapeHtml(scopeName)).append("</i>");
-                }
                 break;
         }
 
-        // Unit and file location
-        String unitName = varDef.getUnitName();
-        String fileName = varDef.getContainingFile().getName();
-        sb.append("<br/>Unit: <b>").append(escapeHtml(unitName)).append("</b>");
-        sb.append("<br/>File: <i>").append(escapeHtml(fileName)).append("</i>");
+        sb.append(DocumentationMarkup.SECTIONS_END);
 
-        // Documentation comment (if present)
-        String docComment = varDef.getDocComment();
-        if (docComment != null && !docComment.isEmpty()) {
-            sb.append("<hr/>");
-            String formattedDoc = escapeHtml(docComment).replace("\n", "<br/>");
-            sb.append(formattedDoc);
-        }
-
-        // Add padding at bottom
-        sb.append("<br/>&nbsp;");
+        // Source location
+        appendSourceLocation(sb, varDef);
 
         return sb.toString();
     }
 
-    private String generateBuiltInDoc(String name) {
+    private String generatePropertyDoc(PascalProperty prop) {
         StringBuilder sb = new StringBuilder();
-        EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-//        Color bgColor = scheme.getDefaultBackground();
-//        Color fgColor = scheme.getDefaultForeground();
-//        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
-//        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
-//
-//        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
-//          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
+        Project project = prop.getProject();
 
+        // Definition section
+        sb.append(DocumentationMarkup.DEFINITION_START);
+        appendPropertySignature(sb, prop, project);
+        sb.append(DocumentationMarkup.DEFINITION_END);
+
+        // Content section (doc comment)
+        String doc = prop.getDocComment();
+        if (doc != null && !doc.isEmpty()) {
+            sb.append(DocumentationMarkup.CONTENT_START);
+            sb.append(formatDocComment(doc));
+            sb.append(DocumentationMarkup.CONTENT_END);
+        }
+
+        // Sections
+        sb.append(DocumentationMarkup.SECTIONS_START);
+
+        String visibility = prop.getVisibility();
+        if (visibility != null && !visibility.isEmpty()) {
+            appendSection(sb, "Visibility:", visibility);
+        }
+
+        String className = prop.getContainingClassName();
+        if (className != null) {
+            appendSectionWithLink(sb, "Class:", className, LINK_TYPE + className);
+        }
+
+        sb.append(DocumentationMarkup.SECTIONS_END);
+
+        // Source location
+        appendSourceLocation(sb, prop);
+
+        return sb.toString();
+    }
+
+    private String generateRoutineDoc(PascalRoutine routine) {
+        StringBuilder sb = new StringBuilder();
+        Project project = routine.getProject();
+
+        // Definition section with syntax highlighting
+        sb.append(DocumentationMarkup.DEFINITION_START);
+        appendHighlightedRoutineSignature(sb, routine, project);
+        sb.append(DocumentationMarkup.DEFINITION_END);
+
+        // Get doc comment (check counterpart if needed)
+        String doc = routine.getDocComment();
+        if (doc == null) {
+            PascalRoutine counterpart = routine.isImplementation() ? routine.getDeclaration() : routine.getImplementation();
+            if (counterpart != null) {
+                doc = counterpart.getDocComment();
+            }
+        }
+
+        // Content section (description part of doc comment)
+        if (doc != null && !doc.isEmpty()) {
+            String description = extractDescription(doc);
+            if (!description.isEmpty()) {
+                sb.append(DocumentationMarkup.CONTENT_START);
+                sb.append(formatDocComment(description));
+                sb.append(DocumentationMarkup.CONTENT_END);
+            }
+        }
+
+        // Sections
+        sb.append(DocumentationMarkup.SECTIONS_START);
+
+        // Parameters section
+        if (doc != null) {
+            Map<String, String> paramDocs = parseParamDocs(doc);
+            if (!paramDocs.isEmpty()) {
+                StringBuilder paramContent = new StringBuilder();
+                for (Map.Entry<String, String> entry : paramDocs.entrySet()) {
+                    paramContent.append("<p><code>").append(escapeHtml(entry.getKey())).append("</code>");
+                    if (!entry.getValue().isEmpty()) {
+                        paramContent.append(" &ndash; ").append(escapeHtml(entry.getValue().trim()));
+                    }
+                    paramContent.append("</p>");
+                }
+                appendSectionRaw(sb, "Params:", paramContent.toString());
+            }
+
+            // Returns section
+            String returns = parseReturns(doc);
+            if (returns != null && !returns.isEmpty()) {
+                appendSection(sb, "Returns:", returns.trim());
+            }
+        }
+
+        // Visibility
+        String visibility = routine.getVisibility();
+        if (visibility != null && !visibility.isEmpty()) {
+            appendSection(sb, "Visibility:", visibility);
+        }
+
+        // Containing class
+        PascalTypeDefinition containingClass = routine.getContainingClass();
+        if (containingClass != null) {
+            String className = containingClass.getName();
+            appendSectionWithLink(sb, "Class:", className, LINK_TYPE + className);
+        }
+
+        sb.append(DocumentationMarkup.SECTIONS_END);
+
+        // Source location
+        appendSourceLocation(sb, routine);
+
+        return sb.toString();
+    }
+
+    private String generateBuiltInDoc(String name, PsiElement context) {
+        StringBuilder sb = new StringBuilder();
+
+        // Definition section
+        sb.append(DocumentationMarkup.DEFINITION_START);
         if (DelphiBuiltIns.isBuiltInFunction(name)) {
-            appendStyled(sb, name, PascalSyntaxHighlighter.ROUTINE_CALL, scheme, true);
-//            sb.append("</div>");
-            sb.append("<br/>Kind: <b>Built-in Function</b>");
-            sb.append("<br/>Unit: <b>System</b> (implicit)");
-            sb.append("<hr/>");
-            sb.append(getBuiltInFunctionDescription(name));
+            sb.append("<b>function</b> ").append(escapeHtml(name));
         } else if (DelphiBuiltIns.isBuiltInType(name)) {
-            appendStyled(sb, name, getBuiltInTypeColor(name), scheme, true);
-//            sb.append("</div>");
-            sb.append("<br/>Kind: <b>Built-in Type</b>");
-            sb.append("<br/>Unit: <b>System</b> (implicit)");
-            sb.append("<hr/>");
-            sb.append(getBuiltInTypeDescription(name));
+            sb.append("<b>type</b> ").append(escapeHtml(name));
         } else if (DelphiBuiltIns.isBuiltInConstant(name)) {
-            appendStyled(sb, name, PascalSyntaxHighlighter.VAR_CONSTANT, scheme, true);
-//            sb.append("</div>");
-            sb.append("<br/>Kind: <b>Built-in Constant</b>");
-            sb.append("<br/>Unit: <b>System</b> (implicit)");
+            sb.append("<b>const</b> ").append(escapeHtml(name));
         } else {
             sb.append(escapeHtml(name));
-//            sb.append("</div>");
-            sb.append("<br/>Kind: <b>Built-in</b>");
-            sb.append("<br/>Unit: <b>System</b> (implicit)");
+        }
+        sb.append(DocumentationMarkup.DEFINITION_END);
+
+        // Content section (description)
+        String description = getBuiltInDescription(name);
+        if (!description.isEmpty()) {
+            sb.append(DocumentationMarkup.CONTENT_START);
+            sb.append(description);
+            sb.append(DocumentationMarkup.CONTENT_END);
         }
 
-        sb.append("<br/>&nbsp;");
+        // Sections
+        sb.append(DocumentationMarkup.SECTIONS_START);
+        if (DelphiBuiltIns.isBuiltInFunction(name)) {
+            appendSection(sb, "Kind:", "Built-in Function");
+        } else if (DelphiBuiltIns.isBuiltInType(name)) {
+            appendSection(sb, "Kind:", "Built-in Type");
+        } else if (DelphiBuiltIns.isBuiltInConstant(name)) {
+            appendSection(sb, "Kind:", "Built-in Constant");
+        } else {
+            appendSection(sb, "Kind:", "Built-in");
+        }
+        appendSection(sb, "Unit:", "System (implicit)");
+        sb.append(DocumentationMarkup.SECTIONS_END);
+
         return sb.toString();
     }
 
-    private TextAttributesKey getBuiltInTypeColor(String name) {
-        String lower = name.toLowerCase();
-        if (lower.startsWith("t") || lower.equals("tobject") || lower.contains("exception")) {
-            return PascalSyntaxHighlighter.TYPE_CLASS;
-        }
-        if (lower.startsWith("i") && name.length() > 1 && Character.isUpperCase(name.charAt(1))) {
-            return PascalSyntaxHighlighter.TYPE_INTERFACE;
-        }
-        return PascalSyntaxHighlighter.TYPE_SIMPLE;
-    }
-
-    private String getBuiltInFunctionDescription(String name) {
-        String lower = name.toLowerCase();
-        switch (lower) {
-            case "assigned":
-                return "Tests whether a pointer or procedural variable is <code>nil</code>.<br/>" +
-                       "Returns <code>True</code> if the pointer is not <code>nil</code>.";
-            case "length":
-                return "Returns the number of elements in an array or characters in a string.";
-            case "setlength":
-                return "Sets the length of a dynamic array or string.";
-            case "inc":
-                return "Increments a variable by 1 or a specified amount.";
-            case "dec":
-                return "Decrements a variable by 1 or a specified amount.";
-            case "ord":
-                return "Returns the ordinal value of an ordinal-type expression.";
-            case "chr":
-                return "Returns the character for a specified ordinal value.";
-            case "high":
-                return "Returns the highest value in the range of an ordinal type or array.";
-            case "low":
-                return "Returns the lowest value in the range of an ordinal type or array.";
-            case "sizeof":
-                return "Returns the size in bytes of a type or variable.";
-            case "copy":
-                return "Returns a substring or a copy of part of an array.";
-            case "pos":
-                return "Searches for a substring in a string and returns its position.";
-            case "inttostr":
-                return "Converts an integer to its string representation.";
-            case "strtoint":
-                return "Converts a string to an integer.";
-            case "format":
-                return "Formats a string with the specified arguments.";
-            case "freeandnil":
-                return "Frees an object and sets its reference to <code>nil</code>.";
-            default:
-                return "Built-in function from the System unit.";
-        }
-    }
-
-    private String generateUnresolvedMemberDoc(String memberName, PsiElement dotElement) {
-        LOG.info("[MemberTraversal] Doc: generateUnresolvedMemberDoc member='" + memberName + "'");
+    private String generateUnresolvedMemberDoc(String memberName, PsiElement dotElement, PsiElement context) {
         StringBuilder sb = new StringBuilder();
-        EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-//        Color bgColor = scheme.getDefaultBackground();
-//        Color fgColor = scheme.getDefaultForeground();
-//        String bgHex = colorToHex(bgColor != null ? bgColor : new Color(0xf7f7f7));
-//        String fgHex = colorToHex(fgColor != null ? fgColor : Color.BLACK);
-//
-//        sb.append("<div style='background-color: ").append(bgHex).append("; color: ").append(fgHex)
-//          .append("; padding: 5px; border-radius: 3px; border: 1px solid #ddd; font-family: monospace;'>");
-        sb.append(escapeHtml(memberName));
-//        sb.append("</div>");
 
-        // Try to find what the qualifier is
+        // Definition section
+        sb.append(DocumentationMarkup.DEFINITION_START);
+        sb.append(escapeHtml(memberName));
+        sb.append(DocumentationMarkup.DEFINITION_END);
+
+        // Try to find qualifier type
         PsiElement qualifier = com.intellij.psi.util.PsiTreeUtil.prevLeaf(dotElement);
         while (qualifier != null && (qualifier instanceof PsiWhiteSpace || qualifier instanceof com.intellij.psi.PsiComment)) {
             qualifier = com.intellij.psi.util.PsiTreeUtil.prevLeaf(qualifier);
@@ -550,7 +540,6 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
 
         String qualifierTypeName = null;
         if (qualifier != null) {
-            // Try to resolve qualifier to find its type
             PsiReference[] refs = qualifier.getReferences();
             for (PsiReference ref : refs) {
                 PsiElement resolved = ref.resolve();
@@ -567,116 +556,123 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             }
         }
 
-        sb.append("<br/>Kind: <b>Member</b> (unresolved)");
+        // Content section
+        sb.append(DocumentationMarkup.CONTENT_START);
         if (qualifierTypeName != null) {
-            sb.append("<br/>Qualifier type: <code>").append(escapeHtml(qualifierTypeName)).append("</code>");
-            sb.append("<hr/>");
             sb.append("Could not find member '<b>").append(escapeHtml(memberName)).append("</b>' ");
-            sb.append("in type '<b>").append(escapeHtml(qualifierTypeName)).append("</b>' or its ancestors.");
-            sb.append("<br/><br/>The type might not be indexed, or the member is defined in a base class that wasn't found.");
+            sb.append("in type '");
+            appendTypeLink(sb, qualifierTypeName);
+            sb.append("' or its ancestors.");
+            sb.append("<p>The type might not be indexed, or the member is defined in a base class that wasn't found.</p>");
         } else {
-            sb.append("<hr/>");
             sb.append("Could not resolve the qualifier expression.");
         }
+        sb.append(DocumentationMarkup.CONTENT_END);
 
-        sb.append("<br/>&nbsp;");
+        // Sections
+        sb.append(DocumentationMarkup.SECTIONS_START);
+        appendSection(sb, "Kind:", "Member (unresolved)");
+        if (qualifierTypeName != null) {
+            appendSectionWithLink(sb, "Qualifier type:", qualifierTypeName, LINK_TYPE + qualifierTypeName);
+        }
+        sb.append(DocumentationMarkup.SECTIONS_END);
+
         return sb.toString();
     }
 
-    private String getBuiltInTypeDescription(String name) {
-        String lower = name.toLowerCase();
-        switch (lower) {
-            case "tobject":
-                return "The ultimate ancestor class. All classes inherit from TObject.";
-            case "exception":
-                return "Base class for all exception types.";
-            case "string":
-                return "A managed string type (UnicodeString by default).";
-            case "integer":
-                return "A signed 32-bit integer type.";
-            case "boolean":
-                return "A Boolean type with values <code>True</code> and <code>False</code>.";
-            case "tstrings":
-                return "Abstract base class for string list classes.";
-            case "tstringlist":
-                return "A list of strings with sorting and searching capabilities.";
-            case "tlist":
-                return "A list of pointers.";
-            case "tstream":
-                return "Abstract base class for streaming data.";
-            case "tcomponent":
-                return "Base class for all components.";
-            case "tpersistent":
-                return "Base class for objects that have published properties.";
-            default:
-                return "Built-in type from the System unit.";
+    // ==================== Signature Building Methods ====================
+
+    private void appendHighlightedTypeSignature(StringBuilder sb, PascalTypeDefinition typeDef, Project project) {
+        // Build the signature text
+        String signature = buildTypeSignature(typeDef);
+
+        // Try HtmlSyntaxInfoUtil for syntax highlighting
+        try {
+            HtmlSyntaxInfoUtil.appendHighlightedByLexerAndEncodedAsHtmlCodeSnippet(
+                    sb, project, PascalLanguage.INSTANCE, signature, 1.0f);
+        } catch (Exception e) {
+            // Fallback to manual highlighting
+            appendManuallyHighlightedType(sb, typeDef);
         }
     }
 
-    private void appendVariableHeader(StringBuilder sb, PascalVariableDefinition varDef, EditorColorsScheme scheme) {
-        VariableKind kind = varDef.getVariableKind();
-        TextAttributesKey colorKey = getColorForVariableKind(kind);
+    private void appendHighlightedRoutineSignature(StringBuilder sb, PascalRoutine routine, Project project) {
+        // Build the signature text
+        String signature = buildRoutineSignature(routine);
 
-        // Variable name
-        String name = varDef.getName();
-        if (name != null) {
-            appendStyled(sb, name, colorKey != null ? colorKey : PascalSyntaxHighlighter.IDENTIFIER, scheme, true);
-        }
-
-        // Type annotation
-        String typeName = varDef.getTypeName();
-        if (typeName != null && !typeName.isEmpty()) {
-            sb.append(": ");
-            appendStyled(sb, typeName, PascalSyntaxHighlighter.IDENTIFIER, scheme, false);
+        // Try HtmlSyntaxInfoUtil for syntax highlighting
+        try {
+            HtmlSyntaxInfoUtil.appendHighlightedByLexerAndEncodedAsHtmlCodeSnippet(
+                    sb, project, PascalLanguage.INSTANCE, signature, 1.0f);
+        } catch (Exception e) {
+            // Fallback to manual highlighting
+            appendManuallyHighlightedRoutine(sb, routine);
         }
     }
 
-    private String getVariableKindLabel(VariableKind kind) {
-        if (kind == null) return "Variable";
-        switch (kind) {
-            case GLOBAL:
-                return "Global Variable";
-            case LOCAL:
-                return "Local Variable";
-            case PARAMETER:
-                return "Parameter";
-            case FIELD:
-                return "Field";
-            case CONSTANT:
-                return "Constant";
-            case THREADVAR:
-                return "Thread Variable";
-            case LOOP_VAR:
-                return "Loop Variable";
-            default:
-                return "Variable";
+    private String buildTypeSignature(PascalTypeDefinition typeDef) {
+        StringBuilder sig = new StringBuilder();
+        ASTNode node = typeDef.getNode();
+        ASTNode child = node.getFirstChildNode();
+        TypeKind kind = typeDef.getTypeKind();
+        boolean foundKindKeyword = false;
+
+        while (child != null) {
+            IElementType type = child.getElementType();
+            String text = child.getText();
+
+            if (type == PascalTokenTypes.SEMI) {
+                sig.append(";");
+                break;
+            }
+
+            if (kind == TypeKind.CLASS || kind == TypeKind.RECORD || kind == TypeKind.INTERFACE) {
+                if (foundKindKeyword && isBodyStartKeyword(type)) {
+                    break;
+                }
+                if (type == PascalTokenTypes.KW_CLASS || type == PascalTokenTypes.KW_RECORD || type == PascalTokenTypes.KW_INTERFACE) {
+                    foundKindKeyword = true;
+                }
+            }
+
+            sig.append(text);
+            child = child.getTreeNext();
         }
+
+        return sig.toString().trim();
     }
 
-    private TextAttributesKey getColorForVariableKind(VariableKind kind) {
-        if (kind == null) return null;
-        switch (kind) {
-            case GLOBAL:
-                return PascalSyntaxHighlighter.VAR_GLOBAL;
-            case LOCAL:
-                return PascalSyntaxHighlighter.VAR_LOCAL;
-            case PARAMETER:
-                return PascalSyntaxHighlighter.VAR_PARAMETER;
-            case FIELD:
-                return PascalSyntaxHighlighter.VAR_FIELD;
-            case CONSTANT:
-                return PascalSyntaxHighlighter.VAR_CONSTANT;
-            case THREADVAR:
-                return PascalSyntaxHighlighter.VAR_THREADVAR;
-            case LOOP_VAR:
-                return PascalSyntaxHighlighter.VAR_LOCAL;
-            default:
-                return null;
+    private String buildRoutineSignature(PascalRoutine routine) {
+        StringBuilder sig = new StringBuilder();
+        ASTNode node = routine.getNode();
+        ASTNode child = node.getFirstChildNode();
+
+        while (child != null) {
+            IElementType type = child.getElementType();
+            String text = child.getText();
+
+            if (type == PascalTokenTypes.SEMI) {
+                sig.append(";");
+                break;
+            }
+
+            // Stop at body start keywords
+            if (type == PascalTokenTypes.KW_BEGIN ||
+                type == PascalTokenTypes.KW_VAR ||
+                type == PascalTokenTypes.KW_CONST ||
+                type == PascalTokenTypes.KW_TYPE) {
+                break;
+            }
+
+            sig.append(text);
+            child = child.getTreeNext();
         }
+
+        return sig.toString().trim();
     }
 
-    private void appendHighlightedTypeDefinition(StringBuilder sb, PascalTypeDefinition typeDef, EditorColorsScheme scheme) {
-        // Re-implementing logic to iterate tokens for better highlighting:
+    private void appendManuallyHighlightedType(StringBuilder sb, PascalTypeDefinition typeDef) {
+        EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
         ASTNode node = typeDef.getNode();
         ASTNode child = node.getFirstChildNode();
         TypeKind kind = typeDef.getTypeKind();
@@ -692,14 +688,11 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             }
 
             if (kind == TypeKind.CLASS || kind == TypeKind.RECORD || kind == TypeKind.INTERFACE) {
-                if (foundKindKeyword) {
-                    if (isBodyStartKeyword(type)) {
-                        break;
-                    }
-                } else {
-                    if (type == PascalTokenTypes.KW_CLASS || type == PascalTokenTypes.KW_RECORD || type == PascalTokenTypes.KW_INTERFACE) {
-                        foundKindKeyword = true;
-                    }
+                if (foundKindKeyword && isBodyStartKeyword(type)) {
+                    break;
+                }
+                if (type == PascalTokenTypes.KW_CLASS || type == PascalTokenTypes.KW_RECORD || type == PascalTokenTypes.KW_INTERFACE) {
+                    foundKindKeyword = true;
                 }
             }
 
@@ -707,12 +700,11 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 appendStyled(sb, text, PascalSyntaxHighlighter.KEYWORD, scheme, true);
             } else if (type == PascalTokenTypes.IDENTIFIER) {
                 if (text.equals(typeDef.getName())) {
-                    TextAttributesKey colorKey = getColorForTypeKind(typeDef.getTypeKind());
+                    TextAttributesKey colorKey = getColorForTypeKind(kind);
                     appendStyled(sb, text, colorKey != null ? colorKey : PascalSyntaxHighlighter.IDENTIFIER, scheme, true);
                 } else {
-                    // Try to see if it's a known type
-                    TextAttributesKey colorKey = getIdentifierColor(text, typeDef);
-                    appendStyled(sb, text, colorKey, scheme, false);
+                    // Type reference - make it clickable
+                    appendTypeLink(sb, text);
                 }
             } else if (type == PascalTokenTypes.STRING_LITERAL) {
                 appendStyled(sb, text, PascalSyntaxHighlighter.STRING, scheme, false);
@@ -724,10 +716,13 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         }
     }
 
-    private void appendHighlightedRoutineDefinition(StringBuilder sb, PascalRoutine routine, EditorColorsScheme scheme) {
-        // Similar logic can be implemented here for routines if needed
+    private void appendManuallyHighlightedRoutine(StringBuilder sb, PascalRoutine routine) {
+        EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
         ASTNode node = routine.getNode();
         ASTNode child = node.getFirstChildNode();
+        boolean inReturnType = false;
+        boolean inParams = false;
+
         while (child != null) {
             IElementType type = child.getElementType();
             String text = child.getText();
@@ -737,14 +732,28 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 break;
             }
 
-            if (isKeyword(type)) {
+            if (type == PascalTokenTypes.LPAREN) {
+                inParams = true;
+                sb.append("(");
+            } else if (type == PascalTokenTypes.RPAREN) {
+                inParams = false;
+                sb.append(")");
+            } else if (type == PascalTokenTypes.COLON && !inParams) {
+                inReturnType = true;
+                sb.append(": ");
+            } else if (isKeyword(type)) {
                 appendStyled(sb, text, PascalSyntaxHighlighter.KEYWORD, scheme, true);
-            } else if (type == PascalTokenTypes.IDENTIFIER && text.equals(routine.getName())) {
-                appendStyled(sb, text, PascalSyntaxHighlighter.ROUTINE_DECLARATION, scheme, true);
-            } else if (type == PascalElementTypes.FORMAL_PARAMETER) {
-                appendStyled(sb, text, PascalSyntaxHighlighter.VAR_PARAMETER, scheme, false);
-            } else if (type == PascalElementTypes.TYPE_DEFINITION) {
-                appendStyled(sb, text, PascalSyntaxHighlighter.TYPE_PARAMETER, scheme, false);
+            } else if (type == PascalTokenTypes.IDENTIFIER) {
+                if (text.equals(routine.getName())) {
+                    appendStyled(sb, text, PascalSyntaxHighlighter.ROUTINE_DECLARATION, scheme, true);
+                } else if (inReturnType || (inParams && isLikelyType(text))) {
+                    // Type reference - make it clickable
+                    appendTypeLink(sb, text);
+                } else if (inParams) {
+                    appendStyled(sb, text, PascalSyntaxHighlighter.VAR_PARAMETER, scheme, false);
+                } else {
+                    sb.append(escapeHtml(text));
+                }
             } else if (type == PascalTokenTypes.STRING_LITERAL) {
                 appendStyled(sb, text, PascalSyntaxHighlighter.STRING, scheme, false);
             } else {
@@ -755,12 +764,117 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         }
     }
 
-    private TextAttributesKey getIdentifierColor(String text, PascalTypeDefinition context) {
-        // Simple heuristic for common types if we don't want to do a full index lookup here
-        if (text.equalsIgnoreCase("TObject")) return PascalSyntaxHighlighter.TYPE_CLASS;
-        if (text.equalsIgnoreCase("Integer") || text.equalsIgnoreCase("String") || text.equalsIgnoreCase("Boolean")) return PascalSyntaxHighlighter.TYPE_SIMPLE;
-        
-        return PascalSyntaxHighlighter.IDENTIFIER;
+    private void appendVariableSignature(StringBuilder sb, PascalVariableDefinition varDef, Project project) {
+        EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
+        VariableKind kind = varDef.getVariableKind();
+        TextAttributesKey colorKey = getColorForVariableKind(kind);
+
+        String name = varDef.getName();
+        if (name != null) {
+            appendStyled(sb, name, colorKey != null ? colorKey : PascalSyntaxHighlighter.IDENTIFIER, scheme, true);
+        }
+
+        String typeName = varDef.getTypeName();
+        if (typeName != null && !typeName.isEmpty()) {
+            sb.append(": ");
+            appendTypeLink(sb, typeName);
+        }
+    }
+
+    private void appendPropertySignature(StringBuilder sb, PascalProperty prop, Project project) {
+        EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
+
+        appendStyled(sb, "property ", PascalSyntaxHighlighter.KEYWORD, scheme, true);
+        appendStyled(sb, prop.getName(), PascalSyntaxHighlighter.VAR_FIELD, scheme, true);
+
+        String typeName = prop.getTypeName();
+        if (typeName != null) {
+            sb.append(": ");
+            appendTypeLink(sb, typeName);
+        }
+
+        String read = prop.getReadSpecifier();
+        if (read != null) {
+            sb.append(" ");
+            appendStyled(sb, "read ", PascalSyntaxHighlighter.KEYWORD, scheme, false);
+            sb.append(escapeHtml(read));
+        }
+
+        String write = prop.getWriteSpecifier();
+        if (write != null) {
+            sb.append(" ");
+            appendStyled(sb, "write ", PascalSyntaxHighlighter.KEYWORD, scheme, false);
+            sb.append(escapeHtml(write));
+        }
+    }
+
+    // ==================== Helper Methods ====================
+
+    private void appendTypeLink(StringBuilder sb, String typeName) {
+        if (typeName == null || typeName.isEmpty()) return;
+
+        // Check if it's a built-in or primitive type
+        if (DelphiBuiltIns.isBuiltInType(typeName) || isPrimitiveType(typeName)) {
+            // Use createHyperlink for clickable link
+            DocumentationManagerUtil.createHyperlink(sb, LINK_TYPE + typeName, typeName, false);
+        } else {
+            // Create clickable link for user-defined types
+            DocumentationManagerUtil.createHyperlink(sb, LINK_TYPE + typeName, typeName, false);
+        }
+    }
+
+    private void appendSourceLocation(StringBuilder sb, PsiElement element) {
+        PsiFile file = element.getContainingFile();
+        if (file == null) return;
+
+        String fileName = file.getName();
+        String unitName = fileName;
+        int dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex > 0) {
+            unitName = fileName.substring(0, dotIndex);
+        }
+
+        // Use CLASS_BOTTOM for the source location bar
+        sb.append("<div class='").append(DocumentationMarkup.CLASS_BOTTOM).append("'>");
+
+        // Unit name as clickable link
+        sb.append("<a href='").append(DocumentationManagerProtocol.PSI_ELEMENT_PROTOCOL);
+        sb.append(LINK_UNIT).append(unitName).append("'>");
+        sb.append(escapeHtml(unitName));
+        sb.append("</a>");
+
+        // File name in grayed style
+        sb.append(" <span class='").append(DocumentationMarkup.CLASS_GRAYED).append("'>");
+        sb.append("(").append(escapeHtml(fileName)).append(")");
+        sb.append("</span>");
+
+        sb.append("</div>");
+    }
+
+    private void appendSection(StringBuilder sb, String label, String value) {
+        sb.append(DocumentationMarkup.SECTION_HEADER_START);
+        sb.append(label);
+        sb.append(DocumentationMarkup.SECTION_SEPARATOR);
+        sb.append("<p>").append(escapeHtml(value)).append("</p>");
+        sb.append(DocumentationMarkup.SECTION_END);
+    }
+
+    private void appendSectionRaw(StringBuilder sb, String label, String valueHtml) {
+        sb.append(DocumentationMarkup.SECTION_HEADER_START);
+        sb.append(label);
+        sb.append(DocumentationMarkup.SECTION_SEPARATOR);
+        sb.append(valueHtml);
+        sb.append(DocumentationMarkup.SECTION_END);
+    }
+
+    private void appendSectionWithLink(StringBuilder sb, String label, String text, String link) {
+        sb.append(DocumentationMarkup.SECTION_HEADER_START);
+        sb.append(label);
+        sb.append(DocumentationMarkup.SECTION_SEPARATOR);
+        sb.append("<p>");
+        DocumentationManagerUtil.createHyperlink(sb, link, text, false);
+        sb.append("</p>");
+        sb.append(DocumentationMarkup.SECTION_END);
     }
 
     private void appendStyled(StringBuilder sb, String text, TextAttributesKey key, EditorColorsScheme scheme, boolean bold) {
@@ -775,50 +889,180 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         sb.append("'>").append(escapeHtml(text)).append("</span>");
     }
 
-    private TextAttributesKey getColorForTypeKind(TypeKind kind) {
-        if (kind == null) return null;
+    // ==================== Doc Comment Parsing ====================
+
+    private String extractDescription(String docComment) {
+        if (docComment == null) return "";
+        // Remove @param, @returns, @see sections
+        String desc = docComment
+                .replaceAll("@param\\s+\\w+\\s+[^@]*", "")
+                .replaceAll("@returns?\\s+[^@]*", "")
+                .replaceAll("@see\\s+[^@]*", "")
+                .trim();
+        return desc;
+    }
+
+    private Map<String, String> parseParamDocs(String docComment) {
+        Map<String, String> params = new LinkedHashMap<>();
+        if (docComment == null) return params;
+
+        Matcher matcher = PARAM_PATTERN.matcher(docComment);
+        while (matcher.find()) {
+            String paramName = matcher.group(1);
+            String paramDesc = matcher.group(2).trim();
+            params.put(paramName, paramDesc);
+        }
+        return params;
+    }
+
+    private String parseReturns(String docComment) {
+        if (docComment == null) return null;
+        Matcher matcher = RETURNS_PATTERN.matcher(docComment);
+        if (matcher.find()) {
+            return matcher.group(1).trim();
+        }
+        return null;
+    }
+
+    private String formatDocComment(String docComment) {
+        if (docComment == null) return "";
+        return escapeHtml(docComment).replace("\n", "<br/>");
+    }
+
+    // ==================== Type/Kind Helpers ====================
+
+    private boolean isLikelyType(String text) {
+        if (text == null || text.isEmpty()) return false;
+        // Common Pascal type conventions
+        if (text.startsWith("T") && text.length() > 1 && Character.isUpperCase(text.charAt(1))) return true;
+        if (text.startsWith("I") && text.length() > 1 && Character.isUpperCase(text.charAt(1))) return true;
+        if (text.startsWith("E") && text.length() > 1 && Character.isUpperCase(text.charAt(1))) return true;
+        if (text.startsWith("P") && text.length() > 1 && Character.isUpperCase(text.charAt(1))) return true;
+        // Built-in types
+        return isPrimitiveType(text) || DelphiBuiltIns.isBuiltInType(text);
+    }
+
+    private boolean isPrimitiveType(String text) {
+        if (text == null) return false;
+        String lower = text.toLowerCase();
+        return lower.equals("integer") || lower.equals("string") || lower.equals("boolean") ||
+               lower.equals("byte") || lower.equals("word") || lower.equals("cardinal") ||
+               lower.equals("int64") || lower.equals("single") || lower.equals("double") ||
+               lower.equals("extended") || lower.equals("char") || lower.equals("shortint") ||
+               lower.equals("smallint") || lower.equals("longint") || lower.equals("longword") ||
+               lower.equals("real") || lower.equals("pointer") || lower.equals("variant");
+    }
+
+    private String getVariableKindLabel(VariableKind kind) {
+        if (kind == null) return "Variable";
         switch (kind) {
-            case CLASS:
-                return PascalSyntaxHighlighter.TYPE_CLASS;
-            case RECORD:
-                return PascalSyntaxHighlighter.TYPE_RECORD;
-            case INTERFACE:
-                return PascalSyntaxHighlighter.TYPE_INTERFACE;
-            case PROCEDURAL:
-                return PascalSyntaxHighlighter.TYPE_PROCEDURAL;
-            case ENUM:
-                return PascalSyntaxHighlighter.TYPE_ENUM;
-            case ALIAS:
-                return PascalSyntaxHighlighter.TYPE_SIMPLE;
-            default:
-                return null;
+            case GLOBAL: return "Global Variable";
+            case LOCAL: return "Local Variable";
+            case PARAMETER: return "Parameter";
+            case FIELD: return "Field";
+            case CONSTANT: return "Constant";
+            case THREADVAR: return "Thread Variable";
+            case LOOP_VAR: return "Loop Variable";
+            default: return "Variable";
         }
     }
 
-    private String colorToHex(Color color) {
-        return String.format("#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
+    private TextAttributesKey getColorForVariableKind(VariableKind kind) {
+        if (kind == null) return null;
+        switch (kind) {
+            case GLOBAL: return PascalSyntaxHighlighter.VAR_GLOBAL;
+            case LOCAL: return PascalSyntaxHighlighter.VAR_LOCAL;
+            case PARAMETER: return PascalSyntaxHighlighter.VAR_PARAMETER;
+            case FIELD: return PascalSyntaxHighlighter.VAR_FIELD;
+            case CONSTANT: return PascalSyntaxHighlighter.VAR_CONSTANT;
+            case THREADVAR: return PascalSyntaxHighlighter.VAR_THREADVAR;
+            case LOOP_VAR: return PascalSyntaxHighlighter.VAR_LOCAL;
+            default: return null;
+        }
     }
 
+    private TextAttributesKey getColorForTypeKind(TypeKind kind) {
+        if (kind == null) return null;
+        switch (kind) {
+            case CLASS: return PascalSyntaxHighlighter.TYPE_CLASS;
+            case RECORD: return PascalSyntaxHighlighter.TYPE_RECORD;
+            case INTERFACE: return PascalSyntaxHighlighter.TYPE_INTERFACE;
+            case PROCEDURAL: return PascalSyntaxHighlighter.TYPE_PROCEDURAL;
+            case ENUM: return PascalSyntaxHighlighter.TYPE_ENUM;
+            case ALIAS: return PascalSyntaxHighlighter.TYPE_SIMPLE;
+            default: return null;
+        }
+    }
+
+    private String getBuiltInDescription(String name) {
+        String lower = name.toLowerCase();
+
+        // Functions
+        switch (lower) {
+            case "assigned": return "Tests whether a pointer or procedural variable is <code>nil</code>. Returns <code>True</code> if not <code>nil</code>.";
+            case "length": return "Returns the number of elements in an array or characters in a string.";
+            case "setlength": return "Sets the length of a dynamic array or string.";
+            case "inc": return "Increments a variable by 1 or a specified amount.";
+            case "dec": return "Decrements a variable by 1 or a specified amount.";
+            case "ord": return "Returns the ordinal value of an ordinal-type expression.";
+            case "chr": return "Returns the character for a specified ordinal value.";
+            case "high": return "Returns the highest value in the range of an ordinal type or array.";
+            case "low": return "Returns the lowest value in the range of an ordinal type or array.";
+            case "sizeof": return "Returns the size in bytes of a type or variable.";
+            case "copy": return "Returns a substring or a copy of part of an array.";
+            case "pos": return "Searches for a substring in a string and returns its position.";
+            case "inttostr": return "Converts an integer to its string representation.";
+            case "strtoint": return "Converts a string to an integer.";
+            case "format": return "Formats a string with the specified arguments.";
+            case "freeandnil": return "Frees an object and sets its reference to <code>nil</code>.";
+        }
+
+        // Types
+        switch (lower) {
+            case "tobject": return "The ultimate ancestor class. All classes inherit from TObject.";
+            case "exception": return "Base class for all exception types.";
+            case "string": return "A managed string type (UnicodeString by default).";
+            case "integer": return "A signed 32-bit integer type.";
+            case "boolean": return "A Boolean type with values <code>True</code> and <code>False</code>.";
+            case "tstrings": return "Abstract base class for string list classes.";
+            case "tstringlist": return "A list of strings with sorting and searching capabilities.";
+            case "tlist": return "A list of pointers.";
+            case "tstream": return "Abstract base class for streaming data.";
+            case "tcomponent": return "Base class for all components.";
+            case "tpersistent": return "Base class for objects that have published properties.";
+        }
+
+        if (DelphiBuiltIns.isBuiltInFunction(name)) {
+            return "Built-in function from the System unit.";
+        } else if (DelphiBuiltIns.isBuiltInType(name)) {
+            return "Built-in type from the System unit.";
+        } else if (DelphiBuiltIns.isBuiltInConstant(name)) {
+            return "Built-in constant from the System unit.";
+        }
+        return "";
+    }
+
+    // ==================== Token Helpers ====================
+
     private boolean isBodyStartKeyword(IElementType type) {
-        return type == PascalTokenTypes.KW_PRIVATE
-                || type == PascalTokenTypes.KW_PROTECTED
-                || type == PascalTokenTypes.KW_PUBLIC
-                || type == PascalTokenTypes.KW_PUBLISHED
-                || type == PascalTokenTypes.KW_STRICT
-                || type == PascalTokenTypes.KW_VAR
-                || type == PascalTokenTypes.KW_CONST
-                || type == PascalTokenTypes.KW_TYPE
-                || type == PascalTokenTypes.KW_PROCEDURE
-                || type == PascalTokenTypes.KW_FUNCTION
-                || type == PascalTokenTypes.KW_CONSTRUCTOR
-                || type == PascalTokenTypes.KW_DESTRUCTOR
-                || type == PascalTokenTypes.KW_PROPERTY
-                || type == PascalTokenTypes.KW_OPERATOR
-                || type == PascalTokenTypes.KW_BEGIN;
+        return type == PascalTokenTypes.KW_PRIVATE ||
+               type == PascalTokenTypes.KW_PROTECTED ||
+               type == PascalTokenTypes.KW_PUBLIC ||
+               type == PascalTokenTypes.KW_PUBLISHED ||
+               type == PascalTokenTypes.KW_STRICT ||
+               type == PascalTokenTypes.KW_VAR ||
+               type == PascalTokenTypes.KW_CONST ||
+               type == PascalTokenTypes.KW_TYPE ||
+               type == PascalTokenTypes.KW_PROCEDURE ||
+               type == PascalTokenTypes.KW_FUNCTION ||
+               type == PascalTokenTypes.KW_CONSTRUCTOR ||
+               type == PascalTokenTypes.KW_DESTRUCTOR ||
+               type == PascalTokenTypes.KW_PROPERTY ||
+               type == PascalTokenTypes.KW_OPERATOR ||
+               type == PascalTokenTypes.KW_BEGIN;
     }
 
     private boolean isKeyword(IElementType type) {
-        // Simple check: keywords are PascalTokenType but not IDENTIFIER, and not literals/comments
         if (!(type instanceof PascalTokenType)) return false;
         if (type == PascalTokenTypes.IDENTIFIER) return false;
         if (type == PascalTokenTypes.STRING_LITERAL) return false;
@@ -829,16 +1073,21 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         if (type == PascalTokenTypes.LINE_COMMENT) return false;
         if (type == PascalTokenTypes.BLOCK_COMMENT) return false;
         if (type == PascalTokenTypes.COMPILER_DIRECTIVE) return false;
-        
-        // Also exclude symbols
+
         String name = type.toString();
-        if (name.equals("LPAREN") || name.equals("RPAREN") || name.equals("LBRACKET") || name.equals("RBRACKET")
-            || name.equals("COMMA") || name.equals("SEMI") || name.equals("DOT") || name.equals("COLON")
-            || name.equals("EQ") || name.equals("PLUS") || name.equals("MINUS") || name.equals("MULT") || name.equals("DIVIDE")) {
+        if (name.equals("LPAREN") || name.equals("RPAREN") || name.equals("LBRACKET") || name.equals("RBRACKET") ||
+            name.equals("COMMA") || name.equals("SEMI") || name.equals("DOT") || name.equals("COLON") ||
+            name.equals("EQ") || name.equals("PLUS") || name.equals("MINUS") || name.equals("MULT") || name.equals("DIVIDE")) {
             return false;
         }
 
         return true;
+    }
+
+    // ==================== Utility Methods ====================
+
+    private String colorToHex(Color color) {
+        return String.format("#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
     }
 
     private String escapeHtml(String text) {
@@ -852,7 +1101,6 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     @Override
     @Nullable
     public String getQuickNavigateInfo(PsiElement element, PsiElement originalElement) {
-        LOG.info("[PascalDoc] getQuickNavigateInfo called for element: " + element);
         if (element instanceof PascalTypeDefinition) {
             PascalTypeDefinition typeDef = (PascalTypeDefinition) element;
             return typeDef.getTypeKind().name().toLowerCase() + " " + typeDef.getName();

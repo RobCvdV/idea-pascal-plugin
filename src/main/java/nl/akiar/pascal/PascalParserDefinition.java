@@ -111,6 +111,29 @@ public class PascalParserDefinition implements ParserDefinition {
         if (node.getElementType() == PascalElementTypes.CLASS_TYPE_REFERENCE) {
             return new nl.akiar.pascal.psi.impl.PascalClassTypeReferenceImpl(node);
         }
+
+        // Statement types
+        if (node.getElementType() == PascalElementTypes.ASSIGNMENT_STATEMENT) {
+            return new nl.akiar.pascal.psi.impl.PascalAssignmentStatementImpl(node);
+        }
+        if (node.getElementType() == PascalElementTypes.IF_STATEMENT) {
+            return new nl.akiar.pascal.psi.impl.PascalIfStatementImpl(node);
+        }
+        if (node.getElementType() == PascalElementTypes.FOR_STATEMENT) {
+            return new nl.akiar.pascal.psi.impl.PascalForStatementImpl(node);
+        }
+
+        // Expression types
+        if (node.getElementType() == PascalElementTypes.BINARY_EXPRESSION) {
+            return new nl.akiar.pascal.psi.impl.PascalBinaryExpressionImpl(node);
+        }
+        if (node.getElementType() == PascalElementTypes.NAME_REFERENCE) {
+            return new nl.akiar.pascal.psi.impl.PascalNameReferenceImpl(node);
+        }
+        if (node.getElementType() == PascalElementTypes.ARGUMENT_LIST) {
+            return new nl.akiar.pascal.psi.impl.PascalArgumentListImpl(node);
+        }
+
         return new PascalPsiElement(node);
     }
 

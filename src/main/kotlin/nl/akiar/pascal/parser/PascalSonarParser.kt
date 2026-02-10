@@ -323,6 +323,48 @@ class PascalSonarParser : PsiParser {
             node.javaClass.simpleName.contains("VisibilitySection", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.VISIBILITY_SECTION
 
             // ============================================================================
+            // Statement Types (inside routine bodies)
+            // ============================================================================
+            node is org.sonar.plugins.communitydelphi.api.ast.CompoundStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.COMPOUND_STATEMENT
+            node is org.sonar.plugins.communitydelphi.api.ast.StatementListNode -> nl.akiar.pascal.psi.PascalElementTypes.STATEMENT_LIST
+            node is org.sonar.plugins.communitydelphi.api.ast.AssignmentStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.ASSIGNMENT_STATEMENT
+            node is org.sonar.plugins.communitydelphi.api.ast.ExpressionStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.EXPRESSION_STATEMENT
+            node is org.sonar.plugins.communitydelphi.api.ast.IfStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.IF_STATEMENT
+            node is org.sonar.plugins.communitydelphi.api.ast.WhileStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.WHILE_STATEMENT
+            node is org.sonar.plugins.communitydelphi.api.ast.ForToStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.FOR_STATEMENT
+            node is org.sonar.plugins.communitydelphi.api.ast.ForInStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.FOR_STATEMENT
+            node is org.sonar.plugins.communitydelphi.api.ast.RepeatStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.REPEAT_STATEMENT
+            node is org.sonar.plugins.communitydelphi.api.ast.CaseStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.CASE_STATEMENT
+            node is org.sonar.plugins.communitydelphi.api.ast.CaseItemStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.CASE_ITEM
+            node is org.sonar.plugins.communitydelphi.api.ast.TryStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.TRY_STATEMENT
+            node is org.sonar.plugins.communitydelphi.api.ast.ExceptBlockNode -> nl.akiar.pascal.psi.PascalElementTypes.EXCEPT_BLOCK
+            node is org.sonar.plugins.communitydelphi.api.ast.FinallyBlockNode -> nl.akiar.pascal.psi.PascalElementTypes.FINALLY_BLOCK
+            node is org.sonar.plugins.communitydelphi.api.ast.WithStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.WITH_STATEMENT
+            node is org.sonar.plugins.communitydelphi.api.ast.RaiseStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.RAISE_STATEMENT
+
+            // ============================================================================
+            // Expression Types (only inside routine bodies/statements)
+            // ============================================================================
+            // Note: These are only mapped when inside a statement context to avoid
+            // interfering with type declarations, property specifiers, etc.
+            node is org.sonar.plugins.communitydelphi.api.ast.BinaryExpressionNode && isInsideRoutineBody(node) ->
+                nl.akiar.pascal.psi.PascalElementTypes.BINARY_EXPRESSION
+            node is org.sonar.plugins.communitydelphi.api.ast.UnaryExpressionNode && isInsideRoutineBody(node) ->
+                nl.akiar.pascal.psi.PascalElementTypes.UNARY_EXPRESSION
+            node is org.sonar.plugins.communitydelphi.api.ast.PrimaryExpressionNode && isInsideRoutineBody(node) ->
+                nl.akiar.pascal.psi.PascalElementTypes.PRIMARY_EXPRESSION
+            node is org.sonar.plugins.communitydelphi.api.ast.ParenthesizedExpressionNode && isInsideRoutineBody(node) ->
+                nl.akiar.pascal.psi.PascalElementTypes.PAREN_EXPRESSION
+            node is org.sonar.plugins.communitydelphi.api.ast.NameReferenceNode && isInsideRoutineBody(node) ->
+                nl.akiar.pascal.psi.PascalElementTypes.NAME_REFERENCE
+            node is org.sonar.plugins.communitydelphi.api.ast.ArgumentListNode && isInsideRoutineBody(node) ->
+                nl.akiar.pascal.psi.PascalElementTypes.ARGUMENT_LIST
+            node is org.sonar.plugins.communitydelphi.api.ast.ArgumentNode && isInsideRoutineBody(node) ->
+                nl.akiar.pascal.psi.PascalElementTypes.ARGUMENT
+            node is org.sonar.plugins.communitydelphi.api.ast.ArrayAccessorNode && isInsideRoutineBody(node) ->
+                nl.akiar.pascal.psi.PascalElementTypes.ARRAY_ACCESS
+
+            // ============================================================================
             // Enum Elements
             // ============================================================================
             node.javaClass.simpleName.contains("EnumElement", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.ENUM_ELEMENT
@@ -627,6 +669,35 @@ class PascalSonarParser : PsiParser {
         while (!builder.eof()) {
             builder.advanceLexer()
         }
+    }
+
+    /**
+     * Check if a node is inside a routine body (statement context).
+     * This is used to restrict expression element types to only appear inside executable code,
+     * not in type declarations, property specifiers, etc.
+     */
+    private fun isInsideRoutineBody(node: org.sonar.plugins.communitydelphi.api.ast.DelphiNode): Boolean {
+        var current: org.sonar.plugins.communitydelphi.api.ast.DelphiNode? = node.parent
+        while (current != null) {
+            val simpleName = current.javaClass.simpleName
+            // Check for routine body or statement nodes
+            if (simpleName.contains("RoutineBody", ignoreCase = true) ||
+                simpleName.contains("Statement", ignoreCase = true) ||
+                simpleName.contains("CompoundStatement", ignoreCase = true)) {
+                return true
+            }
+            // Stop at declaration boundaries - don't go outside the routine
+            if (simpleName.contains("RoutineDeclaration", ignoreCase = true) ||
+                simpleName.contains("RoutineImplementation", ignoreCase = true) ||
+                simpleName.contains("TypeDeclaration", ignoreCase = true) ||
+                simpleName.contains("VarSection", ignoreCase = true) ||
+                simpleName.contains("ConstSection", ignoreCase = true) ||
+                simpleName.contains("InterfaceSection", ignoreCase = true)) {
+                return false
+            }
+            current = current.parent
+        }
+        return false
     }
 
     /**

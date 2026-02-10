@@ -266,4 +266,128 @@ public interface PascalElementTypes {
      * Element type for interface GUID declarations ['{GUID-STRING}'].
      */
     com.intellij.psi.tree.IElementType INTERFACE_GUID = new nl.akiar.pascal.PascalTokenType("INTERFACE_GUID");
+
+    // ============================================================================
+    // Statement Element Types
+    // ============================================================================
+
+    /**
+     * Element type for compound statements (BEGIN...END blocks).
+     */
+    com.intellij.psi.tree.IElementType COMPOUND_STATEMENT = new nl.akiar.pascal.PascalTokenType("COMPOUND_STATEMENT");
+
+    /**
+     * Element type for statement lists (sequence of statements).
+     */
+    com.intellij.psi.tree.IElementType STATEMENT_LIST = new nl.akiar.pascal.PascalTokenType("STATEMENT_LIST");
+
+    /**
+     * Element type for assignment statements (variable := expression).
+     */
+    com.intellij.psi.tree.IElementType ASSIGNMENT_STATEMENT = new nl.akiar.pascal.PascalTokenType("ASSIGNMENT_STATEMENT");
+
+    /**
+     * Element type for expression statements (procedure/function calls as statements).
+     */
+    com.intellij.psi.tree.IElementType EXPRESSION_STATEMENT = new nl.akiar.pascal.PascalTokenType("EXPRESSION_STATEMENT");
+
+    /**
+     * Element type for if statements (if/then/else).
+     */
+    com.intellij.psi.tree.IElementType IF_STATEMENT = new nl.akiar.pascal.PascalTokenType("IF_STATEMENT");
+
+    /**
+     * Element type for while statements (while loops).
+     */
+    com.intellij.psi.tree.IElementType WHILE_STATEMENT = new nl.akiar.pascal.PascalTokenType("WHILE_STATEMENT");
+
+    /**
+     * Element type for for statements (for-to and for-in loops).
+     */
+    com.intellij.psi.tree.IElementType FOR_STATEMENT = new nl.akiar.pascal.PascalTokenType("FOR_STATEMENT");
+
+    /**
+     * Element type for repeat statements (repeat/until loops).
+     */
+    com.intellij.psi.tree.IElementType REPEAT_STATEMENT = new nl.akiar.pascal.PascalTokenType("REPEAT_STATEMENT");
+
+    /**
+     * Element type for case statements (case/of).
+     */
+    com.intellij.psi.tree.IElementType CASE_STATEMENT = new nl.akiar.pascal.PascalTokenType("CASE_STATEMENT");
+
+    /**
+     * Element type for individual case items.
+     */
+    com.intellij.psi.tree.IElementType CASE_ITEM = new nl.akiar.pascal.PascalTokenType("CASE_ITEM");
+
+    /**
+     * Element type for try statements (try/except/finally).
+     */
+    com.intellij.psi.tree.IElementType TRY_STATEMENT = new nl.akiar.pascal.PascalTokenType("TRY_STATEMENT");
+
+    /**
+     * Element type for except blocks.
+     */
+    com.intellij.psi.tree.IElementType EXCEPT_BLOCK = new nl.akiar.pascal.PascalTokenType("EXCEPT_BLOCK");
+
+    /**
+     * Element type for finally blocks.
+     */
+    com.intellij.psi.tree.IElementType FINALLY_BLOCK = new nl.akiar.pascal.PascalTokenType("FINALLY_BLOCK");
+
+    /**
+     * Element type for with statements.
+     */
+    com.intellij.psi.tree.IElementType WITH_STATEMENT = new nl.akiar.pascal.PascalTokenType("WITH_STATEMENT");
+
+    /**
+     * Element type for raise statements.
+     */
+    com.intellij.psi.tree.IElementType RAISE_STATEMENT = new nl.akiar.pascal.PascalTokenType("RAISE_STATEMENT");
+
+    // ============================================================================
+    // Expression Element Types
+    // ============================================================================
+
+    /**
+     * Element type for binary expressions (a + b, a and b, etc.).
+     */
+    com.intellij.psi.tree.IElementType BINARY_EXPRESSION = new nl.akiar.pascal.PascalTokenType("BINARY_EXPRESSION");
+
+    /**
+     * Element type for unary expressions (not a, -a, @a, etc.).
+     */
+    com.intellij.psi.tree.IElementType UNARY_EXPRESSION = new nl.akiar.pascal.PascalTokenType("UNARY_EXPRESSION");
+
+    /**
+     * Element type for primary expressions (identifiers, literals).
+     */
+    com.intellij.psi.tree.IElementType PRIMARY_EXPRESSION = new nl.akiar.pascal.PascalTokenType("PRIMARY_EXPRESSION");
+
+    /**
+     * Element type for parenthesized expressions ((expr)).
+     */
+    com.intellij.psi.tree.IElementType PAREN_EXPRESSION = new nl.akiar.pascal.PascalTokenType("PAREN_EXPRESSION");
+
+    /**
+     * Element type for name references (identifier chains like a.b.c).
+     * Covers qualified references, member access, and simple identifiers.
+     */
+    com.intellij.psi.tree.IElementType NAME_REFERENCE = new nl.akiar.pascal.PascalTokenType("NAME_REFERENCE");
+
+    /**
+     * Element type for argument lists in function/procedure calls.
+     */
+    com.intellij.psi.tree.IElementType ARGUMENT_LIST = new nl.akiar.pascal.PascalTokenType("ARGUMENT_LIST");
+
+    /**
+     * Element type for individual arguments.
+     */
+    com.intellij.psi.tree.IElementType ARGUMENT = new nl.akiar.pascal.PascalTokenType("ARGUMENT");
+
+    /**
+     * Element type for array access (array[index]).
+     */
+    com.intellij.psi.tree.IElementType ARRAY_ACCESS = new nl.akiar.pascal.PascalTokenType("ARRAY_ACCESS");
 }

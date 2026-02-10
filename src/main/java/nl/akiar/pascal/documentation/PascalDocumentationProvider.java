@@ -16,6 +16,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiNameIdentifierOwner;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.tree.IElementType;
@@ -78,7 +79,7 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     @Override
     @Nullable
     public PsiElement getCustomDocumentationElement(@NotNull Editor editor, @NotNull PsiFile file, @Nullable PsiElement contextElement, int targetOffset) {
-        LOG.info("[MemberTraversal] Doc:getCustomDocumentationElement element='" + (contextElement != null ? contextElement.getText() : "<null>") + "' file='" + file.getName() + "'");
+        LOG.info("[PascalDoc] getCustomDocumentationElement element='" + (contextElement != null ? contextElement.getText() : "<null>") + "' file='" + file.getName() + "'");
         if (contextElement != null && contextElement.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
             String name = contextElement.getText();
 
@@ -88,9 +89,8 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 return contextElement;
             }
 
-            PsiElement parent = contextElement.getParent();
-
             // Check if UNIT_REFERENCE
+            PsiElement parent = contextElement.getParent();
             if (parent != null && parent.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
                 LOG.info("[PascalDoc] Unit reference detected: " + parent.getText());
                 return parent;
@@ -109,13 +109,9 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             }
 
             // Check if the context element is a name identifier of a declaration
-            if (parent instanceof PascalVariableDefinition ||
-                parent instanceof PascalTypeDefinition ||
-                parent instanceof PascalRoutine ||
-                parent instanceof PascalProperty) {
-                if (((com.intellij.psi.PsiNameIdentifierOwner) parent).getNameIdentifier() == contextElement) {
-                    return parent;
-                }
+            PsiNameIdentifierOwner owner = com.intellij.psi.util.PsiTreeUtil.getParentOfType(contextElement, PsiNameIdentifierOwner.class);
+            if (owner != null && owner.getNameIdentifier() == contextElement) {
+                return redirectForwardDeclaration((PsiElement) owner);
             }
 
             // Check if it resolves via reference
@@ -123,19 +119,18 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             for (PsiReference ref : refs) {
                 PsiElement resolved = ref.resolve();
                 if (resolved != null) {
-                    return resolved;
+                    return redirectForwardDeclaration(resolved);
                 }
             }
 
             // For member access, use chain resolution
             if (isMemberAccess) {
-                LOG.info("[MemberTraversal] Doc: member access detected; attempting chain resolve");
+                LOG.info("[PascalDoc] Member access detected; attempting chain resolve");
                 PsiElement chainResolved = MemberChainResolver.resolveElement(contextElement);
                 if (chainResolved != null) {
-                    LOG.info("[MemberTraversal] Doc: chain resolved -> " + chainResolved.getClass().getSimpleName());
-                    return chainResolved;
+                    LOG.info("[PascalDoc] Chain resolved -> " + chainResolved.getClass().getSimpleName());
+                    return redirectForwardDeclaration(chainResolved);
                 }
-                LOG.info("[MemberTraversal] Doc: chain unresolved -> no global fallback");
                 return contextElement;
             }
 
@@ -146,6 +141,8 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             if (bestType != null) {
                 return bestType;
             }
+            
+            // ... (rest of the method follows)
 
             PsiFile currentFile = contextElement.getContainingFile();
             int offset = contextElement.getTextOffset();
@@ -290,6 +287,44 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         return sb.toString();
     }
 
+    private PsiElement redirectForwardDeclaration(PsiElement element) {
+        if (element instanceof PascalTypeDefinition && ((PascalTypeDefinition) element).isForwardDeclaration()) {
+            PascalTypeDefinition counterpart = findTypeCounterpart((PascalTypeDefinition) element);
+            if (counterpart != null && !counterpart.isForwardDeclaration()) {
+                LOG.info("[PascalDoc] Redirecting from forward declaration to full definition: " + ((PascalTypeDefinition) element).getName());
+                return counterpart;
+            }
+        }
+        return element;
+    }
+
+    @Nullable
+    private PascalTypeDefinition findTypeCounterpart(PascalTypeDefinition typeDef) {
+        String name = typeDef.getName();
+        if (name == null) return null;
+
+        PsiFile file = typeDef.getContainingFile();
+        if (file == null) return null;
+
+        // Search for the same type name in the same file
+        PascalTypeIndex.TypeLookupResult result =
+                PascalTypeIndex.findTypesWithUsesValidation(name, file, typeDef.getTextOffset());
+
+        PascalTypeDefinition candidateWithDoc = null;
+        PascalTypeDefinition anyOther = null;
+        for (PascalTypeDefinition other : result.getInScopeTypes()) {
+            if (other != typeDef && other.getContainingFile() == file) {
+                if (anyOther == null) anyOther = other;
+                String doc = other.getDocComment();
+                if (doc != null && !doc.isEmpty()) {
+                    candidateWithDoc = other;
+                    break;
+                }
+            }
+        }
+        return candidateWithDoc != null ? candidateWithDoc : anyOther;
+    }
+
     private String generateTypeDoc(PascalTypeDefinition typeDef) {
         StringBuilder sb = new StringBuilder();
         Project project = typeDef.getProject();
@@ -301,6 +336,14 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
 
         // Content section (doc comment)
         String docComment = typeDef.getDocComment();
+        if (docComment == null || docComment.isEmpty()) {
+            // Fallback to the counterpart (full declaration if this is forward, or vice versa)
+            PascalTypeDefinition counterpart = findTypeCounterpart(typeDef);
+            if (counterpart != null) {
+                docComment = counterpart.getDocComment();
+            }
+        }
+
         if (docComment != null && !docComment.isEmpty()) {
             sb.append(DocumentationMarkup.CONTENT_START);
             sb.append(formatDocComment(docComment));
@@ -634,35 +677,7 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     }
 
     private String buildTypeSignature(PascalTypeDefinition typeDef) {
-        StringBuilder sig = new StringBuilder();
-        ASTNode node = typeDef.getNode();
-        ASTNode child = node.getFirstChildNode();
-        TypeKind kind = typeDef.getTypeKind();
-        boolean foundKindKeyword = false;
-
-        while (child != null) {
-            IElementType type = child.getElementType();
-            String text = child.getText();
-
-            if (type == PascalTokenTypes.SEMI) {
-                sig.append(";");
-                break;
-            }
-
-            if (kind == TypeKind.CLASS || kind == TypeKind.RECORD || kind == TypeKind.INTERFACE) {
-                if (foundKindKeyword && isBodyStartKeyword(type)) {
-                    break;
-                }
-                if (type == PascalTokenTypes.KW_CLASS || type == PascalTokenTypes.KW_RECORD || type == PascalTokenTypes.KW_INTERFACE) {
-                    foundKindKeyword = true;
-                }
-            }
-
-            sig.append(text);
-            child = child.getTreeNext();
-        }
-
-        return sig.toString().trim();
+        return typeDef.getDeclarationHeader();
     }
 
     private String buildRoutineSignature(PascalRoutine routine) {
@@ -1068,21 +1083,16 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     // ==================== Token Helpers ====================
 
     private boolean isBodyStartKeyword(IElementType type) {
-        return type == PascalTokenTypes.KW_PRIVATE ||
-               type == PascalTokenTypes.KW_PROTECTED ||
-               type == PascalTokenTypes.KW_PUBLIC ||
-               type == PascalTokenTypes.KW_PUBLISHED ||
-               type == PascalTokenTypes.KW_STRICT ||
-               type == PascalTokenTypes.KW_VAR ||
-               type == PascalTokenTypes.KW_CONST ||
-               type == PascalTokenTypes.KW_TYPE ||
-               type == PascalTokenTypes.KW_PROCEDURE ||
-               type == PascalTokenTypes.KW_FUNCTION ||
-               type == PascalTokenTypes.KW_CONSTRUCTOR ||
-               type == PascalTokenTypes.KW_DESTRUCTOR ||
-               type == PascalTokenTypes.KW_PROPERTY ||
-               type == PascalTokenTypes.KW_OPERATOR ||
-               type == PascalTokenTypes.KW_BEGIN;
+        if (type == null) return false;
+        String s = type.toString();
+        if (s.startsWith("PascalTokenType.")) {
+            s = s.substring("PascalTokenType.".length());
+        }
+        return s.equals("PRIVATE") || s.equals("PROTECTED") || s.equals("PUBLIC") || s.equals("PUBLISHED") ||
+               s.equals("STRICT") || s.equals("VAR") || s.equals("CONST") || s.equals("TYPE") ||
+               s.equals("PROCEDURE") || s.equals("FUNCTION") || s.equals("CONSTRUCTOR") || s.equals("DESTRUCTOR") ||
+               s.equals("PROPERTY") || s.equals("OPERATOR") || s.equals("BEGIN") ||
+               s.equals("VISIBILITY_SECTION") || s.equals("CLASS_BODY") || s.equals("RECORD_BODY") || s.equals("INTERFACE_BODY");
     }
 
     private boolean isKeyword(IElementType type) {

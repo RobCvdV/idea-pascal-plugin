@@ -186,16 +186,21 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
                 inBracket = true;
             } else if (type == PascalTokenTypes.RBRACKET) {
                 inBracket = false;
-            } else if (type == PascalTokenTypes.IDENTIFIER && !inBracket) {
-                return child.getPsi();
+            } else if (!inBracket && nl.akiar.pascal.psi.PsiUtil.findFirstRecursiveAnyOf(child, nl.akiar.pascal.psi.PsiUtil.IDENTIFIER_LIKE_TYPES) != null) {
+                // Check if this child itself is an identifier or contains one (for soft keywords)
+                ASTNode idNode = nl.akiar.pascal.psi.PsiUtil.findFirstRecursiveAnyOf(child, nl.akiar.pascal.psi.PsiUtil.IDENTIFIER_LIKE_TYPES);
+                if (idNode != null) return idNode.getPsi();
             } else if (type == PascalTokenTypes.EQ) {
                 // Reached '=' without finding identifier - shouldn't happen in valid code
                 break;
             }
         }
 
-        // Fallback: use recursive search (original behavior)
-        ASTNode identifierNode = nl.akiar.pascal.psi.PsiUtil.findFirstRecursive(getNode(), nl.akiar.pascal.PascalTokenTypes.IDENTIFIER);
+        // Fallback: use recursive search
+        ASTNode identifierNode = nl.akiar.pascal.psi.PsiUtil.findFirstRecursiveAnyOf(
+            getNode(),
+            nl.akiar.pascal.psi.PsiUtil.IDENTIFIER_LIKE_TYPES
+        );
         if (identifierNode != null) {
             return identifierNode.getPsi();
         }
@@ -267,57 +272,62 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
     @Override
     @NotNull
     public String getDeclarationHeader() {
-        ASTNode node = getNode();
         StringBuilder sb = new StringBuilder();
-        ASTNode child = node.getFirstChildNode();
-        TypeKind kind = getTypeKind();
-        boolean foundKindKeyword = false;
-
-        while (child != null) {
-            IElementType type = child.getElementType();
-
-            // Stop at semicolon
-            if (type == PascalTokenTypes.SEMI) {
-                sb.append(";");
-                break;
-            }
-
-            // For structured types, stop at keywords that start the body
-            if (kind == TypeKind.CLASS || kind == TypeKind.RECORD || kind == TypeKind.INTERFACE) {
-                if (foundKindKeyword) {
-                    if (isBodyStartKeyword(type)) {
-                        break;
-                    }
-                } else {
-                    if (type == PascalTokenTypes.KW_CLASS || type == PascalTokenTypes.KW_RECORD || type == PascalTokenTypes.KW_INTERFACE) {
-                        foundKindKeyword = true;
-                    }
-                }
-            }
-
-            sb.append(child.getText());
-            child = child.getTreeNext();
-        }
-
+        boolean[] state = {false, false}; // [foundKindKeyword, stop]
+        buildSignatureRec(getNode(), sb, getTypeKind(), state);
         return sb.toString().trim();
     }
 
+    private void buildSignatureRec(ASTNode node, StringBuilder sb, TypeKind kind, boolean[] state) {
+        if (state[1]) return;
+
+        IElementType type = node.getElementType();
+        
+        if (type == PascalTokenTypes.SEMI) {
+            sb.append(";");
+            state[1] = true;
+            return;
+        }
+
+        if (kind == TypeKind.CLASS || kind == TypeKind.RECORD || kind == TypeKind.INTERFACE) {
+            if (state[0] && isBodyStartKeyword(type)) {
+                state[1] = true;
+                return;
+            }
+            if (isKindKeyword(type)) {
+                state[0] = true;
+            }
+        }
+
+        if (node.getFirstChildNode() == null) {
+            sb.append(node.getText());
+        } else {
+            for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+                buildSignatureRec(child, sb, kind, state);
+                if (state[1]) break;
+            }
+        }
+    }
+
+    private boolean isKindKeyword(IElementType type) {
+        if (type == null) return false;
+        String s = type.toString();
+        return s.endsWith(".KW_CLASS") || s.endsWith(".CLASS") || s.endsWith(".CLASS_TYPE") ||
+               s.endsWith(".KW_RECORD") || s.endsWith(".RECORD") || s.endsWith(".RECORD_TYPE") ||
+               s.endsWith(".KW_INTERFACE") || s.endsWith(".INTERFACE") || s.endsWith(".INTERFACE_TYPE");
+    }
+
     private boolean isBodyStartKeyword(IElementType type) {
-        return type == PascalTokenTypes.KW_PRIVATE
-                || type == PascalTokenTypes.KW_PROTECTED
-                || type == PascalTokenTypes.KW_PUBLIC
-                || type == PascalTokenTypes.KW_PUBLISHED
-                || type == PascalTokenTypes.KW_STRICT
-                || type == PascalTokenTypes.KW_VAR
-                || type == PascalTokenTypes.KW_CONST
-                || type == PascalTokenTypes.KW_TYPE
-                || type == PascalTokenTypes.KW_PROCEDURE
-                || type == PascalTokenTypes.KW_FUNCTION
-                || type == PascalTokenTypes.KW_CONSTRUCTOR
-                || type == PascalTokenTypes.KW_DESTRUCTOR
-                || type == PascalTokenTypes.KW_PROPERTY
-                || type == PascalTokenTypes.KW_OPERATOR
-                || type == PascalTokenTypes.KW_BEGIN;
+        if (type == null) return false;
+        String s = type.toString();
+        if (s.startsWith("PascalTokenType.")) {
+            s = s.substring("PascalTokenType.".length());
+        }
+        return s.equals("PRIVATE") || s.equals("PROTECTED") || s.equals("PUBLIC") || s.equals("PUBLISHED") ||
+               s.equals("STRICT") || s.equals("VAR") || s.equals("CONST") || s.equals("TYPE") ||
+               s.equals("PROCEDURE") || s.equals("FUNCTION") || s.equals("CONSTRUCTOR") || s.equals("DESTRUCTOR") ||
+               s.equals("PROPERTY") || s.equals("OPERATOR") || s.equals("BEGIN") ||
+               s.equals("VISIBILITY_SECTION") || s.equals("CLASS_BODY") || s.equals("RECORD_BODY") || s.equals("INTERFACE_BODY");
     }
 
     @Override
@@ -632,44 +642,32 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
             return false;
         }
 
-        // A forward declaration looks like: TMyClass = class;
-        // The type keyword is immediately followed by a semicolon (with possible whitespace)
-        // It has no parent class and no body.
-        //
-        // Strategy: After finding the type keyword (class/record/interface),
-        // check if the next non-whitespace token is a semicolon.
-        ASTNode node = getNode();
-        boolean foundTypeKeyword = false;
+        // Check if there are body tokens
+        boolean[] state = {false, false}; // [foundKindKeyword, foundBodyToken]
+        containsBodyToken(getNode(), state);
 
-        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
-            IElementType type = child.getElementType();
+        // If we found kind keyword but did NOT find any body tokens, it's a forward declaration
+        return state[0] && !state[1];
+    }
 
-            // Look for the type keyword
-            if (type == PascalTokenTypes.KW_CLASS ||
-                type == PascalTokenTypes.KW_RECORD ||
-                type == PascalTokenTypes.KW_INTERFACE ||
-                type == PascalTokenTypes.KW_DISPINTERFACE) {
-                foundTypeKeyword = true;
-                continue;
-            }
+    private void containsBodyToken(ASTNode node, boolean[] state) {
+        if (state[1]) return; // already found a body token
 
-            // Skip whitespace after keyword
-            if (foundTypeKeyword && type == PascalTokenTypes.WHITE_SPACE) {
-                continue;
-            }
-
-            // After keyword, if we hit a semicolon immediately, it's a forward declaration
-            if (foundTypeKeyword && type == PascalTokenTypes.SEMI) {
-                return true;
-            }
-
-            // If we hit anything else after the keyword (LPAREN for parent, body elements, etc.),
-            // it's not a forward declaration
-            if (foundTypeKeyword) {
-                return false;
+        IElementType type = node.getElementType();
+        if (isKindKeyword(type)) {
+            state[0] = true;
+        } else if (state[0]) {
+            // Check for body start OR other non-ignored tokens that indicate it's not a forward decl
+            // (like parentheses for parents)
+            if (isBodyStartKeyword(type) || type == PascalTokenTypes.LPAREN) {
+                state[1] = true;
+                return;
             }
         }
-
-        return false;
+        
+        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            containsBodyToken(child, state);
+            if (state[1]) break;
+        }
     }
 }

@@ -28,6 +28,14 @@ object MemberChainResolver {
     private val LOG = Logger.getInstance(MemberChainResolver::class.java)
     private val LOG_ENABLED = java.lang.Boolean.getBoolean("pascal.memberTraversal.logging")
 
+    private class LruCache<K, V>(val maxSize: Int) : java.util.LinkedHashMap<K, V>(maxSize, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?): Boolean {
+            return size > maxSize
+        }
+    }
+
+    private val FILE_RESOLUTION_CACHE: Key<LruCache<String, Any?>> = Key.create("pascal.file.resolution.cache")
+
     // Short-lived memo for chains to avoid repeated resolves during daemon passes
     private data class ChainKey(val filePath: String?, val startOffset: Int, val chainText: String)
     private val chainMemo = java.util.concurrent.ConcurrentHashMap<ChainKey, PsiElement?>()
@@ -231,6 +239,18 @@ object MemberChainResolver {
             val results = MutableList<PsiElement?>(chain.size) { null }
             if (chain.isEmpty()) return results
 
+            val cache = originFile.getUserData(FILE_RESOLUTION_CACHE) ?: LruCache<String, Any?>(100).also {
+                originFile.putUserData(FILE_RESOLUTION_CACHE, it)
+            }
+            val chainText = chain.joinToString(".") { it.text }
+            val modCount = originFile.manager.modificationTracker.modificationCount
+            val cacheKey = "$chainText@$modCount"
+
+            val cached = cache[cacheKey] as? List<PsiElement?>
+            if (cached != null && cached.size == chain.size) {
+                return cached
+            }
+
             val first = chain.first()
             maybeLog("[MemberTraversal] resolving first '${first.text}' at offset=${first.textOffset}", originFile)
 
@@ -319,6 +339,7 @@ object MemberChainResolver {
                     }
                 }
             }
+            cache[cacheKey] = results
             return results
         } finally {
             PerformanceMetrics.record("MemberChainResolver.resolveChainElements", System.nanoTime() - start)
@@ -531,115 +552,145 @@ object MemberChainResolver {
     }
 
     private fun findMemberInType(typeDef: PascalTypeDefinition, name: String, callSiteFile: PsiFile, includeAncestors: Boolean): PsiElement? {
-        // Collect all owner type names using cached inheritance chain
-        val owners = mutableSetOf<String>()
-        typeDef.name?.let { owners.add(it) }
-        if (includeAncestors) {
-            // Use cached inheritance chain for ancestor lookup
-            val ancestors = InheritanceChainCache.getAllAncestorTypes(typeDef)
-            ancestors.forEach { it.name?.let { n -> owners.add(n) } }
-        }
-
-        // Search for fields (variables) in the index
-        val fields = PascalVariableIndex.findVariables(name, callSiteFile.project)
-        val field = fields.firstOrNull { v ->
-            v.variableKind == nl.akiar.pascal.psi.VariableKind.FIELD &&
-            v.containingClass?.name?.let { owners.contains(it) } == true
-        }
-        if (field != null) return field
-
-        // Search for properties in the index
-        val props = PascalPropertyIndex.findProperties(name, callSiteFile.project)
-        val prop = props.firstOrNull { p ->
-            val owner = p.containingClass?.name
-            owner != null && owners.contains(owner)
-        }
-        if (prop != null) return prop
-
-        // Search for routines in the index
-        val routines = PascalRoutineIndex.findRoutines(name, callSiteFile.project)
-        val routine = routines.firstOrNull { r ->
-            val ownerName = r.containingClassName
-            ownerName != null && owners.contains(ownerName)
-        }
-        if (routine != null) return routine
-
-        // Skip file scanning if indices are not ready
-        if (DumbService.isDumb(callSiteFile.project)) {
-            maybeLog("[MemberTraversal] dumb mode: skip PSI scan for '$name' in type='${typeDef.name}'", callSiteFile)
-            return null
-        }
-
-        // Index miss: try to scan the owning unit file for a matching member
         val project = callSiteFile.project
-        val ownerUnit = typeDef.unitName
-        if (!ownerUnit.isNullOrBlank()) {
-            val vf = nl.akiar.pascal.project.PascalProjectService.getInstance(project).resolveUnit(ownerUnit, true)
-            if (vf != null) {
-                val psi = com.intellij.psi.PsiManager.getInstance(project).findFile(vf)
-                if (psi != null) {
-                    // Try fields first
-                    val fileFields = PsiTreeUtil.findChildrenOfType(psi, PascalVariableDefinition::class.java)
-                    val fHit = fileFields.firstOrNull { f ->
-                        f.name.equals(name, true) &&
-                        f.variableKind == nl.akiar.pascal.psi.VariableKind.FIELD &&
-                        f.containingClass?.name?.let { owners.contains(it) } == true
-                    }
-                    if (fHit != null) {
-                        maybeLog("[MemberTraversal] member '$name' (scan) -> PascalVariableDefinitionImpl in unit=${ownerUnit}", callSiteFile)
-                        return fHit
-                    }
-                    // Try properties
-                    val fileProps = PsiTreeUtil.findChildrenOfType(psi, PascalProperty::class.java)
-                    val pHit = fileProps.firstOrNull { p -> p.name.equals(name, true) && p.containingClass?.name?.let { owners.contains(it) } == true }
-                    if (pHit != null) {
-                        maybeLog("[MemberTraversal] member '$name' (scan) -> PascalPropertyImpl in unit=${ownerUnit}", callSiteFile)
-                        return pHit
-                    }
-                    // Then routines
-                    val fileRoutines = PsiTreeUtil.findChildrenOfType(psi, PascalRoutine::class.java)
-                    val rHit = fileRoutines.firstOrNull { r -> r.name.equals(name, true) && (r.containingClassName?.let { owners.contains(it) } == true || r.containingClass?.name?.let { owners.contains(it) } == true) }
-                    if (rHit != null) {
-                        maybeLog("[MemberTraversal] member '$name' (scan) -> PascalRoutineImpl in unit=${ownerUnit}", callSiteFile)
-                        return rHit
-                    }
+        val callSiteUnit = nl.akiar.pascal.psi.PsiUtil.getUnitName(callSiteFile)
+
+        // Collect all owner type names using cached inheritance chain
+        val owners = mutableListOf<PascalTypeDefinition>()
+        owners.add(typeDef)
+        if (includeAncestors) {
+            owners.addAll(InheritanceChainCache.getAllAncestorTypes(typeDef))
+        }
+
+        for (ownerType in owners) {
+            val ownerName = ownerType.name ?: continue
+            val ownerUnit = ownerType.unitName ?: continue
+
+            // 1. Try Scoped Indexes (Deterministic)
+            // Fields
+            val fieldKey = nl.akiar.pascal.stubs.PascalScopedMemberIndex.compositeKey(ownerUnit, ownerName, name, "field")
+            val fields = com.intellij.psi.stubs.StubIndex.getElements(
+                nl.akiar.pascal.stubs.PascalScopedMemberIndex.FIELD_KEY,
+                fieldKey, project, com.intellij.psi.search.GlobalSearchScope.allScope(project),
+                PascalVariableDefinition::class.java
+            )
+            val field = fields.firstOrNull { isVisible(it, callSiteFile) }
+            if (field != null) return field
+
+            // Properties
+            val propKey = nl.akiar.pascal.stubs.PascalScopedMemberIndex.compositeKey(ownerUnit, ownerName, name, "property")
+            val props = com.intellij.psi.stubs.StubIndex.getElements(
+                nl.akiar.pascal.stubs.PascalScopedMemberIndex.PROPERTY_KEY,
+                propKey, project, com.intellij.psi.search.GlobalSearchScope.allScope(project),
+                PascalProperty::class.java
+            )
+            val prop = props.firstOrNull { isVisible(it, callSiteFile) }
+            if (prop != null) return prop
+
+            // Routines
+            val routineKey = "${ownerUnit}#${ownerName}#${name}".lowercase()
+            val routines = nl.akiar.pascal.stubs.PascalScopedRoutineIndex.find(routineKey, project)
+            val routine = routines.firstOrNull { isVisible(it, callSiteFile) }
+            if (routine != null) return routine
+        }
+
+        // 2. Strict unit-local PSI scan as last-resort fallback
+        if (!DumbService.isDumb(project)) {
+            val ownerUnit = typeDef.unitName
+            if (!ownerUnit.isNullOrBlank() && ownerUnit.equals(callSiteUnit, ignoreCase = true)) {
+                // Same unit: scan PSI
+                val fileFields = PsiTreeUtil.findChildrenOfType(callSiteFile, PascalVariableDefinition::class.java)
+                val fHit = fileFields.firstOrNull { f ->
+                    f.name.equals(name, true) &&
+                    f.variableKind == nl.akiar.pascal.psi.VariableKind.FIELD &&
+                    f.containingClass?.name?.let { ownerName -> owners.any { it.name.equals(ownerName, true) } } == true &&
+                    isVisible(f, callSiteFile)
                 }
+                if (fHit != null) return fHit
+
+                val fileProps = PsiTreeUtil.findChildrenOfType(callSiteFile, PascalProperty::class.java)
+                val pHit = fileProps.firstOrNull { p ->
+                    p.name.equals(name, true) &&
+                    p.containingClass?.name?.let { ownerName -> owners.any { it.name.equals(ownerName, true) } } == true &&
+                    isVisible(p, callSiteFile)
+                }
+                if (pHit != null) return pHit
+
+                val fileRoutines = PsiTreeUtil.findChildrenOfType(callSiteFile, PascalRoutine::class.java)
+                val rHit = fileRoutines.firstOrNull { r ->
+                    r.name.equals(name, true) &&
+                    (r.containingClassName?.let { ownerName -> owners.any { it.name.equals(ownerName, true) } } == true ||
+                     r.containingClass?.name?.let { ownerName -> owners.any { it.name.equals(ownerName, true) } } == true) &&
+                    isVisible(r, callSiteFile)
+                }
+                if (rHit != null) return rHit
             }
         }
 
-        // Last resort: scan the type definition directly if it's accessible
-        // This handles cases where index isn't populated (e.g., test fixtures)
-        val typeFile = typeDef.containingFile
-        if (typeFile != null) {
-            for (ownerType in owners.mapNotNull { ownerName ->
-                PsiTreeUtil.findChildrenOfType(typeFile, PascalTypeDefinition::class.java)
-                    .firstOrNull { it.name.equals(ownerName, true) }
-            }) {
-                // Check fields
-                for (f in ownerType.fields) {
-                    if (f.name.equals(name, true)) {
-                        maybeLog("[MemberTraversal] member '$name' (direct scan) -> field in type=${ownerType.name}", callSiteFile)
-                        return f
-                    }
-                }
-                // Check properties
-                for (p in ownerType.properties) {
-                    if (p.name.equals(name, true)) {
-                        maybeLog("[MemberTraversal] member '$name' (direct scan) -> property in type=${ownerType.name}", callSiteFile)
-                        return p
-                    }
-                }
-                // Check methods
-                for (m in ownerType.methods) {
-                    if (m.name.equals(name, true)) {
-                        maybeLog("[MemberTraversal] member '$name' (direct scan) -> method in type=${ownerType.name}", callSiteFile)
-                        return m
-                    }
-                }
-            }
+        if (ResolverConfig.enableDebugLogs) {
+            LOG.info("[MemberTraversal] findMemberInType: no match for '$name' in type='${typeDef.name}' unit='${typeDef.unitName}'")
         }
-
-        maybeLog("[MemberTraversal] findMemberInType: no match for '$name' in type='${typeDef.name}' (owners=${owners})", callSiteFile)
         return null
+    }
+
+    private fun isVisible(member: PsiElement, callSiteFile: PsiFile): Boolean {
+        val visibility = when (member) {
+            is PascalRoutine -> member.visibility
+            is PascalProperty -> member.visibility
+            is PascalVariableDefinition -> member.visibility
+            else -> null
+        } ?: "public"
+
+        if (visibility.equals("public", true) || visibility.equals("published", true)) return true
+
+        val memberUnit = when (member) {
+            is PascalRoutine -> member.unitName
+            is PascalProperty -> member.unitName
+            is PascalVariableDefinition -> member.unitName
+            else -> nl.akiar.pascal.psi.PsiUtil.getUnitName(member)
+        }
+        val callSiteUnit = nl.akiar.pascal.psi.PsiUtil.getUnitName(callSiteFile)
+
+        if (memberUnit.equals(callSiteUnit, ignoreCase = true)) {
+            // Delphi rules: private/protected are visible within the same unit
+            return true
+        }
+
+        // Different unit: private/strict are hidden
+        if (visibility.contains("private", ignoreCase = true)) return false
+
+        // Protected is also hidden across units unless we are in a subclass
+        // (Simplified for now: hide unless we have proof of subclassing)
+        if (visibility.contains("protected", ignoreCase = true)) return false
+
+        return true
+    }
+
+    private fun getContainingClassName(element: PsiElement): String? {
+        return when (element) {
+            is PascalRoutine -> element.containingClassName
+            is PascalProperty -> element.containingClass?.name
+            is PascalVariableDefinition -> element.containingClass?.name
+            else -> null
+        }
+    }
+
+    private fun getCallSiteClassName(callSiteFile: PsiFile, member: PsiElement): String? {
+        // Find the class definition at the call site if any
+        // For simplicity, we can look for the containing type definition of the call site
+        // This is tricky because we don't have the exact call site offset here, just the file.
+        // But MemberChainResolver.resolveChain is called with a PsiElement.
+        // We might need to pass the call site element to isVisible.
+        return null // Fallback
+    }
+
+    private fun isAtSubclassOf(callSiteFile: PsiFile, member: PsiElement): Boolean {
+        // Implementation of subclass check
+        // For now, return false to be safe, or implement using InheritanceChainCache
+        val memberClassName = getContainingClassName(member) ?: return false
+        // We would need to find which class at callSiteFile we are in.
+        // This is complex without the exact element.
+        // For Milestone B, let's keep it simple.
+        return false
     }
 }

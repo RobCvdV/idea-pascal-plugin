@@ -321,7 +321,7 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
         VariableKind kind = getVariableKind();
         switch (kind) {
             case FIELD:
-                return findContainingClassName();
+                return getUnitName();
             case LOCAL:
             case PARAMETER:
                 return findContainingRoutineName();

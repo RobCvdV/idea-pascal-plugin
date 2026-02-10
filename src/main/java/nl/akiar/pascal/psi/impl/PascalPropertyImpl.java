@@ -41,7 +41,11 @@ public class PascalPropertyImpl extends StubBasedPsiElementBase<PascalPropertySt
     @Override
     @Nullable
     public PsiElement getNameIdentifier() {
-        ASTNode identifierNode = nl.akiar.pascal.psi.PsiUtil.findFirstRecursive(getNode(), nl.akiar.pascal.PascalTokenTypes.IDENTIFIER);
+        // Use findFirstRecursiveAnyOf to include soft keywords like 'Name', 'Index', etc.
+        ASTNode identifierNode = nl.akiar.pascal.psi.PsiUtil.findFirstRecursiveAnyOf(
+            getNode(),
+            nl.akiar.pascal.psi.PsiUtil.IDENTIFIER_LIKE_TYPES
+        );
         return identifierNode != null ? identifierNode.getPsi() : null;
     }
 

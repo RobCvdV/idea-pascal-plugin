@@ -122,10 +122,15 @@ public final class PascalProjectService implements Disposable {
         VirtualFile baseDir = ProjectUtil.guessProjectDir(project);
         if (baseDir == null) return;
 
-        // 1. Find .dproj files
+        // 1. Find .dproj files — only in the project root directory (not recursively)
+        //    to focus on the main Delphi project and avoid scanning subdirectories/extra content roots
         List<VirtualFile> dprojFiles = new ArrayList<>();
-        findFilesRecursively(baseDir, ".dproj", dprojFiles, 10);
-        LOG.info("[PascalProject] Found " + dprojFiles.size() + " .dproj files.");
+        for (VirtualFile child : baseDir.getChildren()) {
+            if (!child.isDirectory() && child.getName().toLowerCase().endsWith(".dproj")) {
+                dprojFiles.add(child);
+            }
+        }
+        LOG.info("[PascalProject] Found " + dprojFiles.size() + " .dproj files in project root.");
 
         for (VirtualFile dprojFile : dprojFiles) {
             LOG.info("[PascalProject] Parsing dproj: " + dprojFile.getPath());
@@ -147,7 +152,7 @@ public final class PascalProjectService implements Disposable {
                         }
                     }
                 } else {
-                    LOG.warn("[PascalProject] Could not find DCCReference: " + ref + " relative to " + dprojFile.getPath());
+                    LOG.debug("[PascalProject] Could not find DCCReference: " + ref + " relative to " + dprojFile.getPath());
                 }
             }
 
@@ -180,21 +185,6 @@ public final class PascalProjectService implements Disposable {
                         }
                     }
                 }
-            }
-        }
-    }
-
-    private void findFilesRecursively(VirtualFile dir, String extension, List<VirtualFile> result, int depth) {
-        if (depth <= 0 || dir == null || !dir.isValid() || !dir.isDirectory()) return;
-        com.intellij.openapi.progress.ProgressManager.checkCanceled();
-        for (VirtualFile child : dir.getChildren()) {
-            if (child.isDirectory()) {
-                String name = child.getName();
-                if (!name.startsWith(".") && !name.equals("node_modules") && !name.equals("build") && !name.equals("out")) {
-                    findFilesRecursively(child, extension, result, depth - 1);
-                }
-            } else if (child.getName().toLowerCase().endsWith(extension)) {
-                result.add(child);
             }
         }
     }

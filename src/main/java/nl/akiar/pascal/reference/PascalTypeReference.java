@@ -9,7 +9,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 
 /**
@@ -27,13 +26,16 @@ public class PascalTypeReference extends PsiReferenceBase<PsiElement> implements
     @NotNull
     @Override
     public ResolveResult[] multiResolve(boolean incompleteCode) {
-        LOG.info("[PascalNav] Resolving name: " + name + " for element: " + myElement.getText());
-        Collection<PascalTypeDefinition> types = PascalTypeIndex.findTypes(name, myElement.getProject());
-        LOG.info("[PascalNav] Found " + types.size() + " types for name: " + name);
+        PascalTypeIndex.TypeLookupResult result = PascalTypeIndex.findTypesWithUsesValidation(
+            name, myElement.getContainingFile(), myElement.getTextOffset());
         List<ResolveResult> results = new ArrayList<>();
-        for (PascalTypeDefinition type : types) {
-//             LOG.info("[PascalNav]  -> Match: " + type.getName() + " in " + type.getContainingFile().getName());
+        for (PascalTypeDefinition type : result.getInScopeTypes()) {
             results.add(new PsiElementResolveResult(type));
+        }
+        if (results.isEmpty()) {
+            for (PascalTypeDefinition type : result.getOutOfScopeTypes()) {
+                results.add(new PsiElementResolveResult(type));
+            }
         }
         return results.toArray(new ResolveResult[0]);
     }
@@ -41,13 +43,9 @@ public class PascalTypeReference extends PsiReferenceBase<PsiElement> implements
     @Nullable
     @Override
     public PsiElement resolve() {
-        LOG.info("[PascalNav] resolve() called for " + name + " (element: " + myElement + ")");
         ResolveResult[] resolveResults = multiResolve(false);
-        LOG.info("[PascalNav] Final resolve for " + name + " returned " + resolveResults.length + " results");
         if (resolveResults.length > 0) {
-            PsiElement element = resolveResults[0].getElement();
-            LOG.info("[PascalNav]  -> resolved to: " + element);
-            return element;
+            return resolveResults[0].getElement();
         }
         return null;
     }
@@ -55,7 +53,6 @@ public class PascalTypeReference extends PsiReferenceBase<PsiElement> implements
     @NotNull
     @Override
     public Object[] getVariants() {
-        // For now, we don't implement completion variants here
         return new Object[0];
     }
 }

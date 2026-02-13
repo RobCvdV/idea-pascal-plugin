@@ -18,10 +18,6 @@ import org.jetbrains.annotations.NotNull;
 
 public class PascalReferenceContributor extends PsiReferenceContributor {
     private static final Logger LOG = Logger.getInstance(PascalReferenceContributor.class);
-    
-    static {
-        System.out.println("[DEBUG_LOG] [PascalNav] PascalReferenceContributor class loaded");
-    }
 
     @Override
     public void registerReferenceProviders(@NotNull PsiReferenceRegistrar registrar) {
@@ -33,40 +29,34 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
                 String text = element.getText();
                 ASTNode node = element.getNode();
                 IElementType type = node != null ? node.getElementType() : null;
-                
-                System.out.println("[DEBUG_LOG] [PascalRefProvider] Called for element: '" + text + "' type: " + type + " language: " + (element.getLanguage() != null ? element.getLanguage().getID() : "null"));
-                
-                if (type == PascalTokenTypes.IDENTIFIER || type == nl.akiar.pascal.psi.PascalElementTypes.METHOD_NAME_REFERENCE) {
+
+                if (type == PascalTokenTypes.IDENTIFIER || type == PascalElementTypes.METHOD_NAME_REFERENCE) {
                     PsiElement parent = element.getParent();
 
-                    System.out.println("[DEBUG_LOG] [PascalNav] ID=" + text + " type=" + type + " parent=" + (parent != null ? parent.getClass().getSimpleName() : "null") + " parentType=" + (parent != null && parent.getNode() != null ? parent.getNode().getElementType() : "null"));
-                    
-                    // Routine implementation navigation (e.g. procedure TMyClass.MyMethod)
-                    // The identifier could be a direct child of ROUTINE_DECLARATION
-                    // or nested under METHOD_NAME_REFERENCE.
-                    nl.akiar.pascal.psi.PascalRoutine routine = PsiTreeUtil.getParentOfType(element, nl.akiar.pascal.psi.PascalRoutine.class);
-                    System.out.println("[DEBUG_LOG] [PascalNav] Found routine: " + (routine != null ? routine.getClass().getSimpleName() : "null"));
-                    if (routine != null) {
-                        System.out.println("[DEBUG_LOG] [PascalNav] routine.isImplementation()=" + routine.isImplementation() + " routine.getImplementation()=" + (routine.getImplementation() != null ? "found" : "null"));
-                    }
-                    if (routine != null && (routine.isImplementation() || routine.getImplementation() != null)) {
-                        PsiElement nameId = routine.getNameIdentifier();
-                        System.out.println("[DEBUG_LOG] [PascalNav] nameId=" + (nameId != null ? nameId.getText() : "null") + " element=" + element.getText());
-                        System.out.println("[DEBUG_LOG] [PascalNav] nameId == element: " + (nameId == element));
-                        if (nameId != null) {
-                            System.out.println("[DEBUG_LOG] [PascalNav] PsiTreeUtil.isAncestor(nameId, element, false): " + PsiTreeUtil.isAncestor(nameId, element, false));
+                    // Routine implementation navigation — only for the routine's own name identifier
+                    PsiElement routineParent = null;
+                    if (parent instanceof nl.akiar.pascal.psi.PascalRoutine) {
+                        routineParent = parent;
+                    } else if (parent != null && parent.getNode() != null
+                            && parent.getNode().getElementType() == PascalElementTypes.METHOD_NAME_REFERENCE) {
+                        PsiElement grandParent = parent.getParent();
+                        if (grandParent instanceof nl.akiar.pascal.psi.PascalRoutine) {
+                            routineParent = grandParent;
                         }
+                    }
+                    if (routineParent instanceof nl.akiar.pascal.psi.PascalRoutine rp) {
+                        PsiElement nameId = rp.getNameIdentifier();
                         if (nameId == element || (nameId != null && PsiTreeUtil.isAncestor(nameId, element, false))) {
-                            System.out.println("[DEBUG_LOG] [PascalNav] Creating reference for routine (impl=" + routine.isImplementation() + "): " + text);
-                            return new PsiReference[]{new PascalRoutineImplementationReference(element, routine)};
+                            if (rp.isImplementation() || rp.getImplementation() != null) {
+                                return new PsiReference[]{new PascalRoutineImplementationReference(element, rp)};
+                            }
+                            return PsiReference.EMPTY_ARRAY;
                         }
                     }
 
                     // For METHOD_NAME_REFERENCE, proceed to other reference types after routine check
                     if (type != PascalTokenTypes.IDENTIFIER) {
                         // METHOD_NAME_REFERENCE nodes that weren't handled as routine implementations
-                        // can proceed to other reference logic (like member access, etc.)
-                        // but skip type/variable definition checks which only apply to IDENTIFIER tokens
                         if (parent != null && parent.getNode() != null && parent.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
                             return new PsiReference[]{new PascalUnitReference(element)};
                         }
@@ -85,7 +75,21 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
                         return PsiReference.EMPTY_ARRAY;
                     }
 
-                    // NEW: Check if parent is TYPE_REFERENCE
+                    // Property specifier identifiers (after read/write/stored/default keywords)
+                    if (nl.akiar.pascal.psi.PsiUtil.hasParent(element, PascalElementTypes.PROPERTY_DEFINITION)) {
+                        PsiElement prev = nl.akiar.pascal.psi.PsiUtil.getPrevNoneIgnorableSibling(element);
+                        if (prev != null) {
+                            IElementType prevType = prev.getNode().getElementType();
+                            if (prevType == PascalTokenTypes.KW_READ ||
+                                prevType == PascalTokenTypes.KW_WRITE ||
+                                prevType == PascalTokenTypes.KW_STORED ||
+                                prevType == PascalTokenTypes.KW_DEFAULT) {
+                                return new PsiReference[]{new PascalPropertySpecifierReference(element)};
+                            }
+                        }
+                    }
+
+                    // Check if parent is TYPE_REFERENCE
                     if (parent instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
                         nl.akiar.pascal.psi.impl.PascalTypeReferenceElement typeRef =
                             (nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) parent;
@@ -107,16 +111,6 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
                     }
                     if (parent instanceof nl.akiar.pascal.psi.PascalVariableDefinition) {
                         if (((nl.akiar.pascal.psi.PascalVariableDefinition) parent).getNameIdentifier() == element) {
-                            return PsiReference.EMPTY_ARRAY;
-                        }
-                    }
-                    if (parent instanceof nl.akiar.pascal.psi.PascalRoutine routineParent) {
-                        LOG.info("[PascalNav] ID=" + text + " parent is Routine, nameID=" + (routineParent.getNameIdentifier() == element));
-                        if (routineParent.getNameIdentifier() == element) {
-                            if (routineParent.isImplementation()) {
-                                LOG.info("[PascalNav] Creating reference for implementation (via parent): " + text);
-                                return new PsiReference[]{new PascalRoutineImplementationReference(element, routineParent)};
-                            }
                             return PsiReference.EMPTY_ARRAY;
                         }
                     }
@@ -146,6 +140,14 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
                     if (prev != null && prev.getNode().getElementType() == PascalTokenTypes.DOT) {
                         return new PsiReference[]{new PascalMemberReference(element, new TextRange(0, text.length()))};
                     }
+
+                    // Check if this identifier is a routine call (followed by LPAREN)
+                    PsiElement nextSibling = nl.akiar.pascal.psi.PsiUtil.getNextNoneIgnorableSibling(element);
+                    if (nextSibling != null && nextSibling.getNode() != null
+                            && nextSibling.getNode().getElementType() == PascalTokenTypes.LPAREN) {
+                        return new PsiReference[]{new PascalRoutineCallReference(element)};
+                    }
+
                     return new PsiReference[]{new PascalIdentifierReference(element, new TextRange(0, text.length()))};
                 }
 
@@ -156,8 +158,7 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
         registrar.registerReferenceProvider(
                 PlatformPatterns.psiElement(),
                 provider);
-        LOG.info("[PascalNav] Registration complete (broad pattern for debugging)");
-        System.out.println("[DEBUG_LOG] [PascalNav] Reference contributor registration complete");
+        LOG.debug("[PascalNav] Registration complete");
     }
 
     /**

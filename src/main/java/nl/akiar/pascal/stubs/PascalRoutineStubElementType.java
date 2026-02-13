@@ -40,22 +40,24 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
             parent = parent.getParent();
         }
         if (ownerName == null) {
-            ASTNode node = psi.getNode();
-            ASTNode child = node.getFirstChildNode();
-            ASTNode lastId = null;
-            while (child != null) {
-                if (child.getElementType() == nl.akiar.pascal.PascalTokenTypes.LPAREN ||
-                    child.getElementType() == nl.akiar.pascal.PascalTokenTypes.SEMI ||
-                    child.getElementType() == nl.akiar.pascal.PascalTokenTypes.COLON) {
-                    break;
+            // For implementation methods like "procedure TClass.Method;", extract TClass
+            // from the qualified name. The name parts may be inside a METHOD_NAME_REFERENCE
+            // composite node, so use prevLeaf from the name identifier.
+            PsiElement nameId = psi.getNameIdentifier();
+            if (nameId != null) {
+                PsiElement prev = com.intellij.psi.util.PsiTreeUtil.prevLeaf(nameId);
+                while (prev instanceof com.intellij.psi.PsiWhiteSpace) {
+                    prev = com.intellij.psi.util.PsiTreeUtil.prevLeaf(prev);
                 }
-                if (child.getElementType() == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
-                    lastId = child;
-                } else if (child.getElementType() == nl.akiar.pascal.PascalTokenTypes.DOT && lastId != null) {
-                    ownerName = lastId.getText();
-                    break;
+                if (prev != null && prev.getNode().getElementType() == nl.akiar.pascal.PascalTokenTypes.DOT) {
+                    prev = com.intellij.psi.util.PsiTreeUtil.prevLeaf(prev);
+                    while (prev instanceof com.intellij.psi.PsiWhiteSpace) {
+                        prev = com.intellij.psi.util.PsiTreeUtil.prevLeaf(prev);
+                    }
+                    if (prev != null && prev.getNode().getElementType() == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                        ownerName = nl.akiar.pascal.psi.PsiUtil.stripEscapePrefix(prev.getText());
+                    }
                 }
-                child = child.getTreeNext();
             }
         }
 

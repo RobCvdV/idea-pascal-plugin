@@ -76,23 +76,50 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         return types.get(0);
     }
 
+    @Nullable
+    private String getClassContextForElement(PsiElement element) {
+        PsiElement current = element;
+        while (current != null) {
+            if (current instanceof PascalTypeDefinition) return ((PascalTypeDefinition) current).getName();
+            if (current instanceof PascalRoutine) return ((PascalRoutine) current).getContainingClassName();
+            current = current.getParent();
+        }
+        return null;
+    }
+
+    @NotNull
+    private PsiElement pickBestRoutine(List<PascalRoutine> routines, @Nullable String classContext) {
+        if (routines.size() == 1 || classContext == null) return routines.get(0);
+        // Filter by class context
+        List<PascalRoutine> filtered = new java.util.ArrayList<>();
+        for (PascalRoutine r : routines) {
+            if (classContext.equalsIgnoreCase(r.getContainingClassName())) filtered.add(r);
+        }
+        List<PascalRoutine> candidates = filtered.isEmpty() ? routines : filtered;
+        // Prefer declarations over implementations
+        for (PascalRoutine r : candidates) {
+            if (!r.isImplementation()) return r;
+        }
+        return candidates.get(0);
+    }
+
     @Override
     @Nullable
     public PsiElement getCustomDocumentationElement(@NotNull Editor editor, @NotNull PsiFile file, @Nullable PsiElement contextElement, int targetOffset) {
-        LOG.info("[PascalDoc] getCustomDocumentationElement element='" + (contextElement != null ? contextElement.getText() : "<null>") + "' file='" + file.getName() + "'");
+        LOG.debug("[PascalDoc] getCustomDocumentationElement element='" + (contextElement != null ? contextElement.getText() : "<null>") + "' file='" + file.getName() + "'");
         if (contextElement != null && contextElement.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
             String name = contextElement.getText();
 
             // Check for built-in functions/types FIRST
             if (DelphiBuiltIns.isBuiltIn(name)) {
-                LOG.info("[PascalDoc] Built-in identifier: " + name);
+                LOG.debug("[PascalDoc] Built-in identifier: " + name);
                 return contextElement;
             }
 
             // Check if UNIT_REFERENCE
             PsiElement parent = contextElement.getParent();
             if (parent != null && parent.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
-                LOG.info("[PascalDoc] Unit reference detected: " + parent.getText());
+                LOG.debug("[PascalDoc] Unit reference detected: " + parent.getText());
                 return parent;
             }
 
@@ -105,7 +132,7 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             if (prevLeaf != null && prevLeaf.getNode() != null &&
                 prevLeaf.getNode().getElementType() == PascalTokenTypes.DOT) {
                 isMemberAccess = true;
-                LOG.info("[PascalDoc] Member access detected for: " + name);
+                LOG.debug("[PascalDoc] Member access detected for: " + name);
             }
 
             // Check if the context element is a name identifier of a declaration
@@ -125,10 +152,10 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
 
             // For member access, use chain resolution
             if (isMemberAccess) {
-                LOG.info("[PascalDoc] Member access detected; attempting chain resolve");
+                LOG.debug("[PascalDoc] Member access detected; attempting chain resolve");
                 PsiElement chainResolved = MemberChainResolver.resolveElement(contextElement);
                 if (chainResolved != null) {
-                    LOG.info("[PascalDoc] Chain resolved -> " + chainResolved.getClass().getSimpleName());
+                    LOG.debug("[PascalDoc] Chain resolved -> " + chainResolved.getClass().getSimpleName());
                     return redirectForwardDeclaration(chainResolved);
                 }
                 return contextElement;
@@ -159,7 +186,8 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             PascalRoutineIndex.RoutineLookupResult routineResult =
                     PascalRoutineIndex.findRoutinesWithUsesValidation(name, contextElement.getContainingFile(), contextElement.getTextOffset());
             if (!routineResult.getInScopeRoutines().isEmpty()) {
-                return routineResult.getInScopeRoutines().get(0);
+                String classCtx = getClassContextForElement(contextElement);
+                return pickBestRoutine(routineResult.getInScopeRoutines(), classCtx);
             }
 
             // Last resort: out-of-scope matches
@@ -168,7 +196,8 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 return outOfScopeType;
             }
             if (!routineResult.getOutOfScopeRoutines().isEmpty()) {
-                return routineResult.getOutOfScopeRoutines().get(0);
+                String classCtx = getClassContextForElement(contextElement);
+                return pickBestRoutine(routineResult.getOutOfScopeRoutines(), classCtx);
             }
         }
         return super.getCustomDocumentationElement(editor, file, contextElement, targetOffset);
@@ -221,7 +250,7 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     @Override
     @Nullable
     public String generateDoc(PsiElement element, @Nullable PsiElement originalElement) {
-        LOG.info("[PascalDoc] generateDoc called for element: " + element + " class: " + (element != null ? element.getClass().getName() : "null"));
+        LOG.debug("[PascalDoc] generateDoc called for element: " + element + " class: " + (element != null ? element.getClass().getName() : "null"));
 
         if (element == null) return null;
 
@@ -291,7 +320,7 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         if (element instanceof PascalTypeDefinition && ((PascalTypeDefinition) element).isForwardDeclaration()) {
             PascalTypeDefinition counterpart = findTypeCounterpart((PascalTypeDefinition) element);
             if (counterpart != null && !counterpart.isForwardDeclaration()) {
-                LOG.info("[PascalDoc] Redirecting from forward declaration to full definition: " + ((PascalTypeDefinition) element).getName());
+                LOG.debug("[PascalDoc] Redirecting from forward declaration to full definition: " + ((PascalTypeDefinition) element).getName());
                 return counterpart;
             }
         }

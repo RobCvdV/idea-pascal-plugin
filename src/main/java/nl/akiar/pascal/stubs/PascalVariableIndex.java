@@ -198,8 +198,12 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
                     }
                 }
             } else {
-                // Local/Field are always "in scope" if they are candidates
-                inScope.add(var);
+                // Local/Parameter/Field variables are only in-scope if they're in the same file.
+                // Parameters from other files (e.g., formal params of imported routines)
+                // should never shadow identifiers in the current file.
+                if (fromFile.equals(var.getContainingFile())) {
+                    inScope.add(var);
+                }
             }
         }
 
@@ -225,8 +229,13 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
 
         // 1. Try to find the one that actually contains this offset (declaration)
         for (PascalVariableDefinition var : inScope) {
-            if (var.getTextRange().contains(offset)) {
-                return var;
+            try {
+                if (var.getTextRange().contains(offset)) {
+                    return var;
+                }
+            } catch (Exception e) {
+                // getTextRange() can trigger stub/AST mismatch for external files;
+                // skip this candidate safely
             }
         }
 
@@ -285,7 +294,9 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
         if (bestFieldMatch != null) return bestFieldMatch;
         if (bestGlobalMatch != null) return bestGlobalMatch;
 
-        return inScope.get(0);
+        // No scope-matched variable found — return null rather than an arbitrary match
+        // (e.g., a parameter from a different routine should not be returned)
+        return null;
     }
 
     /**

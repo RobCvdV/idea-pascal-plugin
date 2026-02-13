@@ -30,10 +30,10 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
     @Nullable
     @Override
     public PsiElement resolve() {
-        LOG.info("[MemberTraversal] PascalMemberReference.resolve element='" + myElement.getText() + "' file='" + myElement.getContainingFile().getName() + "'");
+        LOG.debug("[MemberTraversal] PascalMemberReference.resolve element='" + myElement.getText() + "' file='" + myElement.getContainingFile().getName() + "'");
         // Use unified chain resolver so this reference benefits from full member-chain context
         PsiElement resolved = nl.akiar.pascal.resolution.MemberChainResolver.resolveElement(myElement);
-        LOG.info("[MemberTraversal] PascalMemberReference.chain resolved -> " + (resolved != null ? resolved.getClass().getSimpleName() : "<unresolved>"));
+        LOG.debug("[MemberTraversal] PascalMemberReference.chain resolved -> " + (resolved != null ? resolved.getClass().getSimpleName() : "<unresolved>"));
         if (resolved != null) {
             // Enforce accessibility rules for routines/properties/fields
             if (resolved instanceof nl.akiar.pascal.psi.PascalRoutine ||
@@ -86,7 +86,7 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
         }
 
         if (resolvedQualifier == null) {
-            LOG.info("[MemberTraversal] qualifier unresolved for '" + myElement.getText() + "'");
+            LOG.debug("[MemberTraversal] qualifier unresolved for '" + myElement.getText() + "'");
             return null;
         }
 
@@ -110,11 +110,11 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
         }
 
         if (typeDef == null) {
-            LOG.info("[MemberTraversal] qualifier type unresolved for '" + myElement.getText() + "'");
+            LOG.debug("[MemberTraversal] qualifier type unresolved for '" + myElement.getText() + "'");
             return null;
         }
         PsiElement member = findMemberInType(typeDef, memberName, true);
-        LOG.info("[MemberTraversal] fallback member search result -> " + (member != null ? member.getClass().getSimpleName() : "<unresolved>"));
+        LOG.debug("[MemberTraversal] fallback member search result -> " + (member != null ? member.getClass().getSimpleName() : "<unresolved>"));
         return member;
     }
 

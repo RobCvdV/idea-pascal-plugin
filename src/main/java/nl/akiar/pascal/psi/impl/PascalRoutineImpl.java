@@ -198,6 +198,20 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         return false;
     }
 
+    private static List<PascalRoutine> filterByClass(List<PascalRoutine> routines, @Nullable String className) {
+        if (routines.isEmpty()) return routines;
+        List<PascalRoutine> filtered = new ArrayList<>();
+        for (PascalRoutine r : routines) {
+            if (className == null) {
+                // For global routines (no class), only include routines that also have no class
+                if (r.getContainingClassName() == null) filtered.add(r);
+            } else {
+                if (className.equalsIgnoreCase(r.getContainingClassName())) filtered.add(r);
+            }
+        }
+        return filtered;
+    }
+
     @Override
     @Nullable
     public PascalRoutine getDeclaration() {
@@ -208,14 +222,16 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         if (visited.contains(keySig)) return null;
         visited.add(keySig);
         try {
-            // ...existing code for scoped index and fallback...
             String unit = getUnitName();
             String owner = getContainingClassName();
             if (name == null) return null;
+
+            // 1. Scoped index: exact match with signature
             if (unit != null && owner != null) {
                 String key = (unit + "#" + owner + "#" + name).toLowerCase();
                 java.util.Collection<nl.akiar.pascal.psi.PascalRoutine> candidates = nl.akiar.pascal.stubs.PascalScopedRoutineIndex.find(key, getProject());
                 String sig = getSignatureHash();
+                // First try exact signature match
                 for (nl.akiar.pascal.psi.PascalRoutine r : candidates) {
                     if (!r.isImplementation()) {
                         String otherSig = ((PascalRoutineImpl) r).getSignatureHash();
@@ -224,14 +240,20 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
                         }
                     }
                 }
+                // If no exact signature match, accept any declaration with same class
+                for (nl.akiar.pascal.psi.PascalRoutine r : candidates) {
+                    if (!r.isImplementation()) {
+                        return r;
+                    }
+                }
             }
+
+            // 2. Routine index fallback: filter by class
             com.intellij.psi.PsiFile file = getContainingFile();
             nl.akiar.pascal.stubs.PascalRoutineIndex.RoutineLookupResult result = nl.akiar.pascal.stubs.PascalRoutineIndex.findRoutinesWithUsesValidation(name, file, getTextOffset());
-            java.util.List<nl.akiar.pascal.psi.PascalRoutine> inScope = result.getInScopeRoutines();
-            if (!inScope.isEmpty()) {
-                for (nl.akiar.pascal.psi.PascalRoutine r : inScope) {
-                    if (!r.isImplementation()) return r;
-                }
+            java.util.List<nl.akiar.pascal.psi.PascalRoutine> inScope = filterByClass(result.getInScopeRoutines(), owner);
+            for (nl.akiar.pascal.psi.PascalRoutine r : inScope) {
+                if (!r.isImplementation()) return r;
             }
             return null;
         } finally {
@@ -252,10 +274,13 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
             String unit = getUnitName();
             String owner = getContainingClassName();
             if (name == null) return null;
+
+            // 1. Scoped index: exact match with signature
             if (unit != null && owner != null) {
                 String key = (unit + "#" + owner + "#" + name).toLowerCase();
                 java.util.Collection<nl.akiar.pascal.psi.PascalRoutine> candidates = nl.akiar.pascal.stubs.PascalScopedRoutineIndex.find(key, getProject());
                 String sig = getSignatureHash();
+                // First try exact signature match
                 for (nl.akiar.pascal.psi.PascalRoutine r : candidates) {
                     if (r.isImplementation()) {
                         String otherSig = ((PascalRoutineImpl) r).getSignatureHash();
@@ -264,14 +289,20 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
                         }
                     }
                 }
+                // If no exact signature match, accept any implementation with same class
+                for (nl.akiar.pascal.psi.PascalRoutine r : candidates) {
+                    if (r.isImplementation()) {
+                        return r;
+                    }
+                }
             }
+
+            // 2. Routine index fallback: filter by class
             com.intellij.psi.PsiFile file = getContainingFile();
             nl.akiar.pascal.stubs.PascalRoutineIndex.RoutineLookupResult result = nl.akiar.pascal.stubs.PascalRoutineIndex.findRoutinesWithUsesValidation(name, file, getTextOffset());
-            java.util.List<nl.akiar.pascal.psi.PascalRoutine> inScope = result.getInScopeRoutines();
-            if (!inScope.isEmpty()) {
-                for (nl.akiar.pascal.psi.PascalRoutine r : inScope) {
-                    if (r.isImplementation()) return r;
-                }
+            java.util.List<nl.akiar.pascal.psi.PascalRoutine> inScope = filterByClass(result.getInScopeRoutines(), owner);
+            for (nl.akiar.pascal.psi.PascalRoutine r : inScope) {
+                if (r.isImplementation()) return r;
             }
             return null;
         } finally {
@@ -546,6 +577,25 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
                 return ((nl.akiar.pascal.psi.PascalTypeDefinition) parent).getName();
             }
             parent = parent.getParent();
+        }
+
+        // Fallback for implementation methods: extract from qualified name (TClass.Method pattern)
+        // Use prevLeaf to handle cases where IDENTIFIER/DOT may be inside composite nodes
+        PsiElement nameId = getNameIdentifier();
+        if (nameId != null) {
+            PsiElement prev = com.intellij.psi.util.PsiTreeUtil.prevLeaf(nameId);
+            while (prev != null && prev instanceof com.intellij.psi.PsiWhiteSpace) {
+                prev = com.intellij.psi.util.PsiTreeUtil.prevLeaf(prev);
+            }
+            if (prev != null && prev.getNode().getElementType() == PascalTokenTypes.DOT) {
+                prev = com.intellij.psi.util.PsiTreeUtil.prevLeaf(prev);
+                while (prev != null && prev instanceof com.intellij.psi.PsiWhiteSpace) {
+                    prev = com.intellij.psi.util.PsiTreeUtil.prevLeaf(prev);
+                }
+                if (prev != null && prev.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
+                    return nl.akiar.pascal.psi.PsiUtil.stripEscapePrefix(prev.getText());
+                }
+            }
         }
         return null;
     }

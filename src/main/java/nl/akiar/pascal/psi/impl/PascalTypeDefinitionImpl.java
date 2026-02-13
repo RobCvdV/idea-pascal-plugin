@@ -182,6 +182,13 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
         for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
             IElementType type = child.getElementType();
 
+            // Skip attribute composite nodes entirely — they contain identifiers
+            // (like "BaseUrl") that are NOT the type name
+            if (type == nl.akiar.pascal.psi.PascalElementTypes.ATTRIBUTE_DEFINITION ||
+                type == nl.akiar.pascal.psi.PascalElementTypes.ATTRIBUTE_LIST) {
+                continue;
+            }
+
             if (type == PascalTokenTypes.LBRACKET) {
                 inBracket = true;
             } else if (type == PascalTokenTypes.RBRACKET) {

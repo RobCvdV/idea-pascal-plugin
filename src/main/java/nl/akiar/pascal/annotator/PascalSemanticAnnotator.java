@@ -75,6 +75,11 @@ public class PascalSemanticAnnotator implements Annotator {
                 applyHighlight(element, holder, nl.akiar.pascal.PascalSyntaxHighlighter.ATTRIBUTE);
                 return;
             }
+            // Fallback: detect attribute context structurally when PSI tree is broken
+            if (PsiUtil.isLikelyInsideAttributeBrackets(element)) {
+                applyHighlight(element, holder, nl.akiar.pascal.PascalSyntaxHighlighter.ATTRIBUTE);
+                return;
+            }
             if (isTypeReferenceContext(element)) {
                 annotateTypeReferenceIdentifier(element, holder);
                 return;

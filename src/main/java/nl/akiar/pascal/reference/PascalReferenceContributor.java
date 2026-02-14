@@ -121,6 +121,11 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
                         return new PsiReference[]{new PascalAttributeReference(element, attribute)};
                     }
 
+                    // Fallback: structural bracket detection for broken PSI tree
+                    if (nl.akiar.pascal.psi.PsiUtil.isLikelyInsideAttributeBrackets(element)) {
+                        return new PsiReference[]{new PascalAttributeReference(element, null)};
+                    }
+
                     // If inside a UNIT_REFERENCE (header or uses), treat as unit reference
                     if (parent != null && parent.getNode() != null && parent.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
                         return new PsiReference[]{new PascalUnitReference(element)};

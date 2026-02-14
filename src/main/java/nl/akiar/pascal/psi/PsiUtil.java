@@ -2,7 +2,10 @@ package nl.akiar.pascal.psi;
 
 import com.intellij.lang.ASTNode;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiWhiteSpace;
+import com.intellij.psi.PsiComment;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.util.PsiTreeUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -288,6 +291,54 @@ public class PsiUtil {
             if (parent == ancestor) return true;
             parent = parent.getParent();
         }
+        return false;
+    }
+
+    /**
+     * Detect if an identifier is likely inside attribute brackets by walking backward
+     * through leaf elements. This is a structural fallback for when the PSI tree is broken
+     * (e.g., during typing) and doesn't have a proper ATTRIBUTE_DEFINITION parent.
+     *
+     * Returns true if a '[' is found before any ']', ';', or statement/declaration boundary.
+     */
+    public static boolean isLikelyInsideAttributeBrackets(@NotNull PsiElement element) {
+        PsiElement leaf = PsiTreeUtil.prevLeaf(element);
+        int tokensChecked = 0;
+
+        while (leaf != null && tokensChecked < 20) {
+            if (leaf instanceof PsiWhiteSpace || leaf instanceof PsiComment) {
+                leaf = PsiTreeUtil.prevLeaf(leaf);
+                continue;
+            }
+
+            ASTNode node = leaf.getNode();
+            if (node == null) {
+                leaf = PsiTreeUtil.prevLeaf(leaf);
+                continue;
+            }
+
+            IElementType type = node.getElementType();
+            tokensChecked++;
+
+            if (type == nl.akiar.pascal.PascalTokenTypes.LBRACKET) {
+                return true;
+            }
+
+            if (type == nl.akiar.pascal.PascalTokenTypes.RBRACKET ||
+                type == nl.akiar.pascal.PascalTokenTypes.SEMI ||
+                type == nl.akiar.pascal.PascalTokenTypes.KW_END ||
+                type == nl.akiar.pascal.PascalTokenTypes.KW_BEGIN ||
+                type == nl.akiar.pascal.PascalTokenTypes.KW_VAR ||
+                type == nl.akiar.pascal.PascalTokenTypes.KW_CONST ||
+                type == nl.akiar.pascal.PascalTokenTypes.KW_TYPE ||
+                type == nl.akiar.pascal.PascalTokenTypes.KW_PROCEDURE ||
+                type == nl.akiar.pascal.PascalTokenTypes.KW_FUNCTION) {
+                return false;
+            }
+
+            leaf = PsiTreeUtil.prevLeaf(leaf);
+        }
+
         return false;
     }
 

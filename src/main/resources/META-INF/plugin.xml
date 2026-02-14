@@ -116,6 +116,11 @@
         <!-- Pascal Unit Name Index -->
         <fileBasedIndex implementation="nl.akiar.pascal.index.PascalUnitIndex"/>
 
+        <!-- Pascal Code Completion -->
+        <completion.contributor language="ObjectPascal"
+                                implementationClass="nl.akiar.pascal.completion.PascalCompletionContributor"
+                                order="first"/>
+
         <!-- Pascal Semantic Annotator for type coloring -->
         <annotator language="ObjectPascal"
                    implementationClass="nl.akiar.pascal.annotator.PascalSemanticAnnotator"/>

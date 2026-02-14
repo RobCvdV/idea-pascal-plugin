@@ -90,7 +90,12 @@ public class PascalTypeReferenceElement extends PascalPsiElement {
     @Nullable
     public String getReferencedTypeName() {
         StringBuilder name = new StringBuilder();
-        for (ASTNode child = getNode().getFirstChildNode(); child != null; child = child.getTreeNext()) {
+        collectTypeNameParts(getNode(), name);
+        return name.length() > 0 ? name.toString() : null;
+    }
+
+    private void collectTypeNameParts(com.intellij.lang.ASTNode parent, StringBuilder name) {
+        for (com.intellij.lang.ASTNode child = parent.getFirstChildNode(); child != null; child = child.getTreeNext()) {
             if (child.getElementType() == PascalTokenTypes.IDENTIFIER) {
                 if (name.length() > 0) {
                     name.append(".");
@@ -104,9 +109,12 @@ public class PascalTypeReferenceElement extends PascalPsiElement {
                     name.append(".");
                 }
                 name.append(child.getText());
+            } else if (child.getElementType() == nl.akiar.pascal.psi.PascalElementTypes.NAME_REFERENCE) {
+                // NAME_REFERENCE wraps IDENTIFIERs in some contexts (e.g., anonymous routine
+                // parameter types where sonar-delphi produces NameReferenceNode inside TypeReferenceNode)
+                collectTypeNameParts(child, name);
             }
         }
-        return name.length() > 0 ? name.toString() : null;
     }
 
     /**

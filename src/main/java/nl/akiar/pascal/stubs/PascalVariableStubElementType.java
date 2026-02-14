@@ -31,6 +31,11 @@ public class PascalVariableStubElementType extends IStubElementType<PascalVariab
     public PascalVariableStub createStub(@NotNull PascalVariableDefinition psi, StubElement<?> parentStub) {
         String name = psi.getName();
         String typeName = psi.getTypeName();
+        // Fallback: if getTypeName() returned null (PSI sibling navigation can fail during stub
+        // creation), extract the type name directly from the AST tree parent's children.
+        if (typeName == null) {
+            typeName = extractTypeNameFromAst(psi);
+        }
         VariableKind kind = psi.getVariableKind();
         String containingScopeName = psi.getContainingScopeName();
 
@@ -99,6 +104,54 @@ public class PascalVariableStubElementType extends IStubElementType<PascalVariab
                 sink.occurrence(PascalScopedMemberIndex.FIELD_KEY, key);
             }
         }
+    }
+
+    /**
+     * Extract type name by walking the AST tree directly, bypassing PSI navigation.
+     * Used as fallback during stub creation when PSI sibling navigation fails
+     * (e.g., for anonymous routine parameters).
+     */
+    @org.jetbrains.annotations.Nullable
+    private String extractTypeNameFromAst(@NotNull PascalVariableDefinition psi) {
+        com.intellij.lang.ASTNode myNode = psi.getNode();
+        if (myNode == null) return null;
+
+        com.intellij.lang.ASTNode parentNode = myNode.getTreeParent();
+        if (parentNode == null) return null;
+
+        // Walk parent's children, find our node, then look for COLON after it
+        boolean foundSelf = false;
+        for (com.intellij.lang.ASTNode child = parentNode.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            if (!foundSelf) {
+                if (child == myNode) {
+                    foundSelf = true;
+                }
+                continue;
+            }
+            if (child.getElementType() == nl.akiar.pascal.PascalTokenTypes.COLON) {
+                // COLON found, now find the type reference after it
+                com.intellij.lang.ASTNode typeNode = child.getTreeNext();
+                while (typeNode != null) {
+                    com.intellij.psi.tree.IElementType t = typeNode.getElementType();
+                    if (t == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE ||
+                        t == nl.akiar.pascal.PascalTokenTypes.LINE_COMMENT ||
+                        t == nl.akiar.pascal.PascalTokenTypes.BLOCK_COMMENT) {
+                        typeNode = typeNode.getTreeNext();
+                        continue;
+                    }
+                    // Found the type node - extract its text
+                    if (t == nl.akiar.pascal.psi.PascalElementTypes.TYPE_REFERENCE) {
+                        PsiElement typeRefPsi = typeNode.getPsi();
+                        if (typeRefPsi instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
+                            return ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) typeRefPsi).getReferencedTypeName();
+                        }
+                    }
+                    // Plain identifier or keyword type
+                    return typeNode.getText();
+                }
+            }
+        }
+        return null;
     }
 
     @Override

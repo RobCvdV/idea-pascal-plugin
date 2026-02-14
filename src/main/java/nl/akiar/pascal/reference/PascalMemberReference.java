@@ -83,6 +83,13 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
                     resolvedQualifier = typeResult.getInScopeTypes().get(0);
                 }
             }
+            if (resolvedQualifier == null) {
+                nl.akiar.pascal.stubs.PascalRoutineIndex.RoutineLookupResult routineResult =
+                        nl.akiar.pascal.stubs.PascalRoutineIndex.findRoutinesWithUsesValidation(qualifierName, qualifier.getContainingFile(), qualifier.getTextOffset());
+                if (!routineResult.getInScopeRoutines().isEmpty()) {
+                    resolvedQualifier = routineResult.getInScopeRoutines().get(0);
+                }
+            }
         }
 
         if (resolvedQualifier == null) {
@@ -103,6 +110,12 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
             String typeName = ((PascalProperty) resolvedQualifier).getTypeName();
             if (typeName != null) {
                 typeDef = findTypeDefinition(typeName, resolvedQualifier);
+            }
+        } else if (resolvedQualifier instanceof PascalRoutine) {
+            // Function call - use return type for member lookup
+            String returnTypeName = ((PascalRoutine) resolvedQualifier).getReturnTypeName();
+            if (returnTypeName != null) {
+                typeDef = findTypeDefinition(returnTypeName, resolvedQualifier);
             }
         } else if (resolvedQualifier instanceof PascalTypeDefinition) {
             // Static member access or class reference
@@ -196,13 +209,18 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
                 }
             }
             
-            // Also check if caller is in an implementation of a method of a descendant class
+            // Also check if caller is in an implementation of a method of a descendant class.
+            // Walk up through anonymous routines to find the owning named method.
             PascalRoutine callerRoutine = com.intellij.psi.util.PsiTreeUtil.getParentOfType(myElement, PascalRoutine.class);
-            if (callerRoutine != null) {
+            while (callerRoutine != null) {
                 PascalTypeDefinition routineClass = callerRoutine.getContainingClass();
-                if (routineClass != null && isDescendantOf(routineClass, memberClass)) {
-                    return true;
+                if (routineClass != null) {
+                    if (isDescendantOf(routineClass, memberClass)) {
+                        return true;
+                    }
+                    break;
                 }
+                callerRoutine = com.intellij.psi.util.PsiTreeUtil.getParentOfType(callerRoutine, PascalRoutine.class);
             }
 
             return false;

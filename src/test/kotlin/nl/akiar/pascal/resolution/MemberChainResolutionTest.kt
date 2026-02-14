@@ -321,6 +321,8 @@ class MemberChainResolutionTest : BasePlatformTestCase() {
 
         assertNotNull("'TMyClass' should be resolved", result.resolvedElements[0])
         assertTrue("'TMyClass' should resolve to PascalTypeDefinition", result.resolvedElements[0] is PascalTypeDefinition)
+        assertNotNull("'Create' should be resolved as class method", result.resolvedElements[1])
+        assertTrue("'Create' should resolve to PascalRoutine", result.resolvedElements[1] is PascalRoutine)
     }
 
     // ==================== Helper Methods ====================
@@ -378,6 +380,104 @@ class MemberChainResolutionTest : BasePlatformTestCase() {
         }
     }
 
+    // ==================== Cross-Unit Member Chain via getMembers Fallback ====================
+
+    @Test
+    fun testCrossUnitMemberViaGetMembersFallback() {
+        // Type defined in another unit with a method
+        myFixture.configureByText("EntityUnit.pas", """
+            unit EntityUnit;
+            interface
+            type
+              TEntity = class
+              public
+                function GetId: Integer;
+              end;
+            implementation
+            function TEntity.GetId: Integer;
+            begin
+              Result := 0;
+            end;
+            end.
+        """.trimIndent())
+
+        val mainFile = myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            uses EntityUnit;
+            implementation
+            procedure Test;
+            var
+              E: TEntity;
+            begin
+              E.GetId<caret>;
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'GetId' identifier", element)
+
+        val result = MemberChainResolver.resolveChain(element!!)
+        assertEquals("Chain should have 2 elements", 2, result.chainElements.size)
+        assertNotNull("'E' should be resolved", result.resolvedElements[0])
+        assertNotNull("'GetId' should be resolved via getMembers fallback", result.resolvedElements[1])
+        assertTrue("'GetId' should resolve to PascalRoutine", result.resolvedElements[1] is PascalRoutine)
+    }
+
+    @Test
+    fun testCrossUnitInheritedMemberChain() {
+        myFixture.configureByText("BaseUnit.pas", """
+            unit BaseUnit;
+            interface
+            type
+              TBase = class
+              public
+                procedure BaseMethod;
+              end;
+            implementation
+            procedure TBase.BaseMethod; begin end;
+            end.
+        """.trimIndent())
+
+        myFixture.configureByText("DerivedUnit.pas", """
+            unit DerivedUnit;
+            interface
+            uses BaseUnit;
+            type
+              TDerived = class(TBase)
+              public
+                procedure DerivedMethod;
+              end;
+            implementation
+            procedure TDerived.DerivedMethod; begin end;
+            end.
+        """.trimIndent())
+
+        val mainFile = myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            uses DerivedUnit;
+            implementation
+            procedure Test;
+            var
+              D: TDerived;
+            begin
+              D.BaseMethod<caret>;
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'BaseMethod' identifier", element)
+
+        val result = MemberChainResolver.resolveChain(element!!)
+        assertEquals("Chain should have 2 elements", 2, result.chainElements.size)
+        assertNotNull("'D' should be resolved", result.resolvedElements[0])
+        assertNotNull("'BaseMethod' should be resolved (inherited, cross-unit)", result.resolvedElements[1])
+        assertTrue("Should resolve to PascalRoutine", result.resolvedElements[1] is PascalRoutine)
+    }
+
     @Test
     fun testUnresolvedFirstElement() {
         val mainFile = myFixture.configureByText("Main.pas", """
@@ -398,5 +498,249 @@ class MemberChainResolutionTest : BasePlatformTestCase() {
             assertNull("UnknownVar should not be resolved", result.resolvedElements[0])
             assertNull("SomeMethod should not be resolved (no type context)", result.resolvedElements[1])
         }
+    }
+
+    // ==================== Class Method on Type Tests ====================
+
+    @Test
+    fun testClassMethodOnType() {
+        myFixture.configureByText("Types.pas", """
+            unit Types;
+            interface
+            type
+              TRequestToLegacyCode = class
+              public
+                class function WithAction(AOperatorId: Integer; ARequest: String): TRequestToLegacyCode;
+              end;
+            implementation
+            class function TRequestToLegacyCode.WithAction(AOperatorId: Integer; ARequest: String): TRequestToLegacyCode;
+            begin
+              Result := nil;
+            end;
+            end.
+        """.trimIndent())
+
+        val mainFile = myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            uses Types;
+            implementation
+            procedure Test;
+            begin
+              TRequestToLegacyCode.WithAction<caret>(1, 'test');
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'WithAction' identifier", element)
+
+        val result = MemberChainResolver.resolveChain(element!!)
+
+        assertEquals("Chain should have 2 elements", 2, result.chainElements.size)
+        assertNotNull("'TRequestToLegacyCode' should be resolved as type", result.resolvedElements[0])
+        assertTrue("Should resolve to PascalTypeDefinition", result.resolvedElements[0] is PascalTypeDefinition)
+        assertNotNull("'WithAction' should be resolved as class method", result.resolvedElements[1])
+        assertTrue("'WithAction' should resolve to PascalRoutine", result.resolvedElements[1] is PascalRoutine)
+    }
+
+    @Test
+    fun testClassMethodChainOnType() {
+        myFixture.configureByText("Types.pas", """
+            unit Types;
+            interface
+            type
+              TBuilder = class
+              public
+                class function Create: TBuilder;
+                function Build: Integer;
+              end;
+            implementation
+            class function TBuilder.Create: TBuilder;
+            begin
+              Result := nil;
+            end;
+            function TBuilder.Build: Integer;
+            begin
+              Result := 0;
+            end;
+            end.
+        """.trimIndent())
+
+        val mainFile = myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            uses Types;
+            implementation
+            procedure Test;
+            var
+              X: Integer;
+            begin
+              X := TBuilder.Create.Build<caret>;
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'Build' identifier", element)
+
+        val result = MemberChainResolver.resolveChain(element!!)
+
+        assertEquals("Chain should have 3 elements", 3, result.chainElements.size)
+        assertNotNull("'TBuilder' should be resolved", result.resolvedElements[0])
+        assertTrue("'TBuilder' should resolve to PascalTypeDefinition", result.resolvedElements[0] is PascalTypeDefinition)
+        assertNotNull("'Create' should be resolved", result.resolvedElements[1])
+        assertTrue("'Create' should resolve to PascalRoutine", result.resolvedElements[1] is PascalRoutine)
+        assertNotNull("'Build' should be resolved via Create return type", result.resolvedElements[2])
+        assertTrue("'Build' should resolve to PascalRoutine", result.resolvedElements[2] is PascalRoutine)
+    }
+
+    // ==================== Function as First Element Tests ====================
+
+    @Test
+    fun testFunctionAsFirstElementInChain() {
+        myFixture.configureByText("Types.pas", """
+            unit Types;
+            interface
+            type
+              TCoStatus = class
+              public
+                procedure HandleStatus;
+              end;
+            function CoStatus: TCoStatus;
+            implementation
+            function CoStatus: TCoStatus;
+            begin
+              Result := nil;
+            end;
+            procedure TCoStatus.HandleStatus;
+            begin
+            end;
+            end.
+        """.trimIndent())
+
+        val mainFile = myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            uses Types;
+            implementation
+            procedure Test;
+            begin
+              CoStatus.HandleStatus<caret>;
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'HandleStatus' identifier", element)
+
+        val result = MemberChainResolver.resolveChain(element!!)
+
+        assertEquals("Chain should have 2 elements", 2, result.chainElements.size)
+        assertEquals("First element should be 'CoStatus'", "CoStatus", result.chainElements[0].text)
+        assertEquals("Second element should be 'HandleStatus'", "HandleStatus", result.chainElements[1].text)
+
+        assertNotNull("'CoStatus' should be resolved as routine", result.resolvedElements[0])
+        assertTrue("'CoStatus' should resolve to PascalRoutine", result.resolvedElements[0] is PascalRoutine)
+        assertNotNull("'HandleStatus' should be resolved via return type", result.resolvedElements[1])
+        assertTrue("'HandleStatus' should resolve to PascalRoutine", result.resolvedElements[1] is PascalRoutine)
+    }
+
+    @Test
+    fun testFunctionChainWithFieldAccess() {
+        myFixture.configureByText("Types.pas", """
+            unit Types;
+            interface
+            type
+              TConfig = class
+              public
+                ConfigTitle: String;
+              end;
+            function GetConfig: TConfig;
+            implementation
+            function GetConfig: TConfig;
+            begin
+              Result := nil;
+            end;
+            end.
+        """.trimIndent())
+
+        val mainFile = myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            uses Types;
+            implementation
+            procedure Test;
+            var
+              S: String;
+            begin
+              S := GetConfig.ConfigTitle<caret>;
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'ConfigTitle' identifier", element)
+
+        val result = MemberChainResolver.resolveChain(element!!)
+
+        assertEquals("Chain should have 2 elements", 2, result.chainElements.size)
+        assertNotNull("'GetConfig' should be resolved", result.resolvedElements[0])
+        assertTrue("'GetConfig' should resolve to PascalRoutine", result.resolvedElements[0] is PascalRoutine)
+        assertNotNull("'ConfigTitle' should be resolved via return type", result.resolvedElements[1])
+    }
+
+    // ==================== Function Return Type in Deep Chain ====================
+
+    @Test
+    fun testFunctionReturnTypeInDeepChain() {
+        myFixture.configureByText("Types.pas", """
+            unit Types;
+            interface
+            type
+              TInner = class
+              public
+                procedure DoWork;
+              end;
+              TOuter = class
+              public
+                function GetInner: TInner;
+              end;
+            implementation
+            function TOuter.GetInner: TInner;
+            begin
+              Result := nil;
+            end;
+            procedure TInner.DoWork;
+            begin
+            end;
+            end.
+        """.trimIndent())
+
+        val mainFile = myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            uses Types;
+            implementation
+            procedure Test;
+            var
+              Obj: TOuter;
+            begin
+              Obj.GetInner.DoWork<caret>;
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'DoWork' identifier", element)
+
+        val result = MemberChainResolver.resolveChain(element!!)
+
+        assertEquals("Chain should have 3 elements", 3, result.chainElements.size)
+        assertNotNull("'Obj' should be resolved", result.resolvedElements[0])
+        assertNotNull("'GetInner' should be resolved", result.resolvedElements[1])
+        assertTrue("'GetInner' should resolve to PascalRoutine", result.resolvedElements[1] is PascalRoutine)
+        assertNotNull("'DoWork' should be resolved via GetInner return type", result.resolvedElements[2])
+        assertTrue("'DoWork' should resolve to PascalRoutine", result.resolvedElements[2] is PascalRoutine)
     }
 }

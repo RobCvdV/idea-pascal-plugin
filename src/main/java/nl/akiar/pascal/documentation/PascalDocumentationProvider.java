@@ -644,6 +644,9 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 } else if (resolved instanceof PascalProperty) {
                     qualifierTypeName = ((PascalProperty) resolved).getTypeName();
                     break;
+                } else if (resolved instanceof PascalRoutine) {
+                    qualifierTypeName = ((PascalRoutine) resolved).getReturnTypeName();
+                    break;
                 } else if (resolved instanceof PascalTypeDefinition) {
                     qualifierTypeName = ((PascalTypeDefinition) resolved).getName();
                     break;
@@ -845,6 +848,17 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         if (typeName != null && !typeName.isEmpty()) {
             sb.append(": ");
             appendTypeLink(sb, typeName);
+        } else {
+            // Try to infer type from initializer (inline var)
+            PsiFile originFile = varDef.getContainingFile();
+            if (originFile != null) {
+                PascalTypeDefinition inferredType = MemberChainResolver.getInferredTypeOf(varDef, originFile);
+                if (inferredType != null && inferredType.getName() != null) {
+                    sb.append(": ");
+                    appendTypeLink(sb, inferredType.getName());
+                    sb.append(" <span class='").append(DocumentationMarkup.CLASS_GRAYED).append("'>(inferred)</span>");
+                }
+            }
         }
     }
 

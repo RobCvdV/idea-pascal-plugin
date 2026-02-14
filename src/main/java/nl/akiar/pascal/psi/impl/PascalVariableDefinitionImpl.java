@@ -81,6 +81,28 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
             }
         }
 
+        // 3. Fallback: walk the AST tree parent's children to find COLON after this node.
+        //    During stub creation, PSI sibling navigation may not work because the stub tree
+        //    is being built. Pure AST navigation always works.
+        ASTNode myNode = getNode();
+        if (myNode != null) {
+            ASTNode parentNode = myNode.getTreeParent();
+            if (parentNode != null) {
+                boolean foundSelf = false;
+                for (ASTNode child = parentNode.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+                    if (!foundSelf) {
+                        if (child == myNode) {
+                            foundSelf = true;
+                        }
+                        continue;
+                    }
+                    if (child.getElementType() == PascalTokenTypes.COLON) {
+                        return parseTypeNameFromAstSiblings(child);
+                    }
+                }
+            }
+        }
+
         return null;
     }
 
@@ -104,6 +126,22 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
                 // Found the type
                 return buildTypeName(child);
             }
+        }
+        return null;
+    }
+
+    @Nullable
+    private String parseTypeNameFromAstSiblings(ASTNode colonNode) {
+        ASTNode current = colonNode.getTreeNext();
+        while (current != null) {
+            IElementType type = current.getElementType();
+            if (type == PascalTokenTypes.WHITE_SPACE ||
+                type == PascalTokenTypes.LINE_COMMENT ||
+                type == PascalTokenTypes.BLOCK_COMMENT) {
+                current = current.getTreeNext();
+                continue;
+            }
+            return buildTypeName(current);
         }
         return null;
     }

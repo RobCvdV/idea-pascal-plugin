@@ -501,8 +501,20 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         com.intellij.lang.ASTNode node = getNode();
         if (node == null) return null;
 
-        // Find the colon after the parameter list, then find the identifier after the colon
+        // First check for RETURN_TYPE composite node (created by parser)
         com.intellij.lang.ASTNode child = node.getFirstChildNode();
+        while (child != null) {
+            if (child.getElementType() == nl.akiar.pascal.psi.PascalElementTypes.RETURN_TYPE) {
+                com.intellij.psi.PsiElement psi = child.getPsi();
+                if (psi instanceof nl.akiar.pascal.psi.PascalReturnType) {
+                    return ((nl.akiar.pascal.psi.PascalReturnType) psi).getTypeName();
+                }
+            }
+            child = child.getTreeNext();
+        }
+
+        // Fallback: find the colon after the parameter list, then find the identifier after the colon
+        child = node.getFirstChildNode();
         boolean foundColon = false;
 
         while (child != null) {

@@ -60,7 +60,7 @@ object MemberResolutionCache {
     private fun typeNameOf(element: PsiElement?): String? = when (element) {
         is PascalVariableDefinition -> element.typeName
         is PascalProperty -> element.typeName
-        is PascalRoutine -> null
+        is PascalRoutine -> element.returnTypeName
         else -> null
     }
 

@@ -447,7 +447,8 @@ class PascalSonarParser : PsiParser {
             // (standalone, method, constructor, etc.) based on context.
             node is org.sonar.plugins.communitydelphi.api.ast.RoutineImplementationNode ||
                 node is org.sonar.plugins.communitydelphi.api.ast.RoutineDeclarationNode ||
-                node is org.sonar.plugins.communitydelphi.api.ast.RoutineNode -> {
+                node is org.sonar.plugins.communitydelphi.api.ast.RoutineNode ||
+                node is org.sonar.plugins.communitydelphi.api.ast.AnonymousMethodNode -> {
                 // Check if this is a qualified method name (TClass.MethodName)
                 // by looking for a qualified name pattern in the routine heading
                 val heading = node.getChild(0)

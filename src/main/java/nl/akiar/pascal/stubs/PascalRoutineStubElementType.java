@@ -96,7 +96,21 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
     private String extractReturnTypeName(@NotNull PascalRoutine psi) {
         ASTNode node = psi.getNode();
         if (node == null) return null;
+
+        // First check for RETURN_TYPE composite node (created by parser)
         ASTNode child = node.getFirstChildNode();
+        while (child != null) {
+            if (child.getElementType() == nl.akiar.pascal.psi.PascalElementTypes.RETURN_TYPE) {
+                com.intellij.psi.PsiElement returnTypePsi = child.getPsi();
+                if (returnTypePsi instanceof nl.akiar.pascal.psi.PascalReturnType) {
+                    return ((nl.akiar.pascal.psi.PascalReturnType) returnTypePsi).getTypeName();
+                }
+            }
+            child = child.getTreeNext();
+        }
+
+        // Fallback: find the colon after the parameter list
+        child = node.getFirstChildNode();
         boolean foundColon = false;
         while (child != null) {
             com.intellij.psi.tree.IElementType type = child.getElementType();

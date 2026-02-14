@@ -270,14 +270,26 @@ object MemberChainResolver {
                 else -> {
                     val typeResult = nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(first.text, originFile, first.textOffset)
                     typeResult.inScopeTypes.firstOrNull()?.also { maybeLog("[MemberTraversal] first resolved as type '${first.text}' -> ${it.name}", originFile) }
+                        ?: run {
+                            // Try routine index (function as first element in chain, e.g. CoStatus.HandleStatus)
+                            val routineResult = PascalRoutineIndex.findRoutinesWithUsesValidation(first.text, originFile, first.textOffset)
+                            routineResult.inScopeRoutines.firstOrNull()?.also {
+                                maybeLog("[MemberTraversal] first resolved as routine '${first.text}' -> returnType=${it.returnTypeName}", originFile)
+                            }
+                        }
                 }
             }
             results[0] = resolvedFirst
 
-            var currentType: PascalTypeDefinition? = getTypeOf(resolvedFirst, originFile)
+            var currentType: PascalTypeDefinition? = when (resolvedFirst) {
+                is PascalTypeDefinition -> resolvedFirst  // Type used directly (e.g. TMyClass.Create)
+                else -> getTypeOf(resolvedFirst, originFile)
+            }
             var currentOwnerName: String? = when (resolvedFirst) {
                 is PascalVariableDefinition -> resolvedFirst.typeName
                 is PascalProperty -> resolvedFirst.typeName
+                is PascalRoutine -> resolvedFirst.returnTypeName
+                is PascalTypeDefinition -> resolvedFirst.name
                 else -> null
             }
             if (resolvedFirst != null) {
@@ -470,7 +482,7 @@ object MemberChainResolver {
     private fun getTypeOf(element: PsiElement?, originFile: PsiFile): PascalTypeDefinition? {
         if (element == null) return null
         val typeName = when (element) {
-            is PascalVariableDefinition -> element.typeName
+            is PascalVariableDefinition -> element.typeName ?: inferTypeFromInitializer(element, originFile)
             is PascalProperty -> element.typeName
             is PascalRoutine -> element.returnTypeName  // Now uses stub-based return type
             else -> null
@@ -484,7 +496,7 @@ object MemberChainResolver {
             }
         }
 
-        val disableBuiltins = true  //java.lang.Boolean.getBoolean("pascal.memberTraversal.builtin.disable")
+        val disableBuiltins = false
 
         return MemberResolutionCache.getOrComputeTypeOf(element, originFile, contextFile) {
             if (typeName.equals("TStrings", ignoreCase = true)) {
@@ -551,6 +563,99 @@ object MemberChainResolver {
         }
     }
 
+    /**
+     * Public entry point for getting the inferred type of an inline variable.
+     * Used by documentation provider to show inferred types.
+     */
+    @JvmStatic
+    fun getInferredTypeOf(varDef: PascalVariableDefinition, originFile: PsiFile): PascalTypeDefinition? {
+        if (!varDef.typeName.isNullOrBlank()) return null // has explicit type
+        val inferredTypeName = inferTypeFromInitializer(varDef, originFile) ?: return null
+        val typeResult = PascalTypeIndex.findTypeWithTransitiveDeps(inferredTypeName, originFile, varDef.textOffset)
+        return typeResult.inScopeTypes.firstOrNull()
+            ?: PascalTypeIndex.findTypesWithUsesValidation(inferredTypeName, originFile, varDef.textOffset).inScopeTypes.firstOrNull()
+    }
+
+    /**
+     * Infer the type of an inline variable from its initializer expression.
+     * For `var X := SomeFunc()`, resolves SomeFunc and returns its return type name.
+     * For `var X := SomeVar`, resolves SomeVar and returns its type name.
+     */
+    private fun inferTypeFromInitializer(varDef: PascalVariableDefinition, originFile: PsiFile): String? {
+        // Walk AST siblings after the variable definition looking for ASSIGN (:=)
+        val node = varDef.node ?: return null
+        val parentNode = node.treeParent ?: return null
+
+        var foundSelf = false
+        var foundAssign = false
+        var child = parentNode.firstChildNode
+        while (child != null) {
+            if (!foundSelf) {
+                if (child == node) foundSelf = true
+                child = child.treeNext
+                continue
+            }
+            val elementType = child.elementType
+            if (elementType == PascalTokenTypes.ASSIGN) {
+                foundAssign = true
+                child = child.treeNext
+                continue
+            }
+            if (foundAssign) {
+                // Skip whitespace/comments
+                if (elementType == PascalTokenTypes.WHITE_SPACE ||
+                    elementType == PascalTokenTypes.LINE_COMMENT ||
+                    elementType == PascalTokenTypes.BLOCK_COMMENT) {
+                    child = child.treeNext
+                    continue
+                }
+                // Found the first meaningful node after :=
+                // The identifier may be a direct child (simple assignment) or nested
+                // inside an expression node (e.g. PRIMARY_EXPRESSION for function calls)
+                val identifierNode = if (elementType == PascalTokenTypes.IDENTIFIER) {
+                    child
+                } else {
+                    // Drill into expression nodes to find the first identifier
+                    nl.akiar.pascal.psi.PsiUtil.findFirstRecursiveAnyOf(
+                        child,
+                        PascalTokenTypes.IDENTIFIER
+                    )
+                }
+                if (identifierNode != null) {
+                    val rhsName = identifierNode.text
+                    maybeLog("[MemberTraversal] inferType: trying RHS identifier '$rhsName'", originFile)
+
+                    // Try as routine first (function call)
+                    val routineResult = PascalRoutineIndex.findRoutinesWithUsesValidation(rhsName, originFile, identifierNode.startOffset)
+                    val routine = routineResult.inScopeRoutines.firstOrNull()
+                    if (routine != null && !routine.returnTypeName.isNullOrBlank()) {
+                        maybeLog("[MemberTraversal] inferType: '$rhsName' is routine, returnType='${routine.returnTypeName}'", originFile)
+                        return routine.returnTypeName
+                    }
+
+                    // Try as variable
+                    val varResult = PascalVariableIndex.findVariablesWithUsesValidation(rhsName, originFile, identifierNode.startOffset)
+                    val variable = varResult.inScopeVariables.firstOrNull()
+                    if (variable != null && !variable.typeName.isNullOrBlank()) {
+                        maybeLog("[MemberTraversal] inferType: '$rhsName' is variable, typeName='${variable.typeName}'", originFile)
+                        return variable.typeName
+                    }
+
+                    // Try as property
+                    val props = PascalPropertyIndex.findProperties(rhsName, originFile.project)
+                    val prop = props.firstOrNull()
+                    if (prop != null && !prop.typeName.isNullOrBlank()) {
+                        maybeLog("[MemberTraversal] inferType: '$rhsName' is property, typeName='${prop.typeName}'", originFile)
+                        return prop.typeName
+                    }
+                }
+                break
+            }
+            child = child.treeNext
+        }
+        return null
+    }
+
     private fun findMemberInType(typeDef: PascalTypeDefinition, name: String, callSiteFile: PsiFile, includeAncestors: Boolean): PsiElement? {
         val project = callSiteFile.project
         val callSiteUnit = nl.akiar.pascal.psi.PsiUtil.getUnitName(callSiteFile)
@@ -594,36 +699,15 @@ object MemberChainResolver {
             if (routine != null) return routine
         }
 
-        // 2. Strict unit-local PSI scan as last-resort fallback
+        // 2. Fallback: use PSI-based getMembers(true) which handles inheritance and works cross-unit
         if (!DumbService.isDumb(project)) {
-            val ownerUnit = typeDef.unitName
-            if (!ownerUnit.isNullOrBlank() && ownerUnit.equals(callSiteUnit, ignoreCase = true)) {
-                // Same unit: scan PSI
-                val fileFields = PsiTreeUtil.findChildrenOfType(callSiteFile, PascalVariableDefinition::class.java)
-                val fHit = fileFields.firstOrNull { f ->
-                    f.name.equals(name, true) &&
-                    f.variableKind == nl.akiar.pascal.psi.VariableKind.FIELD &&
-                    f.containingClass?.name?.let { ownerName -> owners.any { it.name.equals(ownerName, true) } } == true &&
-                    isVisible(f, callSiteFile)
+            val allMembers = typeDef.getMembers(true)
+            for (m in allMembers) {
+                if (m is com.intellij.psi.PsiNameIdentifierOwner && m.name.equals(name, ignoreCase = true)) {
+                    if (isVisible(m, callSiteFile)) {
+                        return m
+                    }
                 }
-                if (fHit != null) return fHit
-
-                val fileProps = PsiTreeUtil.findChildrenOfType(callSiteFile, PascalProperty::class.java)
-                val pHit = fileProps.firstOrNull { p ->
-                    p.name.equals(name, true) &&
-                    p.containingClass?.name?.let { ownerName -> owners.any { it.name.equals(ownerName, true) } } == true &&
-                    isVisible(p, callSiteFile)
-                }
-                if (pHit != null) return pHit
-
-                val fileRoutines = PsiTreeUtil.findChildrenOfType(callSiteFile, PascalRoutine::class.java)
-                val rHit = fileRoutines.firstOrNull { r ->
-                    r.name.equals(name, true) &&
-                    (r.containingClassName?.let { ownerName -> owners.any { it.name.equals(ownerName, true) } } == true ||
-                     r.containingClass?.name?.let { ownerName -> owners.any { it.name.equals(ownerName, true) } } == true) &&
-                    isVisible(r, callSiteFile)
-                }
-                if (rHit != null) return rHit
             }
         }
 

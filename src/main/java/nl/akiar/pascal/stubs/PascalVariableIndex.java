@@ -246,6 +246,21 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
         nl.akiar.pascal.psi.PascalTypeDefinition containingClass =
                 com.intellij.psi.util.PsiTreeUtil.getParentOfType(elementAtOffset, nl.akiar.pascal.psi.PascalTypeDefinition.class);
 
+        // In implementation methods (e.g., procedure TMyClass.MyMethod), the code is NOT a PSI
+        // child of the class definition. Derive containingClass from the routine's owner type,
+        // walking up through anonymous routines to find the outermost named method.
+        if (containingClass == null && containingRoutine != null) {
+            nl.akiar.pascal.psi.PascalRoutine r = containingRoutine;
+            while (r != null) {
+                nl.akiar.pascal.psi.PascalTypeDefinition routineClass = r.getContainingClass();
+                if (routineClass != null) {
+                    containingClass = routineClass;
+                    break;
+                }
+                r = com.intellij.psi.util.PsiTreeUtil.getParentOfType(r, nl.akiar.pascal.psi.PascalRoutine.class);
+            }
+        }
+
         PascalVariableDefinition bestLocalMatch = null;
         int bestLocalDistance = Integer.MAX_VALUE;
         PascalVariableDefinition bestFieldMatch = null;
@@ -267,7 +282,9 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
             if (kind == VariableKind.LOCAL || kind == VariableKind.PARAMETER || kind == VariableKind.LOOP_VAR) {
                 nl.akiar.pascal.psi.PascalRoutine varRoutine =
                         com.intellij.psi.util.PsiTreeUtil.getParentOfType(var, nl.akiar.pascal.psi.PascalRoutine.class);
-                if (varRoutine != null && varRoutine.equals(containingRoutine)) {
+                // Check if the variable's routine is the same as or an ancestor of the containing routine.
+                // This allows anonymous routines to see variables from enclosing scopes.
+                if (varRoutine != null && isRoutineOrAncestor(varRoutine, containingRoutine)) {
                     if (distance < bestLocalDistance) {
                         bestLocalDistance = distance;
                         bestLocalMatch = var;
@@ -297,6 +314,22 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
         // No scope-matched variable found — return null rather than an arbitrary match
         // (e.g., a parameter from a different routine should not be returned)
         return null;
+    }
+
+    /**
+     * Check if {@code candidate} is the same routine as {@code current} or is an ancestor
+     * (enclosing routine). This allows variables from an outer routine to be visible
+     * inside nested anonymous routines.
+     */
+    private static boolean isRoutineOrAncestor(
+            @NotNull nl.akiar.pascal.psi.PascalRoutine candidate,
+            @Nullable nl.akiar.pascal.psi.PascalRoutine current) {
+        nl.akiar.pascal.psi.PascalRoutine r = current;
+        while (r != null) {
+            if (r.equals(candidate)) return true;
+            r = com.intellij.psi.util.PsiTreeUtil.getParentOfType(r, nl.akiar.pascal.psi.PascalRoutine.class);
+        }
+        return false;
     }
 
     /**

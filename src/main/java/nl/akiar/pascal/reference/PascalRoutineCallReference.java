@@ -56,8 +56,13 @@ public class PascalRoutineCallReference extends PsiReferenceBase<PsiElement> {
     }
 
     private PascalTypeDefinition findContainingClass(PsiElement element) {
+        // Walk up through nested routines (anonymous routines) to find the owning class.
         PascalRoutine routine = PsiTreeUtil.getParentOfType(element, PascalRoutine.class);
-        if (routine != null) return routine.getContainingClass();
+        while (routine != null) {
+            PascalTypeDefinition cls = routine.getContainingClass();
+            if (cls != null) return cls;
+            routine = PsiTreeUtil.getParentOfType(routine, PascalRoutine.class);
+        }
         return PsiTreeUtil.getParentOfType(element, PascalTypeDefinition.class);
     }
 

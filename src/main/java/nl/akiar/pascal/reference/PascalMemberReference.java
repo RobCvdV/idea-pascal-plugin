@@ -93,6 +93,25 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
         }
 
         if (resolvedQualifier == null) {
+            // Try unit-qualified fallback: if qualifier matches a unit name, look up the member in that unit
+            String qualifierName = qualifier.getText();
+            nl.akiar.pascal.uses.PascalUsesClauseInfo usesInfo = nl.akiar.pascal.uses.PascalUsesClauseInfo.Companion.parse(myElement.getContainingFile());
+            java.util.List<String> availableUnits = usesInfo.getAvailableUnits(myElement.getTextOffset());
+            for (String unit : availableUnits) {
+                if (unit.equalsIgnoreCase(qualifierName)) {
+                    nl.akiar.pascal.project.PascalProjectService svc = nl.akiar.pascal.project.PascalProjectService.getInstance(myElement.getProject());
+                    com.intellij.openapi.vfs.VirtualFile vf = svc.resolveUnit(unit, true);
+                    if (vf != null) {
+                        PsiFile unitPsiFile = com.intellij.psi.PsiManager.getInstance(myElement.getProject()).findFile(vf);
+                        if (unitPsiFile != null) {
+                            String unitName = nl.akiar.pascal.psi.PsiUtil.getUnitName(unitPsiFile);
+                            PsiElement unitMember = nl.akiar.pascal.resolution.MemberChainResolver.findGlobalMemberInUnit(memberName, unitName, myElement.getProject());
+                            if (unitMember != null) return unitMember;
+                        }
+                    }
+                    break;
+                }
+            }
             LOG.debug("[MemberTraversal] qualifier unresolved for '" + myElement.getText() + "'");
             return null;
         }

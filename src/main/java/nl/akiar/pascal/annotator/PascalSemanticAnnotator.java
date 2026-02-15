@@ -5,6 +5,7 @@ import com.intellij.lang.annotation.Annotator;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -227,10 +228,14 @@ public class PascalSemanticAnnotator implements Annotator {
         for (com.intellij.psi.PsiReference ref : refs) {
             PsiElement resolved = ref.resolve();
             if (resolved != null) {
-                if (resolved instanceof PascalRoutine) {
+                if (resolved instanceof PsiFile) {
+                    // Unit-prefix identifier (e.g. "Spring" in Spring.Collections.Lists.TList)
+                    applyHighlight(element, holder, PascalSyntaxHighlighter.UNIT_REFERENCE);
+                    return;
+                } else if (resolved instanceof PascalRoutine) {
                     PascalRoutine routine = (PascalRoutine) resolved;
-                    TextAttributesKey key = routine.isMethod() ? 
-                            PascalSyntaxHighlighter.METHOD_CALL : 
+                    TextAttributesKey key = routine.isMethod() ?
+                            PascalSyntaxHighlighter.METHOD_CALL :
                             PascalSyntaxHighlighter.ROUTINE_CALL;
                     applyHighlight(element, holder, key);
                     return;

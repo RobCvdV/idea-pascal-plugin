@@ -9,6 +9,7 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.util.PsiTreeUtil
 import nl.akiar.pascal.PascalTokenTypes
+import com.intellij.psi.PsiManager
 import nl.akiar.pascal.psi.PascalProperty
 import nl.akiar.pascal.psi.PascalRoutine
 import nl.akiar.pascal.psi.PascalTypeDefinition
@@ -200,6 +201,11 @@ object MemberChainResolver {
      * Collect all identifiers in a member access chain.
      * For "a.b.c", returns [a, b, c]
      */
+    private fun isChainIdentifier(element: PsiElement): Boolean {
+        val elemType = element.node.elementType
+        return elemType.toString().contains("IDENTIFIER") || elemType == PascalTokenTypes.KW_SELF
+    }
+
     private fun collectChain(element: PsiElement): List<PsiElement> {
         // Collect identifiers following DOTs: qualifier.Member.Next
         val parts = mutableListOf<PsiElement>()
@@ -208,7 +214,7 @@ object MemberChainResolver {
         var prev = PsiTreeUtil.prevLeaf(element)
         while (prev != null && prev.node.elementType == PascalTokenTypes.DOT) {
             val beforeDot = PsiTreeUtil.prevLeaf(prev)
-            if (beforeDot == null) {
+            if (beforeDot == null || !isChainIdentifier(beforeDot)) {
                 break
             }
             start = beforeDot
@@ -217,7 +223,7 @@ object MemberChainResolver {
         // Walk forward collecting identifiers separated by DOT
         var current: PsiElement? = start
         while (current != null) {
-            if (current.node.elementType.toString().contains("IDENTIFIER")) {
+            if (isChainIdentifier(current)) {
                 parts.add(current)
             }
             val next = PsiTreeUtil.nextLeaf(current)
@@ -258,52 +264,96 @@ object MemberChainResolver {
             val availableUnitsAtOffset = usesInfo.getAvailableUnits(first.textOffset)
             maybeLog("[MemberTraversal] uses at offset=${first.textOffset} size=${availableUnitsAtOffset.size} sample=${availableUnitsAtOffset.take(10)}", originFile)
 
-            val varResult = nl.akiar.pascal.stubs.PascalVariableIndex.findVariablesWithUsesValidation(first.text, originFile, first.textOffset)
-            val resolvedFirst: PsiElement? = when {
-                varResult.inScopeVariables.isNotEmpty() -> {
-                    maybeLog("[MemberTraversal] first resolve refs=${varResult.inScopeVariables.size} for '${first.text}'", originFile)
-                    varResult.inScopeVariables.first().also {
-                        maybeLog("[MemberTraversal] first resolved as variable '${first.text}'", originFile)
-                        maybeLog("[MemberTraversal] first resolved -> ${it.javaClass.simpleName}", originFile)
+            var startIndex = 1
+            var currentType: PascalTypeDefinition? = null
+            var currentOwnerName: String? = null
+
+            // Check for Self keyword as first element
+            if (first.node.elementType == PascalTokenTypes.KW_SELF) {
+                val containingClass = findContainingClass(first)
+                results[0] = containingClass
+                currentType = containingClass
+                currentOwnerName = containingClass?.name
+                maybeLog("[MemberTraversal] first resolved as Self -> class '${containingClass?.name}'", originFile)
+            }
+            // Try unit-qualified prefix (e.g. Spring.Collections.Lists.TList)
+            else if (chain.size >= 2) {
+                val unitPrefixResult = tryResolveUnitPrefix(chain, availableUnitsAtOffset, originFile.project)
+                if (unitPrefixResult != null) {
+                    val (prefixLen, unitPsiFile) = unitPrefixResult
+                    for (idx in 0 until prefixLen) {
+                        results[idx] = unitPsiFile
+                    }
+                    val memberName = chain[prefixLen].text
+                    val unitName = nl.akiar.pascal.psi.PsiUtil.getUnitName(unitPsiFile)
+                    val globalMember = findGlobalMemberInUnit(memberName, unitName, originFile.project)
+                    results[prefixLen] = globalMember
+                    maybeLog("[MemberTraversal] unit-qualified: prefix=$prefixLen unitName=$unitName member=$memberName -> ${globalMember?.javaClass?.simpleName}", originFile)
+                    currentType = when (globalMember) {
+                        is PascalTypeDefinition -> globalMember
+                        else -> getTypeOf(globalMember, originFile)
+                    }
+                    currentOwnerName = when (globalMember) {
+                        is PascalVariableDefinition -> globalMember.typeName
+                        is PascalProperty -> globalMember.typeName
+                        is PascalRoutine -> globalMember.returnTypeName
+                        is PascalTypeDefinition -> globalMember.name
+                        else -> null
+                    }
+                    if (currentType != null) currentOwnerName = currentType.name
+                    startIndex = prefixLen + 1
+                }
+            }
+
+            // Normal first-element resolution (if not handled by Self or unit prefix)
+            if (startIndex == 1 && results[0] == null) {
+                val varResult = nl.akiar.pascal.stubs.PascalVariableIndex.findVariablesWithUsesValidation(first.text, originFile, first.textOffset)
+                val resolvedFirst: PsiElement? = when {
+                    varResult.inScopeVariables.isNotEmpty() -> {
+                        maybeLog("[MemberTraversal] first resolve refs=${varResult.inScopeVariables.size} for '${first.text}'", originFile)
+                        varResult.inScopeVariables.first().also {
+                            maybeLog("[MemberTraversal] first resolved as variable '${first.text}'", originFile)
+                            maybeLog("[MemberTraversal] first resolved -> ${it.javaClass.simpleName}", originFile)
+                        }
+                    }
+                    else -> {
+                        val typeResult = nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(first.text, originFile, first.textOffset)
+                        typeResult.inScopeTypes.firstOrNull()?.also { maybeLog("[MemberTraversal] first resolved as type '${first.text}' -> ${it.name}", originFile) }
+                            ?: run {
+                                // Try routine index (function as first element in chain, e.g. CoStatus.HandleStatus)
+                                val routineResult = PascalRoutineIndex.findRoutinesWithUsesValidation(first.text, originFile, first.textOffset)
+                                routineResult.inScopeRoutines.firstOrNull()?.also {
+                                    maybeLog("[MemberTraversal] first resolved as routine '${first.text}' -> returnType=${it.returnTypeName}", originFile)
+                                }
+                            }
                     }
                 }
-                else -> {
-                    val typeResult = nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(first.text, originFile, first.textOffset)
-                    typeResult.inScopeTypes.firstOrNull()?.also { maybeLog("[MemberTraversal] first resolved as type '${first.text}' -> ${it.name}", originFile) }
-                        ?: run {
-                            // Try routine index (function as first element in chain, e.g. CoStatus.HandleStatus)
-                            val routineResult = PascalRoutineIndex.findRoutinesWithUsesValidation(first.text, originFile, first.textOffset)
-                            routineResult.inScopeRoutines.firstOrNull()?.also {
-                                maybeLog("[MemberTraversal] first resolved as routine '${first.text}' -> returnType=${it.returnTypeName}", originFile)
-                            }
-                        }
-                }
-            }
-            results[0] = resolvedFirst
+                results[0] = resolvedFirst
 
-            var currentType: PascalTypeDefinition? = when (resolvedFirst) {
-                is PascalTypeDefinition -> resolvedFirst  // Type used directly (e.g. TMyClass.Create)
-                else -> getTypeOf(resolvedFirst, originFile)
-            }
-            var currentOwnerName: String? = when (resolvedFirst) {
-                is PascalVariableDefinition -> resolvedFirst.typeName
-                is PascalProperty -> resolvedFirst.typeName
-                is PascalRoutine -> resolvedFirst.returnTypeName
-                is PascalTypeDefinition -> resolvedFirst.name
-                else -> null
-            }
-            if (resolvedFirst != null) {
-                maybeLog("[MemberTraversal] getTypeOf element='${resolvedFirst.javaClass.simpleName}' typeName='${(resolvedFirst as? PascalVariableDefinition)?.typeName ?: (resolvedFirst as? PascalProperty)?.typeName ?: "<null>"}'", originFile)
-            }
-            if (currentType != null) {
-                maybeLog("[MemberTraversal] typeOf lookup '${currentType.name}' in-scope=[${currentType.name}] out-of-scope=[]", originFile)
-                maybeLog("[MemberTraversal] first type -> ${currentType.name}", originFile)
-                maybeLog("[MemberTraversal] confirm type index for '${currentType.name}': in-scope=[${currentType.name}] out-of-scope=[]", originFile)
-                currentOwnerName = currentType.name
+                currentType = when (resolvedFirst) {
+                    is PascalTypeDefinition -> resolvedFirst  // Type used directly (e.g. TMyClass.Create)
+                    else -> getTypeOf(resolvedFirst, originFile)
+                }
+                currentOwnerName = when (resolvedFirst) {
+                    is PascalVariableDefinition -> resolvedFirst.typeName
+                    is PascalProperty -> resolvedFirst.typeName
+                    is PascalRoutine -> resolvedFirst.returnTypeName
+                    is PascalTypeDefinition -> resolvedFirst.name
+                    else -> null
+                }
+                if (resolvedFirst != null) {
+                    maybeLog("[MemberTraversal] getTypeOf element='${resolvedFirst.javaClass.simpleName}' typeName='${(resolvedFirst as? PascalVariableDefinition)?.typeName ?: (resolvedFirst as? PascalProperty)?.typeName ?: "<null>"}'", originFile)
+                }
+                if (currentType != null) {
+                    maybeLog("[MemberTraversal] typeOf lookup '${currentType.name}' in-scope=[${currentType.name}] out-of-scope=[]", originFile)
+                    maybeLog("[MemberTraversal] first type -> ${currentType.name}", originFile)
+                    maybeLog("[MemberTraversal] confirm type index for '${currentType.name}': in-scope=[${currentType.name}] out-of-scope=[]", originFile)
+                    currentOwnerName = currentType.name
+                }
             }
 
             // Resolve subsequent chain parts using member lookup on currentType
-            for (i in 1 until chain.size) {
+            for (i in startIndex until chain.size) {
                 val name = chain[i].text
                 if (name.equals("Add", ignoreCase = true)) {
                     if (nl.akiar.pascal.log.UnitLogFilter.shouldLog(originFile)) {
@@ -776,5 +826,69 @@ object MemberChainResolver {
         // This is complex without the exact element.
         // For Milestone B, let's keep it simple.
         return false
+    }
+
+    /**
+     * Try to match a prefix of the chain against available unit names (greedy, longest first).
+     * Returns Pair(prefixLength, unitPsiFile) or null if no match.
+     */
+    private fun tryResolveUnitPrefix(
+        chain: List<PsiElement>,
+        availableUnits: List<String>,
+        project: Project
+    ): Pair<Int, PsiFile>? {
+        val maxPrefixLen = minOf(chain.size - 1, 5)
+        for (len in maxPrefixLen downTo 1) {
+            val candidate = chain.subList(0, len).joinToString(".") { it.text }
+            val matchedUnit = availableUnits.firstOrNull { it.equals(candidate, ignoreCase = true) }
+            if (matchedUnit != null) {
+                val svc = nl.akiar.pascal.project.PascalProjectService.getInstance(project)
+                val vf = svc.resolveUnit(matchedUnit, true) ?: continue
+                val psiFile = PsiManager.getInstance(project).findFile(vf) ?: continue
+                return Pair(len, psiFile)
+            }
+        }
+        return null
+    }
+
+    /**
+     * Find a global type/variable/routine within a specific unit.
+     */
+    @JvmStatic
+    fun findGlobalMemberInUnit(name: String, targetUnitName: String?, project: Project): PsiElement? {
+        if (targetUnitName == null) return null
+
+        // Try types first
+        val types = PascalTypeIndex.findTypes(name, project)
+        val typeHit = types.firstOrNull { it.unitName.equals(targetUnitName, ignoreCase = true) }
+        if (typeHit != null) return typeHit
+
+        // Try variables
+        val vars = PascalVariableIndex.findVariables(name, project)
+        val varHit = vars.firstOrNull { it.unitName.equals(targetUnitName, ignoreCase = true) }
+        if (varHit != null) return varHit
+
+        // Try routines (global only - no containing class)
+        val routines = PascalRoutineIndex.findRoutines(name, project)
+        val routineHit = routines.firstOrNull {
+            it.unitName.equals(targetUnitName, ignoreCase = true) && it.containingClassName.isNullOrBlank()
+        }
+        if (routineHit != null) return routineHit
+
+        return null
+    }
+
+    /**
+     * Find the containing class for an element by walking up through nested routines.
+     */
+    @JvmStatic
+    fun findContainingClass(element: PsiElement): PascalTypeDefinition? {
+        var routine = PsiTreeUtil.getParentOfType(element, PascalRoutine::class.java)
+        while (routine != null) {
+            val cls = routine.containingClass
+            if (cls != null) return cls
+            routine = PsiTreeUtil.getParentOfType(routine, PascalRoutine::class.java)
+        }
+        return PsiTreeUtil.getParentOfType(element, PascalTypeDefinition::class.java)
     }
 }

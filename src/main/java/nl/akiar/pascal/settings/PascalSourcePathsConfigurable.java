@@ -151,7 +151,7 @@ public class PascalSourcePathsConfigurable implements Configurable {
     private void removePath() {
         int selectedIndex = pathList.getSelectedIndex();
         if (selectedIndex >= 0) {
-            pathListModel.remove(selectedIndex);
+          pathListModel.remove(selectedIndex);
         }
     }
 

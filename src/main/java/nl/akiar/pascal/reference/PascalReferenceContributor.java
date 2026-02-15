@@ -30,6 +30,10 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
                 ASTNode node = element.getNode();
                 IElementType type = node != null ? node.getElementType() : null;
 
+                if (type == PascalTokenTypes.KW_SELF) {
+                    return new PsiReference[]{new PascalSelfReference(element)};
+                }
+
                 if (type == PascalTokenTypes.IDENTIFIER || type == PascalElementTypes.METHOD_NAME_REFERENCE) {
                     PsiElement parent = element.getParent();
 

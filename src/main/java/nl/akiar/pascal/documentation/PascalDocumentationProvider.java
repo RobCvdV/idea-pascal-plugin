@@ -107,6 +107,11 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     @Nullable
     public PsiElement getCustomDocumentationElement(@NotNull Editor editor, @NotNull PsiFile file, @Nullable PsiElement contextElement, int targetOffset) {
         LOG.debug("[PascalDoc] getCustomDocumentationElement element='" + (contextElement != null ? contextElement.getText() : "<null>") + "' file='" + file.getName() + "'");
+        // Handle Self keyword -> resolve to containing class for documentation
+        if (contextElement != null && contextElement.getNode().getElementType() == PascalTokenTypes.KW_SELF) {
+            PascalTypeDefinition containingClass = MemberChainResolver.findContainingClass(contextElement);
+            if (containingClass != null) return containingClass;
+        }
         if (contextElement != null && contextElement.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
             String name = contextElement.getText();
 

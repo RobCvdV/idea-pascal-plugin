@@ -49,6 +49,14 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
         }
         if (qualifier == null) return;
 
+        // Check if qualifier resolves to a unit (PsiFile) for unit-qualified completion
+        PsiElement resolvedElement = resolveQualifierElement(qualifier, file);
+        if (resolvedElement instanceof PsiFile) {
+            addUnitGlobals((PsiFile) resolvedElement, file, result);
+            result.stopHere();
+            return;
+        }
+
         // Resolve the qualifier chain to get its type
         PascalTypeDefinition typeDef = resolveQualifierType(qualifier, file);
         if (typeDef == null) return;
@@ -72,10 +80,19 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
         result.stopHere();
     }
 
+    /**
+     * Resolve qualifier and return either a PascalTypeDefinition for member access,
+     * or null. For unit-qualified access, returns null but adds globals directly.
+     */
     private PascalTypeDefinition resolveQualifierType(PsiElement qualifier, PsiFile originFile) {
         // Use the chain resolver to resolve the qualifier
         MemberChainResolver.ChainResolutionResult chainResult = MemberChainResolver.resolveChain(qualifier);
         PsiElement lastResolved = chainResult.getLastResolved();
+
+        if (lastResolved instanceof PsiFile) {
+            // Unit-qualified: will be handled by addUnitGlobals in the caller
+            return null;
+        }
 
         if (lastResolved == null) {
             // Try direct lookup as variable/type/routine
@@ -85,7 +102,21 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
         return getTypeOf(lastResolved, originFile);
     }
 
+    /**
+     * Resolve qualifier to a PsiElement, which may be a PsiFile (for unit-qualified access).
+     * Returns null if unresolvable.
+     */
+    private PsiElement resolveQualifierElement(PsiElement qualifier, PsiFile originFile) {
+        MemberChainResolver.ChainResolutionResult chainResult = MemberChainResolver.resolveChain(qualifier);
+        return chainResult.getLastResolved();
+    }
+
     private PascalTypeDefinition resolveSimpleQualifier(PsiElement qualifier, PsiFile file) {
+        // Handle Self keyword
+        if (qualifier.getNode().getElementType() == PascalTokenTypes.KW_SELF) {
+            return MemberChainResolver.findContainingClass(qualifier);
+        }
+
         String name = qualifier.getText();
         int offset = qualifier.getTextOffset();
 
@@ -107,6 +138,50 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
         }
 
         return null;
+    }
+
+    /**
+     * Add completion items for all public globals (types, variables, routines) in a unit.
+     * Uses PSI tree traversal on the unit file to find all top-level declarations.
+     */
+    private void addUnitGlobals(PsiFile unitFile, PsiFile originFile, CompletionResultSet result) {
+        java.util.Set<String> seen = new java.util.HashSet<>();
+
+        // Add types from the unit
+        for (PascalTypeDefinition typeDef : PsiTreeUtil.findChildrenOfType(unitFile, PascalTypeDefinition.class)) {
+            String name = typeDef.getName();
+            if (name == null || name.isEmpty() || !seen.add(name.toLowerCase())) continue;
+            LookupElementBuilder lookup = LookupElementBuilder.create(name)
+                    .withIcon(com.intellij.icons.AllIcons.Nodes.Class)
+                    .withTypeText(typeDef.getTypeKind() != null ? typeDef.getTypeKind().name().toLowerCase() : "type");
+            result.addElement(PrioritizedLookupElement.withPriority(lookup, 200));
+        }
+
+        // Add global variables from the unit (no containing class)
+        for (PascalVariableDefinition varDef : PsiTreeUtil.findChildrenOfType(unitFile, PascalVariableDefinition.class)) {
+            if (varDef.getContainingClassName() != null && !varDef.getContainingClassName().isEmpty()) continue;
+            String name = varDef.getName();
+            if (name == null || name.isEmpty() || !seen.add(name.toLowerCase())) continue;
+            LookupElementBuilder lookup = LookupElementBuilder.create(name)
+                    .withIcon(com.intellij.icons.AllIcons.Nodes.Variable);
+            String typeName = varDef.getTypeName();
+            if (typeName != null) lookup = lookup.withTypeText(typeName);
+            result.addElement(PrioritizedLookupElement.withPriority(lookup, 150));
+        }
+
+        // Add global routines from the unit (no containing class)
+        for (PascalRoutine routine : PsiTreeUtil.findChildrenOfType(unitFile, PascalRoutine.class)) {
+            if (routine.getContainingClassName() != null && !routine.getContainingClassName().isEmpty()) continue;
+            if (routine.isImplementation()) continue;
+            String name = routine.getName();
+            if (name == null || name.isEmpty() || !seen.add(name.toLowerCase())) continue;
+            LookupElementBuilder lookup = LookupElementBuilder.create(name)
+                    .withIcon(com.intellij.icons.AllIcons.Nodes.Function)
+                    .withTailText("()", true);
+            String returnType = routine.getReturnTypeName();
+            if (returnType != null) lookup = lookup.withTypeText(returnType);
+            result.addElement(PrioritizedLookupElement.withPriority(lookup, 100));
+        }
     }
 
     private PascalTypeDefinition getTypeOf(PsiElement element, PsiFile originFile) {

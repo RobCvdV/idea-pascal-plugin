@@ -261,8 +261,10 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
 
     private String extractCommentContent(String comment, IElementType type) {
         if (type == PascalTokenTypes.LINE_COMMENT) {
-            // Remove leading //
-            if (comment.startsWith("//")) {
+            // Remove leading /// or //
+            if (comment.startsWith("///")) {
+                return comment.substring(3).trim();
+            } else if (comment.startsWith("//")) {
                 return comment.substring(2).trim();
             }
         } else if (type == PascalTokenTypes.BLOCK_COMMENT) {
@@ -280,29 +282,42 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
     @NotNull
     public String getDeclarationHeader() {
         StringBuilder sb = new StringBuilder();
-        boolean[] state = {false, false}; // [foundKindKeyword, stop]
+        int[] state = {0, 0, 0}; // [foundKindKeyword (0/1), stop (0/1), angleBracketDepth]
         buildSignatureRec(getNode(), sb, getTypeKind(), state);
-        return sb.toString().trim();
+        return sb.toString().trim().replaceAll("\\n\\s*\\n+", "\n");
     }
 
-    private void buildSignatureRec(ASTNode node, StringBuilder sb, TypeKind kind, boolean[] state) {
-        if (state[1]) return;
+    private void buildSignatureRec(ASTNode node, StringBuilder sb, TypeKind kind, int[] state) {
+        if (state[1] != 0) return;
 
         IElementType type = node.getElementType();
-        
-        if (type == PascalTokenTypes.SEMI) {
-            sb.append(";");
-            state[1] = true;
+
+        // Skip comments in signature
+        if (type == PascalTokenTypes.LINE_COMMENT || type == PascalTokenTypes.BLOCK_COMMENT) {
             return;
         }
 
+        if (type == PascalTokenTypes.SEMI) {
+            sb.append(";");
+            state[1] = 1;
+            return;
+        }
+
+        // Track angle bracket depth for generic parameters
+        if (type == PascalTokenTypes.LT) {
+            state[2]++;
+        } else if (type == PascalTokenTypes.GT) {
+            if (state[2] > 0) state[2]--;
+        }
+
         if (kind == TypeKind.CLASS || kind == TypeKind.RECORD || kind == TypeKind.INTERFACE) {
-            if (state[0] && isBodyStartKeyword(type)) {
-                state[1] = true;
+            boolean insideGenericBrackets = state[2] > 0;
+            if (!insideGenericBrackets && state[0] != 0 && isBodyStartKeyword(type)) {
+                state[1] = 1;
                 return;
             }
-            if (isKindKeyword(type)) {
-                state[0] = true;
+            if (!insideGenericBrackets && isKindKeyword(type)) {
+                state[0] = 1;
             }
         }
 
@@ -311,7 +326,7 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
         } else {
             for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
                 buildSignatureRec(child, sb, kind, state);
-                if (state[1]) break;
+                if (state[1] != 0) break;
             }
         }
     }
@@ -478,6 +493,13 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
             return null;
         }
 
+        // Strip generic arguments for lookup: "TEntity<TRide>" -> "TEntity"
+        String lookupName = superClassName;
+        int ltIdx = superClassName.indexOf('<');
+        if (ltIdx > 0) {
+            lookupName = superClassName.substring(0, ltIdx);
+        }
+
         // Step 2a: First, try to find in the same file (fast path, no index needed)
         // This is important for test fixtures and when the superclass is in the same unit
         PsiFile containingFile = getContainingFile();
@@ -485,7 +507,7 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
             Collection<PascalTypeDefinition> sameFileTypes =
                     PsiTreeUtil.findChildrenOfType(containingFile, PascalTypeDefinition.class);
             for (PascalTypeDefinition typeDef : sameFileTypes) {
-                if (typeDef != this && superClassName.equalsIgnoreCase(typeDef.getName())) {
+                if (typeDef != this && lookupName.equalsIgnoreCase(typeDef.getName())) {
                     return typeDef;
                 }
             }
@@ -494,11 +516,31 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
         // Step 2b: Fall back to transitive dependency resolution for cross-unit lookups
         nl.akiar.pascal.stubs.PascalTypeIndex.TypeLookupResult result =
                 nl.akiar.pascal.stubs.PascalTypeIndex.findTypeWithTransitiveDeps(
-                        superClassName, containingFile, getTextOffset());
+                        lookupName, containingFile, getTextOffset());
         if (!result.getInScopeTypes().isEmpty()) {
             return result.getInScopeTypes().get(0);
         }
 
+        // Step 2c: Try direct index lookup without uses validation (for types accessible
+        // through implicit dependencies or re-exports)
+        nl.akiar.pascal.stubs.PascalTypeIndex.TypeLookupResult directResult =
+                nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(
+                        lookupName, containingFile, getTextOffset());
+        if (!directResult.getInScopeTypes().isEmpty()) {
+            LOG.info("[GenericChain] getSuperClass: found '" + lookupName + "' via direct uses validation for " + getName());
+            return directResult.getInScopeTypes().get(0);
+        }
+
+        // Step 2d: Global fallback - search all indexed types
+        Collection<PascalTypeDefinition> globalTypes =
+                nl.akiar.pascal.stubs.PascalTypeIndex.findTypes(lookupName, getProject());
+        if (!globalTypes.isEmpty()) {
+            PascalTypeDefinition globalHit = globalTypes.iterator().next();
+            LOG.info("[GenericChain] getSuperClass: found '" + lookupName + "' via global index for " + getName() + " -> " + globalHit.getUnitName());
+            return globalHit;
+        }
+
+        LOG.info("[GenericChain] getSuperClass: FAILED to resolve '" + lookupName + "' (raw='" + superClassName + "') for type " + getName() + " in unit " + getUnitName());
         return null;
     }
 

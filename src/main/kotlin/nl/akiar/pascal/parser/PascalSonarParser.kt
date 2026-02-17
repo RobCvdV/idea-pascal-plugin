@@ -64,6 +64,9 @@ class PascalSonarParser : PsiParser {
             ParserComponents(preprocessorFactory, typeFactory, config, tempFile)
         }
 
+        /** Per-parse collection of structural elements for PascalPsiCache recording. */
+        private val RECORDED_ELEMENTS = ThreadLocal.withInitial { mutableListOf<PascalPsiCache.CachedElement>() }
+
         private val DIAG_ENABLED: Boolean = java.lang.Boolean.getBoolean("pascal.parser.diag")
         private val DIAG_ONLY_UNIT: String? = System.getProperty("pascal.parser.diag.onlyUnit")
         private val DIAG_ONLY_REGEX: Regex? = System.getProperty("pascal.parser.diag.onlyUnitRegex")?.let { Regex(it, setOf(RegexOption.IGNORE_CASE)) }
@@ -90,8 +93,9 @@ class PascalSonarParser : PsiParser {
         val rootMarker = builder.mark()
         var text = builder.originalText.toString()
 
-        // Reset stats per parse
+        // Reset stats and recorded elements per parse
         STATS_TL.set(ParseStats())
+        RECORDED_ELEMENTS.get().clear()
 
         // Try to detect the unit name early for diagnostics filtering
         val headerRegex = Regex("""(?i)\bunit\s+([A-Za-z_][\w.]*)\s*;""")
@@ -115,7 +119,11 @@ class PascalSonarParser : PsiParser {
             " ".repeat(match.value.length)
         }
 
+        // Derive a stable file key for PSI cache (use unit name if available, else hash)
+        val cacheKey = detectedUnit ?: text.hashCode().toString()
+
         if (text.isNotBlank()) {
+            var parseSucceeded = false
             try {
                 val components = THREAD_LOCAL_COMPONENTS.get()
                 val tempFile = components.tempFile
@@ -123,24 +131,64 @@ class PascalSonarParser : PsiParser {
                 diag("temp write ok path=${tempFile.path}")
 
                 val delphiFile = DelphiFile.from(tempFile, components.config)
-                val ast = delphiFile.ast
+                var ast = delphiFile.ast
                 diag("ast ready? ${ast != null}")
+
+                // Layer 1: Source Sanitization — retry with heuristic fixes
+                if (ast == null) {
+                    val sanitized = PascalSourceSanitizer.sanitize(text)
+                    if (sanitized != text) {
+                        diag("sanitization applied, retrying parse")
+                        try {
+                            tempFile.writeText(sanitized)
+                            val retryFile = DelphiFile.from(tempFile, components.config)
+                            val retryAst = retryFile.ast
+                            if (retryAst != null) {
+                                ast = retryAst
+                                diag("sanitization succeeded — AST recovered")
+                            }
+                        } catch (e: Exception) {
+                            diag("sanitization retry failed: ${e.message}")
+                        }
+                    }
+                }
 
                 if (ast != null) {
                     val lineOffsets = calculateLineOffsets(text)
                     try {
                         mapNode(ast, builder, lineOffsets)
+                        parseSucceeded = true
                     } catch (e: Exception) {
                         handleException(e, "Error during mapNode")
                     }
                 } else {
-                    LOG.warn("PascalSonarParser: AST is null")
+                    LOG.debug("PascalSonarParser: AST is null after sanitization attempt")
                 }
             } catch (e: Exception) {
                 if (e.message?.contains("Empty files are not allowed") == true) {
                     LOG.debug("PascalSonarParser: sonar-delphi reported empty file")
                 } else {
                     handleException(e, "Error parsing with sonar-delphi", true)
+                }
+            }
+
+            // Record cache on success for future replay
+            if (parseSucceeded) {
+                val recorded = RECORDED_ELEMENTS.get().toList()
+                if (recorded.isNotEmpty()) {
+                    PascalPsiCache.record(cacheKey, text, recorded)
+                    diag("cache recorded: ${recorded.size} elements for key=$cacheKey")
+                }
+            }
+
+            // Layer 2: Cache Replay — use last-valid PSI structure with offset adjustment
+            if (!parseSucceeded) {
+                val replayed = PascalPsiCache.replay(cacheKey, text)
+                if (replayed != null) {
+                    diag("cache replay: ${replayed.size} elements for key=$cacheKey")
+                    for (elem in replayed) {
+                        synthesize(builder, elem.startOffset, elem.endOffset, elem.elementType)
+                    }
                 }
             }
         }
@@ -193,7 +241,87 @@ class PascalSonarParser : PsiParser {
             synthesize(builder, usesStart, usesEnd, nl.akiar.pascal.psi.PascalElementTypes.USES_SECTION)
         }
 
+        // Layer 3: Enhanced token-based structural reconstruction
+        // Reconstruct interface/implementation sections, type definitions, and routines from token patterns
+        runEnhancedTokenFallback(builder, text, interfaceMatch)
+
         diag("[fallback] synthesized UNIT/USES from text for file with zero sonar elements")
+    }
+
+    /**
+     * Layer 3: Reconstruct major structural elements from token patterns in the source text.
+     * This is the last resort when both sanitization and cache replay have failed.
+     *
+     * IMPORTANT: Only non-stub element types may be synthesized here. Stub-based types
+     * (TYPE_DEFINITION, VARIABLE_DEFINITION, ROUTINE_DECLARATION, PROPERTY_DEFINITION,
+     * ATTRIBUTE_DEFINITION) require specific child structure for stub building. Synthesizing
+     * them from raw tokens causes "Failed to build stub tree" errors and NPEs.
+     */
+    private fun runEnhancedTokenFallback(builder: PsiBuilder, text: String, interfaceMatch: MatchResult?) {
+        // 1. Interface section: from 'interface' keyword (not followed by '(') to 'implementation'
+        val implRegex = Regex("""\bimplementation\b""", RegexOption.IGNORE_CASE)
+        val implMatch = implRegex.find(text)
+
+        if (interfaceMatch != null) {
+            // Check it's not an interface type declaration (followed by '(' or identifier on same line)
+            val afterInterface = text.substring(interfaceMatch.range.last + 1).trimStart()
+            val isInterfaceSection = !afterInterface.startsWith("(") &&
+                (afterInterface.startsWith("\n") || afterInterface.startsWith("\r") || afterInterface.isBlank() ||
+                    afterInterface.startsWith("uses", ignoreCase = true))
+
+            if (isInterfaceSection) {
+                val intfEnd = implMatch?.range?.first ?: text.length
+                if (intfEnd > interfaceMatch.range.first) {
+                    synthesize(builder, interfaceMatch.range.first, intfEnd, nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_SECTION)
+                }
+            }
+        }
+
+        // 2. Implementation section: from 'implementation' to end (or 'initialization'/'finalization')
+        if (implMatch != null) {
+            val initRegex = Regex("""\b(?:initialization|finalization)\b""", RegexOption.IGNORE_CASE)
+            val initMatch = initRegex.find(text, startIndex = implMatch.range.last)
+            val implEnd = initMatch?.range?.first ?: text.length
+            if (implEnd > implMatch.range.first) {
+                synthesize(builder, implMatch.range.first, implEnd, nl.akiar.pascal.psi.PascalElementTypes.IMPLEMENTATION_SECTION)
+            }
+        }
+
+        // 3. Type sections: 'type' keyword through next section keyword (non-stub, safe to synthesize)
+        val typeSectionRegex = Regex("""\btype\b""", RegexOption.IGNORE_CASE)
+        val sectionKeywords = Regex("""\b(?:type|const|var|procedure|function|constructor|destructor|begin|implementation|initialization|finalization)\b""", RegexOption.IGNORE_CASE)
+        for (typeMatch in typeSectionRegex.findAll(text)) {
+            val typeStart = typeMatch.range.first
+            val nextSection = sectionKeywords.find(text, startIndex = typeMatch.range.last + 1)
+            val typeEnd = nextSection?.range?.first ?: text.length
+            if (typeEnd > typeStart) {
+                synthesize(builder, typeStart, typeEnd, nl.akiar.pascal.psi.PascalElementTypes.TYPE_SECTION)
+            }
+        }
+
+        // 4. Variable sections: 'var' keyword through next section keyword (non-stub, safe to synthesize)
+        val varSectionRegex = Regex("""\bvar\b""", RegexOption.IGNORE_CASE)
+        for (varMatch in varSectionRegex.findAll(text)) {
+            val varStart = varMatch.range.first
+            val nextSection = sectionKeywords.find(text, startIndex = varMatch.range.last + 1)
+            val varEnd = nextSection?.range?.first ?: text.length
+            if (varEnd > varStart) {
+                synthesize(builder, varStart, varEnd, nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION)
+            }
+        }
+
+        // 5. Const sections: 'const' keyword through next section keyword (non-stub, safe to synthesize)
+        val constSectionRegex = Regex("""\bconst\b""", RegexOption.IGNORE_CASE)
+        for (constMatch in constSectionRegex.findAll(text)) {
+            val constStart = constMatch.range.first
+            val nextSection = sectionKeywords.find(text, startIndex = constMatch.range.last + 1)
+            val constEnd = nextSection?.range?.first ?: text.length
+            if (constEnd > constStart) {
+                synthesize(builder, constStart, constEnd, nl.akiar.pascal.psi.PascalElementTypes.CONST_SECTION)
+            }
+        }
+
+        diag("[fallback] enhanced token-based reconstruction applied")
     }
 
     private fun synthesize(builder: PsiBuilder, startOffset: Int, endOffset: Int, type: IElementType) {
@@ -566,7 +694,13 @@ class PascalSonarParser : PsiParser {
                         nodeEndOffset++
                     }
                 }
-            } else if (markerType != nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER_LIST) {
+            } else if (markerType != nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER_LIST &&
+                       markerType != nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION &&
+                       markerType != nl.akiar.pascal.psi.PascalElementTypes.CLASS_TYPE &&
+                       markerType != nl.akiar.pascal.psi.PascalElementTypes.RECORD_TYPE &&
+                       markerType != nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_TYPE &&
+                       markerType != nl.akiar.pascal.psi.PascalElementTypes.ENUM_TYPE &&
+                       markerType != nl.akiar.pascal.psi.PascalElementTypes.GENERIC_PARAMETER) {
                 // Global strip of trailing punctuation for non-TYPE_REFERENCE and non-FORMAL_PARAMETER_LIST nodes
                 while (nodeEndOffset > nodeStartOffset && nodeEndOffset <= text.length && (text[nodeEndOffset - 1] == ')' || text[nodeEndOffset - 1] == ',' || text[nodeEndOffset - 1] == ';' || text[nodeEndOffset - 1] == '<' || text[nodeEndOffset - 1] == '>' || text[nodeEndOffset - 1].isWhitespace())) {
                     nodeEndOffset--
@@ -660,6 +794,8 @@ class PascalSonarParser : PsiParser {
                 builder.advanceLexer()
             }
             marker.done(markerType!!)
+            // Record for PSI cache
+            RECORDED_ELEMENTS.get().add(PascalPsiCache.CachedElement(nodeStartOffset, nodeEndOffset, markerType))
             if (DIAG_ENABLED) {
                 diag("done: ${markerType} span=${nodeStartOffset}..${nodeEndOffset}")
             }

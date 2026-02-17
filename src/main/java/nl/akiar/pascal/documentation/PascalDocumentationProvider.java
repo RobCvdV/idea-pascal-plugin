@@ -39,6 +39,7 @@ import java.util.*;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Documentation provider for Pascal language elements.
@@ -48,6 +49,10 @@ import java.util.regex.Pattern;
 public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     private static final Logger LOG = Logger.getInstance(PascalDocumentationProvider.class);
 
+    /** Key for storing a generic type argument substitution map on an element during doc generation. */
+    private static final com.intellij.openapi.util.Key<Map<String, String>> TYPE_ARG_MAP_KEY =
+            com.intellij.openapi.util.Key.create("pascal.doc.typeArgMap");
+
     // Link prefixes for different element types
     private static final String LINK_TYPE = "type:";
     private static final String LINK_ROUTINE = "routine:";
@@ -56,6 +61,20 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     // Patterns for parsing doc comments
     private static final Pattern PARAM_PATTERN = Pattern.compile("@param\\s+(\\w+)\\s+(.+?)(?=@|$)", Pattern.DOTALL);
     private static final Pattern RETURNS_PATTERN = Pattern.compile("@returns?\\s+(.+?)(?=@|$)", Pattern.DOTALL);
+
+    // XMLDoc patterns
+    private static final Pattern XMLDOC_DETECT_PATTERN = Pattern.compile("<(summary|remarks|param|returns|value|exception|example|code|see |see>|c>)");
+    private static final Pattern XMLDOC_SUMMARY_PATTERN = Pattern.compile("<summary>(.*?)</summary>", Pattern.DOTALL);
+    private static final Pattern XMLDOC_REMARKS_PATTERN = Pattern.compile("<remarks>(.*?)</remarks>", Pattern.DOTALL);
+    private static final Pattern XMLDOC_PARAM_PATTERN = Pattern.compile("<param\\s+name=\"(\\w+)\">(.*?)</param>", Pattern.DOTALL);
+    private static final Pattern XMLDOC_RETURNS_PATTERN = Pattern.compile("<returns>(.*?)</returns>", Pattern.DOTALL);
+    private static final Pattern XMLDOC_VALUE_PATTERN = Pattern.compile("<value>(.*?)</value>", Pattern.DOTALL);
+    private static final Pattern XMLDOC_EXCEPTION_PATTERN = Pattern.compile("<exception\\s+cref=\"([^\"]+)\">(.*?)</exception>", Pattern.DOTALL);
+    private static final Pattern XMLDOC_EXAMPLE_PATTERN = Pattern.compile("<example>(.*?)</example>", Pattern.DOTALL);
+    private static final Pattern XMLDOC_CODE_PATTERN = Pattern.compile("<code>(.*?)</code>", Pattern.DOTALL);
+    private static final Pattern XMLDOC_INLINE_CODE_PATTERN = Pattern.compile("<c>(.*?)</c>", Pattern.DOTALL);
+    private static final Pattern XMLDOC_SEE_SELF_CLOSING_PATTERN = Pattern.compile("<see\\s+cref=\"([^\"]+)\"\\s*/>", Pattern.DOTALL);
+    private static final Pattern XMLDOC_SEE_WITH_TEXT_PATTERN = Pattern.compile("<see\\s+cref=\"([^\"]+)\">(.*?)</see>", Pattern.DOTALL);
 
     /**
      * Find the best type definition from a list, preferring non-forward declarations.
@@ -140,6 +159,41 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 LOG.debug("[PascalDoc] Member access detected for: " + name);
             }
 
+            // For member access, prioritize chain resolution (handles generic substitution)
+            if (isMemberAccess) {
+                LOG.info("[GenericChain][Doc] member access; attempting chain resolve for: " + name);
+                MemberChainResolver.ChainResolutionResult chainResult = MemberChainResolver.resolveChain(contextElement);
+                LOG.info("[GenericChain][Doc] chain collected: " + chainResult.getChainElements().size() + " elements = " +
+                    chainResult.getChainElements().stream().map(e -> e.getText()).collect(java.util.stream.Collectors.joining(", ")));
+                int myIndex = -1;
+                for (int idx = 0; idx < chainResult.getChainElements().size(); idx++) {
+                    if (chainResult.getChainElements().get(idx).getTextRange().equals(contextElement.getTextRange())) {
+                        myIndex = idx;
+                        break;
+                    }
+                }
+                if (myIndex < 0) myIndex = chainResult.getChainElements().size() - 1;
+                PsiElement chainResolved = myIndex < chainResult.getResolvedElements().size()
+                        ? chainResult.getResolvedElements().get(myIndex) : null;
+                LOG.info("[GenericChain][Doc] myIndex=" + myIndex + " chainResolved=" +
+                    (chainResolved != null ? chainResolved.getClass().getSimpleName() : "<null>") +
+                    " allResolved=[" + chainResult.getResolvedElements().stream()
+                        .map(e -> e != null ? e.getClass().getSimpleName() : "<null>")
+                        .collect(java.util.stream.Collectors.joining(", ")) + "]");
+                if (chainResolved != null) {
+                    // Get the typeArgMap that was active when resolving this element
+                    // (i.e., the owner's generic substitution context)
+                    Map<String, String> typeArgMap = chainResult.getTypeArgMapForIndex(myIndex);
+                    if (!typeArgMap.isEmpty()) {
+                        chainResolved.putUserData(TYPE_ARG_MAP_KEY, typeArgMap);
+                        LOG.info("[GenericChain][Doc] stored typeArgMap on resolved: " + typeArgMap);
+                    }
+                    return redirectForwardDeclaration(chainResolved);
+                }
+                // Chain resolution failed — fall through to reference/index resolution
+                LOG.info("[GenericChain][Doc] chain resolution FAILED for member: " + name + " — falling through to index lookups");
+            }
+
             // Check if the context element is a name identifier of a declaration
             PsiNameIdentifierOwner owner = com.intellij.psi.util.PsiTreeUtil.getParentOfType(contextElement, PsiNameIdentifierOwner.class);
             if (owner != null && owner.getNameIdentifier() == contextElement) {
@@ -155,17 +209,6 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 }
             }
 
-            // For member access, use chain resolution
-            if (isMemberAccess) {
-                LOG.debug("[PascalDoc] Member access detected; attempting chain resolve");
-                PsiElement chainResolved = MemberChainResolver.resolveElement(contextElement);
-                if (chainResolved != null) {
-                    LOG.debug("[PascalDoc] Chain resolved -> " + chainResolved.getClass().getSimpleName());
-                    return redirectForwardDeclaration(chainResolved);
-                }
-                return contextElement;
-            }
-
             // Fallback to index lookups
             PascalTypeIndex.TypeLookupResult typeResult =
                     PascalTypeIndex.findTypesWithUsesValidation(name, contextElement.getContainingFile(), contextElement.getTextOffset());
@@ -175,6 +218,13 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             }
             
             // ... (rest of the method follows)
+
+            // For member access, skip global index lookups (they return unrelated matches
+            // from any class). Instead, return the raw identifier so generateDoc can show
+            // "member not found" instead of IntelliJ's default parent-walking behavior.
+            if (isMemberAccess) {
+                return contextElement;
+            }
 
             PsiFile currentFile = contextElement.getContainingFile();
             int offset = contextElement.getTextOffset();
@@ -287,19 +337,26 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             return generateTypeDoc((PascalTypeDefinition) element);
         }
 
+        // Retrieve generic type argument substitution map if set by chain resolution
+        Map<String, String> typeArgMap = element.getUserData(TYPE_ARG_MAP_KEY);
+        // Clean up UserData after reading to avoid stale data
+        if (typeArgMap != null) {
+            element.putUserData(TYPE_ARG_MAP_KEY, null);
+        }
+
         // Variable definition documentation
         if (element instanceof PascalVariableDefinition) {
-            return generateVariableDoc((PascalVariableDefinition) element);
+            return generateVariableDoc((PascalVariableDefinition) element, typeArgMap);
         }
 
         // Property documentation
         if (element instanceof PascalProperty) {
-            return generatePropertyDoc((PascalProperty) element);
+            return generatePropertyDoc((PascalProperty) element, typeArgMap);
         }
 
         // Routine documentation
         if (element instanceof PascalRoutine) {
-            return generateRoutineDoc((PascalRoutine) element);
+            return generateRoutineDoc((PascalRoutine) element, typeArgMap);
         }
 
         return null;
@@ -390,7 +447,7 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         // Generic parameters
         List<String> typeParams = typeDef.getTypeParameters();
         if (!typeParams.isEmpty()) {
-            appendSection(sb, "Generic:", "&lt;" + escapeHtml(String.join(", ", typeParams)) + "&gt;");
+            appendSectionRaw(sb, "Generic:", "<p>&lt;" + escapeHtml(String.join(", ", typeParams)) + "&gt;</p>");
         }
 
         // Visibility (if any)
@@ -409,12 +466,16 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     }
 
     private String generateVariableDoc(PascalVariableDefinition varDef) {
+        return generateVariableDoc(varDef, null);
+    }
+
+    private String generateVariableDoc(PascalVariableDefinition varDef, @Nullable Map<String, String> typeArgMap) {
         StringBuilder sb = new StringBuilder();
         Project project = varDef.getProject();
 
         // Definition section
         sb.append(DocumentationMarkup.DEFINITION_START);
-        appendVariableSignature(sb, varDef, project);
+        appendVariableSignature(sb, varDef, project, typeArgMap);
         sb.append(DocumentationMarkup.DEFINITION_END);
 
         // Content section (doc comment)
@@ -472,12 +533,16 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     }
 
     private String generatePropertyDoc(PascalProperty prop) {
+        return generatePropertyDoc(prop, null);
+    }
+
+    private String generatePropertyDoc(PascalProperty prop, @Nullable Map<String, String> typeArgMap) {
         StringBuilder sb = new StringBuilder();
         Project project = prop.getProject();
 
         // Definition section
         sb.append(DocumentationMarkup.DEFINITION_START);
-        appendPropertySignature(sb, prop, project);
+        appendPropertySignature(sb, prop, project, typeArgMap);
         sb.append(DocumentationMarkup.DEFINITION_END);
 
         // Content section (doc comment)
@@ -510,12 +575,16 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     }
 
     private String generateRoutineDoc(PascalRoutine routine) {
+        return generateRoutineDoc(routine, null);
+    }
+
+    private String generateRoutineDoc(PascalRoutine routine, @Nullable Map<String, String> typeArgMap) {
         StringBuilder sb = new StringBuilder();
         Project project = routine.getProject();
 
         // Definition section with syntax highlighting
         sb.append(DocumentationMarkup.DEFINITION_START);
-        appendHighlightedRoutineSignature(sb, routine, project);
+        appendHighlightedRoutineSignature(sb, routine, project, typeArgMap);
         sb.append(DocumentationMarkup.DEFINITION_END);
 
         // Get doc comment (check counterpart if needed)
@@ -700,8 +769,17 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     }
 
     private void appendHighlightedRoutineSignature(StringBuilder sb, PascalRoutine routine, Project project) {
+        appendHighlightedRoutineSignature(sb, routine, project, null);
+    }
+
+    private void appendHighlightedRoutineSignature(StringBuilder sb, PascalRoutine routine, Project project, @Nullable Map<String, String> typeArgMap) {
         // Build the signature text
         String signature = buildRoutineSignature(routine);
+
+        // Apply generic substitution to the return type in the signature
+        if (typeArgMap != null && !typeArgMap.isEmpty()) {
+            signature = applyGenericSubstitutionToSignature(signature, typeArgMap);
+        }
 
         // Try HtmlSyntaxInfoUtil for syntax highlighting
         try {
@@ -711,6 +789,33 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             // Fallback to manual highlighting
             appendManuallyHighlightedRoutine(sb, routine);
         }
+    }
+
+    /**
+     * Apply generic type parameter substitution to a routine signature string.
+     * Replaces type parameter names (e.g., "T") with their concrete types (e.g., "TRide")
+     * in the return type position (after the last ":").
+     */
+    private String applyGenericSubstitutionToSignature(String signature, Map<String, String> typeArgMap) {
+        // Find the return type portion: after the closing paren and last ":"
+        // e.g., "function GetItem(Index: Integer): T;" → replace T with TRide
+        int lastColon = signature.lastIndexOf(':');
+        if (lastColon < 0) return signature;
+
+        // Only substitute after the last colon if it comes after the closing paren
+        int lastParen = signature.lastIndexOf(')');
+        if (lastParen >= 0 && lastColon < lastParen) return signature;
+
+        String beforeReturn = signature.substring(0, lastColon + 1);
+        String returnPart = signature.substring(lastColon + 1);
+
+        // Replace type parameter names in the return part
+        for (Map.Entry<String, String> entry : typeArgMap.entrySet()) {
+            // Use word boundary replacement to avoid partial matches
+            returnPart = returnPart.replaceAll("\\b" + java.util.regex.Pattern.quote(entry.getKey()) + "\\b", entry.getValue());
+        }
+
+        return beforeReturn + returnPart;
     }
 
     private String buildTypeSignature(PascalTypeDefinition typeDef) {
@@ -757,6 +862,12 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             IElementType type = child.getElementType();
             String text = child.getText();
 
+            // Skip comments in signature
+            if (type == PascalTokenTypes.LINE_COMMENT || type == PascalTokenTypes.BLOCK_COMMENT) {
+                child = child.getTreeNext();
+                continue;
+            }
+
             if (type == PascalTokenTypes.SEMI) {
                 sb.append(";");
                 break;
@@ -784,7 +895,9 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             } else if (type == PascalTokenTypes.STRING_LITERAL) {
                 appendStyled(sb, text, PascalSyntaxHighlighter.STRING, scheme, false);
             } else {
-                sb.append(escapeHtml(text));
+                // Collapse multiple newlines (left over from skipped comments) into one
+                String collapsed = text.replaceAll("\\n\\s*\\n+", "\n");
+                sb.append(escapeHtml(collapsed));
             }
 
             child = child.getTreeNext();
@@ -840,6 +953,10 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     }
 
     private void appendVariableSignature(StringBuilder sb, PascalVariableDefinition varDef, Project project) {
+        appendVariableSignature(sb, varDef, project, null);
+    }
+
+    private void appendVariableSignature(StringBuilder sb, PascalVariableDefinition varDef, Project project, @Nullable Map<String, String> typeArgMap) {
         EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
         VariableKind kind = varDef.getVariableKind();
         TextAttributesKey colorKey = getColorForVariableKind(kind);
@@ -850,6 +967,10 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         }
 
         String typeName = varDef.getTypeName();
+        // Apply generic substitution if available
+        if (typeName != null && typeArgMap != null && typeArgMap.containsKey(typeName)) {
+            typeName = typeArgMap.get(typeName);
+        }
         if (typeName != null && !typeName.isEmpty()) {
             sb.append(": ");
             appendTypeLink(sb, typeName);
@@ -868,12 +989,20 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     }
 
     private void appendPropertySignature(StringBuilder sb, PascalProperty prop, Project project) {
+        appendPropertySignature(sb, prop, project, null);
+    }
+
+    private void appendPropertySignature(StringBuilder sb, PascalProperty prop, Project project, @Nullable Map<String, String> typeArgMap) {
         EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
 
         appendStyled(sb, "property ", PascalSyntaxHighlighter.KEYWORD, scheme, true);
         appendStyled(sb, prop.getName(), PascalSyntaxHighlighter.VAR_FIELD, scheme, true);
 
         String typeName = prop.getTypeName();
+        // Apply generic substitution if available
+        if (typeName != null && typeArgMap != null && typeArgMap.containsKey(typeName)) {
+            typeName = typeArgMap.get(typeName);
+        }
         if (typeName != null) {
             sb.append(": ");
             appendTypeLink(sb, typeName);
@@ -899,12 +1028,14 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     private void appendTypeLink(StringBuilder sb, String typeName) {
         if (typeName == null || typeName.isEmpty()) return;
 
-        // Check if it's a built-in or primitive type
-        if (DelphiBuiltIns.isBuiltInType(typeName) || isPrimitiveType(typeName)) {
-            // Use createHyperlink for clickable link
-            DocumentationManagerUtil.createHyperlink(sb, LINK_TYPE + typeName, typeName, false);
+        int ltIdx = typeName.indexOf('<');
+        if (ltIdx > 0) {
+            // Has generic arguments: "TEntityList<TRide>"
+            String baseName = typeName.substring(0, ltIdx);
+            String genericPart = typeName.substring(ltIdx); // "<TRide>"
+            DocumentationManagerUtil.createHyperlink(sb, LINK_TYPE + baseName, baseName, false);
+            sb.append(escapeHtml(genericPart));
         } else {
-            // Create clickable link for user-defined types
             DocumentationManagerUtil.createHyperlink(sb, LINK_TYPE + typeName, typeName, false);
         }
     }
@@ -979,6 +1110,19 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
 
     private String extractDescription(String docComment) {
         if (docComment == null) return "";
+
+        if (isXmlDoc(docComment)) {
+            // Extract <summary> content
+            Matcher summaryMatcher = XMLDOC_SUMMARY_PATTERN.matcher(docComment);
+            if (summaryMatcher.find()) {
+                return summaryMatcher.group(1).trim();
+            }
+            // Fallback: return text minus known XMLDoc tags
+            return docComment
+                    .replaceAll("</?(?:summary|remarks|param|returns|value|exception|example|code|see|c)[^>]*>", "")
+                    .trim();
+        }
+
         // Remove @param, @returns, @see sections
         String desc = docComment
                 .replaceAll("@param\\s+\\w+\\s+[^@]*", "")
@@ -992,6 +1136,14 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         Map<String, String> params = new LinkedHashMap<>();
         if (docComment == null) return params;
 
+        if (isXmlDoc(docComment)) {
+            Matcher matcher = XMLDOC_PARAM_PATTERN.matcher(docComment);
+            while (matcher.find()) {
+                params.put(matcher.group(1), matcher.group(2).trim());
+            }
+            return params;
+        }
+
         Matcher matcher = PARAM_PATTERN.matcher(docComment);
         while (matcher.find()) {
             String paramName = matcher.group(1);
@@ -1003,6 +1155,15 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
 
     private String parseReturns(String docComment) {
         if (docComment == null) return null;
+
+        if (isXmlDoc(docComment)) {
+            Matcher matcher = XMLDOC_RETURNS_PATTERN.matcher(docComment);
+            if (matcher.find()) {
+                return matcher.group(1).trim();
+            }
+            return null;
+        }
+
         Matcher matcher = RETURNS_PATTERN.matcher(docComment);
         if (matcher.find()) {
             return matcher.group(1).trim();
@@ -1012,7 +1173,98 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
 
     private String formatDocComment(String docComment) {
         if (docComment == null) return "";
+        if (isXmlDoc(docComment)) {
+            return formatXmlDoc(docComment);
+        }
         return escapeHtml(docComment).replace("\n", "<br/>");
+    }
+
+    private boolean isXmlDoc(String docComment) {
+        return docComment != null && XMLDOC_DETECT_PATTERN.matcher(docComment).find();
+    }
+
+    private String formatXmlDoc(String docComment) {
+        StringBuilder sb = new StringBuilder();
+
+        // Summary
+        Matcher summaryMatcher = XMLDOC_SUMMARY_PATTERN.matcher(docComment);
+        if (summaryMatcher.find()) {
+            sb.append("<p>").append(processInlineXmlDoc(summaryMatcher.group(1).trim())).append("</p>");
+        }
+
+        // Remarks
+        Matcher remarksMatcher = XMLDOC_REMARKS_PATTERN.matcher(docComment);
+        if (remarksMatcher.find()) {
+            sb.append("<p><i>Remarks:</i> ").append(processInlineXmlDoc(remarksMatcher.group(1).trim())).append("</p>");
+        }
+
+        // Value (used for properties)
+        Matcher valueMatcher = XMLDOC_VALUE_PATTERN.matcher(docComment);
+        if (valueMatcher.find()) {
+            sb.append("<p>").append(processInlineXmlDoc(valueMatcher.group(1).trim())).append("</p>");
+        }
+
+        // Exceptions
+        Matcher exceptionMatcher = XMLDOC_EXCEPTION_PATTERN.matcher(docComment);
+        boolean hasExceptions = false;
+        while (exceptionMatcher.find()) {
+            if (!hasExceptions) {
+                sb.append("<p><b>Raises:</b></p>");
+                hasExceptions = true;
+            }
+            String exType = exceptionMatcher.group(1);
+            String exDesc = exceptionMatcher.group(2).trim();
+            sb.append("<p>");
+            appendTypeLink(sb, exType);
+            if (!exDesc.isEmpty()) {
+                sb.append(" &mdash; ").append(processInlineXmlDoc(exDesc));
+            }
+            sb.append("</p>");
+        }
+
+        // Example
+        Matcher exampleMatcher = XMLDOC_EXAMPLE_PATTERN.matcher(docComment);
+        if (exampleMatcher.find()) {
+            String exampleContent = exampleMatcher.group(1).trim();
+            sb.append("<p><b>Example:</b></p>");
+            sb.append("<pre><code>").append(escapeHtml(exampleContent)).append("</code></pre>");
+        }
+
+        return sb.toString();
+    }
+
+    private String processInlineXmlDoc(String text) {
+        // Process <c>...</c> -> inline code
+        String result = XMLDOC_INLINE_CODE_PATTERN.matcher(text).replaceAll(m ->
+                "<code>" + escapeHtml(m.group(1)) + "</code>");
+
+        // Process <code>...</code> -> pre block
+        result = XMLDOC_CODE_PATTERN.matcher(result).replaceAll(m ->
+                "<pre><code>" + escapeHtml(m.group(1)) + "</code></pre>");
+
+        // Process <see cref="X">text</see> -> type link with text
+        result = XMLDOC_SEE_WITH_TEXT_PATTERN.matcher(result).replaceAll(m -> {
+            StringBuilder linkSb = new StringBuilder();
+            DocumentationManagerUtil.createHyperlink(linkSb, LINK_TYPE + m.group(1), m.group(2), false);
+            return linkSb.toString();
+        });
+
+        // Process <see cref="X"/> -> type link
+        result = XMLDOC_SEE_SELF_CLOSING_PATTERN.matcher(result).replaceAll(m -> {
+            StringBuilder linkSb = new StringBuilder();
+            DocumentationManagerUtil.createHyperlink(linkSb, LINK_TYPE + m.group(1), m.group(1), false);
+            return linkSb.toString();
+        });
+
+        // Strip any remaining unrecognized XML tags
+        result = result.replaceAll("</?[a-zA-Z][^>]*>", "");
+
+        // Escape remaining plain text (but preserve already-processed HTML)
+        // Since we've already inserted HTML tags, we can't bulk-escape here.
+        // The input from XMLDoc comments should be safe — just trim up newlines.
+        result = result.replace("\n", " ").replaceAll("\\s+", " ").trim();
+
+        return result;
     }
 
     // ==================== Type/Kind Helpers ====================

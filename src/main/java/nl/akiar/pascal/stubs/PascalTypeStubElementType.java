@@ -85,6 +85,7 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
         if (lparen == null) return null;
 
         // Find the first identifier after LPAREN - this is the superclass name
+        // Handle both direct IDENTIFIER tokens and TYPE_REFERENCE wrapper nodes
         ASTNode next = lparen.getTreeNext();
         StringBuilder superName = new StringBuilder();
         while (next != null) {
@@ -92,6 +93,30 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
             if (type == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE) {
                 next = next.getTreeNext();
                 continue;
+            }
+            // Handle TYPE_REFERENCE elements created by parser (wraps identifiers)
+            if (type == nl.akiar.pascal.psi.PascalElementTypes.TYPE_REFERENCE) {
+                com.intellij.psi.PsiElement typeRefElement = next.getPsi();
+                if (typeRefElement instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
+                    String typeName = ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) typeRefElement).getReferencedTypeName();
+                    if (typeName != null) {
+                        return typeName;
+                    }
+                }
+                // Fallback: extract identifiers from TYPE_REFERENCE children
+                ASTNode refChild = next.getFirstChildNode();
+                while (refChild != null) {
+                    if (refChild.getElementType() == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                        if (superName.length() > 0) superName.append(".");
+                        superName.append(refChild.getText());
+                    } else if (refChild.getElementType() == nl.akiar.pascal.PascalTokenTypes.DOT) {
+                        // handled by prepending dot before next identifier
+                    } else if (refChild.getElementType() == nl.akiar.pascal.PascalTokenTypes.LT) {
+                        break; // Stop at generic arguments
+                    }
+                    refChild = refChild.getTreeNext();
+                }
+                return superName.length() > 0 ? superName.toString() : null;
             }
             if (type == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
                 superName.append(next.getText());

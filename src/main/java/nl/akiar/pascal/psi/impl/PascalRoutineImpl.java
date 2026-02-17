@@ -78,55 +78,72 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
             return findNameIdentifierFallback();
         }
 
-        // Find the first identifier AFTER the routine keyword
-        List<ASTNode> allIds = nl.akiar.pascal.psi.PsiUtil.findAllRecursiveAnyOf(
-            node,
-            nl.akiar.pascal.psi.PsiUtil.IDENTIFIER_LIKE_TYPES
-        );
-
-        // Find cutoff: first LPAREN or COLON or SEMI AFTER the routine keyword
-        int cutoffOffset = Integer.MAX_VALUE;
-        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
-            IElementType type = child.getElementType();
-            int offset = child.getStartOffset();
-            if (offset > routineKeywordOffset) {
-                if (type == PascalTokenTypes.LPAREN || type == PascalTokenTypes.COLON || type == PascalTokenTypes.SEMI) {
-                    cutoffOffset = offset;
-                    break;
-                }
-            }
-        }
-
-        ASTNode bestId = null;
-        for (ASTNode idNode : allIds) {
-            int idOffset = idNode.getStartOffset();
-
-            // Must be after routine keyword
-            if (idOffset < routineKeywordOffset) {
-                continue;
-            }
-
-            // Must be before cutoff
-            if (idOffset >= cutoffOffset) {
-                continue;
-            }
-
-            // Skip identifiers inside parameters
-            PsiElement psi = idNode.getPsi();
-            if (nl.akiar.pascal.psi.PsiUtil.hasParent(psi, nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER)) {
-                continue;
-            }
-
-            // Skip identifiers inside return type
-            if (nl.akiar.pascal.psi.PsiUtil.hasParent(psi, nl.akiar.pascal.psi.PascalElementTypes.RETURN_TYPE)) {
-                continue;
-            }
-
-            // For qualified names (TClass.Method), keep the last one
-            bestId = idNode;
-        }
-
+        // Find the method name: the last identifier-like token after the routine keyword,
+        // before any structural boundary (LT, LPAREN, COLON, SEMI, FORMAL_PARAMETER_LIST, etc.).
+        // Handles qualified names like TClass.Method (keeps the last identifier)
+        // and soft keywords used as method names (e.g. "Register" tokenized as KW_REGISTER).
+        // For qualified names, the parser may wrap parts in composite nodes
+        // (CLASS_TYPE_REFERENCE, METHOD_NAME_REFERENCE) — we descend into those.
+        ASTNode bestId = findNameInChildren(node, routineKeywordOffset);
         return bestId != null ? bestId.getPsi() : null;
+    }
+
+    /**
+     * Scan children of the given node for the last identifier-like token after minOffset,
+     * stopping at structural boundaries. Descends into composite nodes like
+     * CLASS_TYPE_REFERENCE and METHOD_NAME_REFERENCE which wrap parts of qualified names.
+     *
+     * In Delphi, many keywords can be used as method names (soft keywords like Register,
+     * Name, Index, etc.), so we accept any token that could be part of a name. We stop
+     * at tokens that definitely mark the end of the name region (BEGIN, SEMI, COLON, etc.).
+     */
+    @Nullable
+    private ASTNode findNameInChildren(ASTNode parent, int minOffset) {
+        ASTNode bestId = null;
+        for (ASTNode child = parent.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            if (child.getStartOffset() < minOffset) continue;
+
+            IElementType type = child.getElementType();
+
+            // Stop at structural boundaries that mark end of routine name region
+            if (type == PascalTokenTypes.LPAREN || type == PascalTokenTypes.LT ||
+                type == PascalTokenTypes.COLON || type == PascalTokenTypes.SEMI ||
+                type == PascalTokenTypes.KW_BEGIN || type == PascalTokenTypes.KW_END ||
+                type == PascalTokenTypes.KW_VAR || type == PascalTokenTypes.KW_CONST ||
+                type == nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER_LIST ||
+                type == nl.akiar.pascal.psi.PascalElementTypes.RETURN_TYPE ||
+                type == nl.akiar.pascal.psi.PascalElementTypes.GENERIC_PARAMETER) {
+                break;
+            }
+
+            // Skip whitespace and dots
+            if (type == PascalTokenTypes.WHITE_SPACE || type == PascalTokenTypes.DOT) continue;
+
+            // Descend into composite nodes that may contain name identifiers
+            // (CLASS_TYPE_REFERENCE wraps the class part, METHOD_NAME_REFERENCE wraps the method name,
+            //  NAME_REFERENCE wraps identifiers in some contexts)
+            if (type == nl.akiar.pascal.psi.PascalElementTypes.CLASS_TYPE_REFERENCE ||
+                type == nl.akiar.pascal.psi.PascalElementTypes.METHOD_NAME_REFERENCE ||
+                type == nl.akiar.pascal.psi.PascalElementTypes.NAME_REFERENCE ||
+                type == nl.akiar.pascal.psi.PascalElementTypes.TYPE_REFERENCE) {
+                ASTNode innerBest = findNameInChildren(child, minOffset);
+                if (innerBest != null) {
+                    bestId = innerBest;
+                }
+                continue;
+            }
+
+            // Accept any leaf token as a potential name part. In Delphi, many keywords
+            // can be used as routine names (Register, Name, Read, Write, etc.) and the
+            // sonar-delphi parser tokenizes them with their keyword types (KW_REGISTER etc.).
+            // For qualified names (TClass.Method), keep the last one.
+            if (child.getFirstChildNode() == null) {
+                // It's a leaf token — treat it as a potential name
+                bestId = child;
+            }
+            // Non-leaf composite nodes that aren't in our known list — skip them
+        }
+        return bestId;
     }
 
     /**
@@ -191,8 +208,13 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         // Heuristic: check if we are in implementation section
         PsiElement parent = getParent();
         while (parent != null) {
-            if (parent.getNode().getElementType() == PascalElementTypes.IMPLEMENTATION_SECTION) return true;
-            if (parent.getNode().getElementType() == PascalElementTypes.INTERFACE_SECTION) return false;
+            ASTNode node = parent.getNode();
+            if (node == null) {
+                parent = parent.getParent();
+                continue;
+            }
+            if (node.getElementType() == PascalElementTypes.IMPLEMENTATION_SECTION) return true;
+            if (node.getElementType() == PascalElementTypes.INTERFACE_SECTION) return false;
             parent = parent.getParent();
         }
         return false;
@@ -465,7 +487,9 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
 
     private String extractCommentContent(String comment, IElementType type) {
         if (type == nl.akiar.pascal.PascalTokenTypes.LINE_COMMENT) {
-            if (comment.startsWith("//")) {
+            if (comment.startsWith("///")) {
+                return comment.substring(3).trim();
+            } else if (comment.startsWith("//")) {
                 return comment.substring(2).trim();
             }
         } else if (type == nl.akiar.pascal.PascalTokenTypes.BLOCK_COMMENT) {
@@ -538,7 +562,7 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
                 // Found the return type identifier
                 if (type == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
                     StringBuilder typeName = new StringBuilder(child.getText());
-                    // Handle qualified names like System.TObject
+                    // Handle qualified names like System.TObject and generics like IPromise<TEntityList<TMutation>>
                     child = child.getTreeNext();
                     while (child != null) {
                         com.intellij.psi.tree.IElementType nextType = child.getElementType();
@@ -552,6 +576,23 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
                         } else if (nextType == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
                             typeName.append(child.getText());
                             child = child.getTreeNext();
+                        } else if (nextType == nl.akiar.pascal.PascalTokenTypes.LT) {
+                            // Collect the full generic argument list: <Type1, Type2<Nested>>
+                            typeName.append("<");
+                            int depth = 1;
+                            child = child.getTreeNext();
+                            while (child != null && depth > 0) {
+                                nextType = child.getElementType();
+                                if (nextType == nl.akiar.pascal.PascalTokenTypes.LT) { depth++; typeName.append("<"); }
+                                else if (nextType == nl.akiar.pascal.PascalTokenTypes.GT) { depth--; typeName.append(">"); }
+                                else if (nextType == nl.akiar.pascal.PascalTokenTypes.COMMA) { typeName.append(", "); }
+                                else if (nextType == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) { typeName.append(child.getText()); }
+                                else if (nextType == nl.akiar.pascal.PascalTokenTypes.DOT) { typeName.append("."); }
+                                // Skip whitespace and TYPE_REFERENCE composites (their children are handled individually)
+                                if (depth > 0) child = child.getTreeNext();
+                            }
+                            // After closing >, continue to check for more DOT-qualified parts
+                            if (child != null) child = child.getTreeNext();
                         } else {
                             break;
                         }

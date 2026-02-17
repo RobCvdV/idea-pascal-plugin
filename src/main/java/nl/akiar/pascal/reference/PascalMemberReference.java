@@ -32,7 +32,12 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
     public PsiElement resolve() {
         LOG.debug("[MemberTraversal] PascalMemberReference.resolve element='" + myElement.getText() + "' file='" + myElement.getContainingFile().getName() + "'");
         // Use unified chain resolver so this reference benefits from full member-chain context
-        PsiElement resolved = nl.akiar.pascal.resolution.MemberChainResolver.resolveElement(myElement);
+        PsiElement resolved = null;
+        try {
+            resolved = nl.akiar.pascal.resolution.MemberChainResolver.resolveElement(myElement);
+        } catch (Exception e) {
+            LOG.debug("Chain resolution failed for '" + myElement.getText() + "': " + e.getMessage());
+        }
         LOG.debug("[MemberTraversal] PascalMemberReference.chain resolved -> " + (resolved != null ? resolved.getClass().getSimpleName() : "<unresolved>"));
         if (resolved != null) {
             // Enforce accessibility rules for routines/properties/fields

@@ -150,6 +150,7 @@ object InheritanceChainCache {
             }
 
             if (currentSuperName == null) {
+                LOG.info("[GenericChain] computeInheritanceChain: ${current.name} has no superClassName, stopping")
                 break  // No more superclasses
             }
 
@@ -168,6 +169,7 @@ object InheritanceChainCache {
                 current = superClass
             } else {
                 // Superclass couldn't be resolved - record the name but no pointer
+                LOG.info("[GenericChain] computeInheritanceChain: could not resolve superclass '$currentSuperName' for ${current.name} (unit=${current.unitName})")
                 ancestorNames.add(currentSuperName)
                 ancestorPtrs.add(null)
                 break  // Can't continue chain without resolved type

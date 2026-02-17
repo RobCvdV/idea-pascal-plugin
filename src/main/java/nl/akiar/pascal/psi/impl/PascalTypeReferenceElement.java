@@ -82,8 +82,9 @@ public class PascalTypeReferenceElement extends PascalPsiElement {
     }
 
     /**
-     * Get the full type name being referenced.
+     * Get the base type name being referenced (without generic arguments).
      * May be qualified like "System.Integer" or simple like "Integer".
+     * For "TEntityList&lt;TRide&gt;", returns "TEntityList".
      *
      * @return The type name, or null if no identifiers found
      */
@@ -94,8 +95,26 @@ public class PascalTypeReferenceElement extends PascalPsiElement {
         return name.length() > 0 ? name.toString() : null;
     }
 
+    /**
+     * Get the full type name including generic arguments.
+     * For "TEntityList&lt;TRide&gt;", returns "TEntityList&lt;TRide&gt;".
+     * For "System.Integer", returns "System.Integer".
+     *
+     * @return The full type name with generics, or null if no identifiers found
+     */
+    @Nullable
+    public String getFullTypeName() {
+        StringBuilder name = new StringBuilder();
+        collectFullTypeNameParts(getNode(), name);
+        return name.length() > 0 ? name.toString() : null;
+    }
+
     private void collectTypeNameParts(com.intellij.lang.ASTNode parent, StringBuilder name) {
         for (com.intellij.lang.ASTNode child = parent.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            // Stop at generic arguments: TGenericBase<String> → "TGenericBase"
+            if (child.getElementType() == PascalTokenTypes.LT) {
+                break;
+            }
             if (child.getElementType() == PascalTokenTypes.IDENTIFIER) {
                 if (name.length() > 0) {
                     name.append(".");
@@ -114,6 +133,28 @@ public class PascalTypeReferenceElement extends PascalPsiElement {
                 // parameter types where sonar-delphi produces NameReferenceNode inside TypeReferenceNode)
                 collectTypeNameParts(child, name);
             }
+        }
+    }
+
+    private void collectFullTypeNameParts(com.intellij.lang.ASTNode parent, StringBuilder name) {
+        for (com.intellij.lang.ASTNode child = parent.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            com.intellij.psi.tree.IElementType type = child.getElementType();
+            if (type == PascalTokenTypes.IDENTIFIER || type == PascalTokenTypes.KW_STRING) {
+                name.append(child.getText());
+            } else if (type == PascalTokenTypes.DOT) {
+                name.append(".");
+            } else if (type == PascalTokenTypes.LT) {
+                name.append("<");
+            } else if (type == PascalTokenTypes.GT) {
+                name.append(">");
+            } else if (type == PascalTokenTypes.COMMA) {
+                name.append(", ");
+            } else if (type == nl.akiar.pascal.psi.PascalElementTypes.TYPE_REFERENCE) {
+                collectFullTypeNameParts(child, name);
+            } else if (type == nl.akiar.pascal.psi.PascalElementTypes.NAME_REFERENCE) {
+                collectFullTypeNameParts(child, name);
+            }
+            // Skip whitespace, comments, etc.
         }
     }
 

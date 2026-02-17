@@ -41,12 +41,42 @@ public class PascalPropertyImpl extends StubBasedPsiElementBase<PascalPropertySt
     @Override
     @Nullable
     public PsiElement getNameIdentifier() {
-        // Use findFirstRecursiveAnyOf to include soft keywords like 'Name', 'Index', etc.
-        ASTNode identifierNode = nl.akiar.pascal.psi.PsiUtil.findFirstRecursiveAnyOf(
-            getNode(),
-            nl.akiar.pascal.psi.PsiUtil.IDENTIFIER_LIKE_TYPES
-        );
-        return identifierNode != null ? identifierNode.getPsi() : null;
+        // Find the identifier AFTER the 'property' keyword, skipping any attribute nodes.
+        // Without this, properties with attributes like [Map('id')] would return 'Map' as the name
+        // because findFirstRecursiveAnyOf would find the attribute's identifier first.
+        ASTNode node = getNode();
+        boolean afterPropertyKeyword = false;
+        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            if (child.getElementType() == PascalTokenTypes.KW_PROPERTY) {
+                afterPropertyKeyword = true;
+                continue;
+            }
+            if (!afterPropertyKeyword) continue;
+            // Skip whitespace
+            if (child.getElementType() == PascalTokenTypes.WHITE_SPACE) continue;
+            // Check for identifier-like tokens (includes soft keywords like Name, Index, etc.)
+            for (com.intellij.psi.tree.IElementType type : nl.akiar.pascal.psi.PsiUtil.IDENTIFIER_LIKE_TYPES) {
+                if (child.getElementType() == type) {
+                    return child.getPsi();
+                }
+            }
+            // If we find a non-identifier, non-whitespace token after 'property', stop
+            break;
+        }
+        // Fallback: find first identifier-like token (skipping attribute subtrees)
+        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            // Skip ATTRIBUTE_LIST and ATTRIBUTE_DEFINITION subtrees
+            if (child.getElementType() == PascalElementTypes.ATTRIBUTE_LIST ||
+                child.getElementType() == PascalElementTypes.ATTRIBUTE_DEFINITION) {
+                continue;
+            }
+            for (com.intellij.psi.tree.IElementType type : nl.akiar.pascal.psi.PsiUtil.IDENTIFIER_LIKE_TYPES) {
+                if (child.getElementType() == type) {
+                    return child.getPsi();
+                }
+            }
+        }
+        return null;
     }
 
     @Override
@@ -72,7 +102,7 @@ public class PascalPropertyImpl extends StubBasedPsiElementBase<PascalPropertySt
                 if (next.getElementType() == PascalElementTypes.TYPE_REFERENCE) {
                     PsiElement typeRefElement = next.getPsi();
                     if (typeRefElement instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
-                        return ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) typeRefElement).getReferencedTypeName();
+                        return ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) typeRefElement).getFullTypeName();
                     }
                 }
                 // Fallback to IDENTIFIER for keyword types that don't get TYPE_REFERENCE

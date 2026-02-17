@@ -170,7 +170,8 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
         if (type == PascalElementTypes.TYPE_REFERENCE) {
             PsiElement typeRefElement = child.getPsi();
             if (typeRefElement instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
-                return ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) typeRefElement).getReferencedTypeName();
+                // Use full type name including generic arguments (e.g., "TEntityList<TRide>")
+                return ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) typeRefElement).getFullTypeName();
             }
         }
 
@@ -477,7 +478,9 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
 
     private String extractCommentContent(String comment, IElementType type) {
         if (type == PascalTokenTypes.LINE_COMMENT) {
-            if (comment.startsWith("//")) {
+            if (comment.startsWith("///")) {
+                return comment.substring(3).trim();
+            } else if (comment.startsWith("//")) {
                 return comment.substring(2).trim();
             }
         } else if (type == PascalTokenTypes.BLOCK_COMMENT) {

@@ -220,38 +220,44 @@ public class PascalSemanticAnnotator implements Annotator {
         }
 
         // Use references to resolve usage
-        com.intellij.psi.PsiReference[] refs = element.getReferences();
-        if (refs.length == 0) {
-            // Fallback for tests or if not picked up by platform
-            refs = com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry.getReferencesFromProviders(element);
-        }
-        for (com.intellij.psi.PsiReference ref : refs) {
-            PsiElement resolved = ref.resolve();
-            if (resolved != null) {
-                if (resolved instanceof PsiFile) {
-                    // Unit-prefix identifier (e.g. "Spring" in Spring.Collections.Lists.TList)
-                    applyHighlight(element, holder, PascalSyntaxHighlighter.UNIT_REFERENCE);
-                    return;
-                } else if (resolved instanceof PascalRoutine) {
-                    PascalRoutine routine = (PascalRoutine) resolved;
-                    TextAttributesKey key = routine.isMethod() ?
-                            PascalSyntaxHighlighter.METHOD_CALL :
-                            PascalSyntaxHighlighter.ROUTINE_CALL;
-                    applyHighlight(element, holder, key);
-                    return;
-                } else if (resolved instanceof PascalTypeDefinition) {
-                    PascalTypeDefinition typeDef = (PascalTypeDefinition) resolved;
-                    applyHighlight(element, holder, getColorForTypeKind(typeDef.getTypeKind()));
-                    return;
-                } else if (resolved instanceof PascalVariableDefinition) {
-                    PascalVariableDefinition varDef = (PascalVariableDefinition) resolved;
-                    applyHighlight(element, holder, getColorForVariableKind(varDef.getVariableKind()));
-                    return;
-                } else if (resolved instanceof PascalProperty) {
-                    applyHighlight(element, holder, PascalSyntaxHighlighter.METHOD_CALL);
-                    return;
+        try {
+            com.intellij.psi.PsiReference[] refs = element.getReferences();
+            if (refs.length == 0) {
+                // Fallback for tests or if not picked up by platform
+                refs = com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry.getReferencesFromProviders(element);
+            }
+            for (com.intellij.psi.PsiReference ref : refs) {
+                PsiElement resolved = ref.resolve();
+                if (resolved != null) {
+                    if (resolved instanceof PsiFile) {
+                        // Unit-prefix identifier (e.g. "Spring" in Spring.Collections.Lists.TList)
+                        applyHighlight(element, holder, PascalSyntaxHighlighter.UNIT_REFERENCE);
+                        return;
+                    } else if (resolved instanceof PascalRoutine) {
+                        PascalRoutine routine = (PascalRoutine) resolved;
+                        TextAttributesKey key = routine.isMethod() ?
+                                PascalSyntaxHighlighter.METHOD_CALL :
+                                PascalSyntaxHighlighter.ROUTINE_CALL;
+                        applyHighlight(element, holder, key);
+                        return;
+                    } else if (resolved instanceof PascalTypeDefinition) {
+                        PascalTypeDefinition typeDef = (PascalTypeDefinition) resolved;
+                        applyHighlight(element, holder, getColorForTypeKind(typeDef.getTypeKind()));
+                        return;
+                    } else if (resolved instanceof PascalVariableDefinition) {
+                        PascalVariableDefinition varDef = (PascalVariableDefinition) resolved;
+                        applyHighlight(element, holder, getColorForVariableKind(varDef.getVariableKind()));
+                        return;
+                    } else if (resolved instanceof PascalProperty) {
+                        applyHighlight(element, holder, PascalSyntaxHighlighter.METHOD_CALL);
+                        return;
+                    }
                 }
             }
+        } catch (Exception e) {
+            // Prevent reference resolution failures from disabling the annotator for the rest of the file
+            com.intellij.openapi.diagnostic.Logger.getInstance(PascalSemanticAnnotator.class)
+                .debug("Reference resolution failed for '" + element.getText() + "': " + e.getMessage());
         }
 
         // Second fallback: simple type-like name check (T* or I*)
@@ -396,7 +402,7 @@ public class PascalSemanticAnnotator implements Annotator {
             // If inside a property definition and followed by an identifier, it's a keyword
             if (PsiUtil.hasParent(element, PascalElementTypes.PROPERTY_DEFINITION)) {
                 PsiElement next = PsiUtil.getNextNoneIgnorableSibling(element);
-                if (next != null) {
+                if (next != null && next.getNode() != null) {
                     com.intellij.psi.tree.IElementType nextType = next.getNode().getElementType();
                     // If followed by identifier or semicolon (for nodefault), it's being used as keyword
                     if (nextType == PascalTokenTypes.IDENTIFIER ||

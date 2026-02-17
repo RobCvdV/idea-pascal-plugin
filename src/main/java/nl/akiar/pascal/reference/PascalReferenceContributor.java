@@ -26,6 +26,15 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
             @Override
             public PsiReference[] getReferencesByElement(@NotNull PsiElement element,
                                                          @NotNull ProcessingContext context) {
+                try {
+                    return getReferencesByElementImpl(element);
+                } catch (Exception e) {
+                    LOG.debug("Reference provider error for '" + element.getText() + "': " + e.getMessage());
+                    return PsiReference.EMPTY_ARRAY;
+                }
+            }
+
+            private PsiReference[] getReferencesByElementImpl(@NotNull PsiElement element) {
                 String text = element.getText();
                 ASTNode node = element.getNode();
                 IElementType type = node != null ? node.getElementType() : null;

@@ -139,6 +139,23 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
                         } else if (nextType == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
                             typeName.append(child.getText());
                             child = child.getTreeNext();
+                        } else if (nextType == nl.akiar.pascal.PascalTokenTypes.LT) {
+                            // Collect the full generic argument list: <Type1, Type2<Nested>>
+                            typeName.append("<");
+                            int depth = 1;
+                            child = child.getTreeNext();
+                            while (child != null && depth > 0) {
+                                nextType = child.getElementType();
+                                if (nextType == nl.akiar.pascal.PascalTokenTypes.LT) { depth++; typeName.append("<"); }
+                                else if (nextType == nl.akiar.pascal.PascalTokenTypes.GT) { depth--; typeName.append(">"); }
+                                else if (nextType == nl.akiar.pascal.PascalTokenTypes.COMMA) { typeName.append(", "); }
+                                else if (nextType == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) { typeName.append(child.getText()); }
+                                else if (nextType == nl.akiar.pascal.PascalTokenTypes.DOT) { typeName.append("."); }
+                                // Skip whitespace and TYPE_REFERENCE composites (their children are handled individually)
+                                if (depth > 0) child = child.getTreeNext();
+                            }
+                            // After closing >, continue to check for more DOT-qualified parts
+                            if (child != null) child = child.getTreeNext();
                         } else {
                             break;
                         }

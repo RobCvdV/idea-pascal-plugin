@@ -18,7 +18,10 @@ import nl.akiar.pascal.stubs.PascalVariableIndex;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Provides completion after DOT for member access chains.
@@ -42,24 +45,46 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
         }
         if (dot == null || dot.getNode().getElementType() != PascalTokenTypes.DOT) return;
 
-        // Find the qualifier before the DOT
+        // Find the qualifier before the DOT, skipping past brackets and parens
         PsiElement qualifier = PsiTreeUtil.prevLeaf(dot);
         while (qualifier != null && qualifier.getNode().getElementType() == PascalTokenTypes.WHITE_SPACE) {
             qualifier = PsiTreeUtil.prevLeaf(qualifier);
         }
+        // Skip past bracket/paren expressions to find the actual identifier
+        qualifier = skipBackwardToIdentifier(qualifier);
         if (qualifier == null) return;
 
+        // Resolve the full qualifier chain (including generic substitution)
+        PsiElement lastResolved = null;
+        Map<String, String> typeArgMap = new HashMap<>();
+        try {
+            MemberChainResolver.ChainResolutionResult chainResult = MemberChainResolver.resolveChain(qualifier);
+            lastResolved = chainResult.getLastResolved();
+            typeArgMap = chainResult.getTypeArgMap();
+        } catch (Exception e) {
+            // Log and fall through to resolveSimpleQualifier
+            com.intellij.openapi.diagnostic.Logger.getInstance(PascalMemberCompletionProvider.class)
+                .debug("Chain resolution failed for completion: " + e.getMessage());
+        }
+
         // Check if qualifier resolves to a unit (PsiFile) for unit-qualified completion
-        PsiElement resolvedElement = resolveQualifierElement(qualifier, file);
-        if (resolvedElement instanceof PsiFile) {
-            addUnitGlobals((PsiFile) resolvedElement, file, result);
+        if (lastResolved instanceof PsiFile) {
+            addUnitGlobals((PsiFile) lastResolved, file, result);
             result.stopHere();
             return;
         }
 
-        // Resolve the qualifier chain to get its type
-        PascalTypeDefinition typeDef = resolveQualifierType(qualifier, file);
+        // Resolve the qualifier to its type
+        PascalTypeDefinition typeDef = resolveQualifierType(lastResolved, qualifier, file, typeArgMap);
         if (typeDef == null) return;
+
+        // Build the type arg map for this type context if not already set
+        if (typeArgMap.isEmpty() && lastResolved != null) {
+            String rawTypeName = getMemberTypeName(lastResolved);
+            if (rawTypeName != null) {
+                typeArgMap = buildTypeArgMap(typeDef, rawTypeName);
+            }
+        }
 
         // Get all members (including inherited)
         List<PsiElement> members = typeDef.getMembers(true);
@@ -71,7 +96,7 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
             // Visibility check
             if (!isAccessible(member, file)) continue;
 
-            LookupElementBuilder lookup = createMemberLookup(member, name);
+            LookupElementBuilder lookup = createMemberLookup(member, name, typeArgMap);
             if (lookup != null) {
                 result.addElement(PrioritizedLookupElement.withPriority(lookup, getPriority(member)));
             }
@@ -81,34 +106,133 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
     }
 
     /**
-     * Resolve qualifier and return either a PascalTypeDefinition for member access,
-     * or null. For unit-qualified access, returns null but adds globals directly.
+     * Resolve qualifier to its type definition, using the chain result's typeArgMap
+     * for generic type parameter substitution.
      */
-    private PascalTypeDefinition resolveQualifierType(PsiElement qualifier, PsiFile originFile) {
-        // Use the chain resolver to resolve the qualifier
-        MemberChainResolver.ChainResolutionResult chainResult = MemberChainResolver.resolveChain(qualifier);
-        PsiElement lastResolved = chainResult.getLastResolved();
-
-        if (lastResolved instanceof PsiFile) {
-            // Unit-qualified: will be handled by addUnitGlobals in the caller
-            return null;
-        }
-
+    private PascalTypeDefinition resolveQualifierType(PsiElement lastResolved, PsiElement qualifier,
+                                                       PsiFile originFile, Map<String, String> typeArgMap) {
         if (lastResolved == null) {
             // Try direct lookup as variable/type/routine
             return resolveSimpleQualifier(qualifier, originFile);
+        }
+
+        // Get the raw type name of the last resolved element
+        String rawTypeName = getMemberTypeName(lastResolved);
+
+        // Apply generic substitution if the type name is a type parameter
+        if (rawTypeName != null && typeArgMap.containsKey(rawTypeName)) {
+            String substituted = typeArgMap.get(rawTypeName);
+            return getTypeOf(lastResolved, originFile, substituted);
         }
 
         return getTypeOf(lastResolved, originFile);
     }
 
     /**
-     * Resolve qualifier to a PsiElement, which may be a PsiFile (for unit-qualified access).
-     * Returns null if unresolvable.
+     * Get the type name from a resolved element (variable, property, routine, or type definition).
      */
-    private PsiElement resolveQualifierElement(PsiElement qualifier, PsiFile originFile) {
-        MemberChainResolver.ChainResolutionResult chainResult = MemberChainResolver.resolveChain(qualifier);
-        return chainResult.getLastResolved();
+    private String getMemberTypeName(PsiElement element) {
+        if (element instanceof PascalVariableDefinition varDef) return varDef.getTypeName();
+        if (element instanceof PascalProperty prop) return prop.getTypeName();
+        if (element instanceof PascalRoutine routine) return routine.getReturnTypeName();
+        if (element instanceof PascalTypeDefinition td) return td.getName();
+        return null;
+    }
+
+    /**
+     * Build a type argument substitution map from a type definition and the raw type name
+     * that references it (which may contain generic arguments).
+     * E.g., for TEntityList definition with type param T, and raw name "TEntityList<TRide>",
+     * returns {T → TRide}.
+     */
+    private Map<String, String> buildTypeArgMap(PascalTypeDefinition typeDef, String rawTypeName) {
+        Map<String, String> map = new HashMap<>();
+        if (rawTypeName == null || typeDef == null) return map;
+        int ltIdx = rawTypeName.indexOf('<');
+        if (ltIdx <= 0) return map;
+        int gtIdx = rawTypeName.lastIndexOf('>');
+        if (gtIdx <= ltIdx) return map;
+        String argsStr = rawTypeName.substring(ltIdx + 1, gtIdx);
+        List<String> typeArgs = splitGenericArgs(argsStr);
+        List<String> typeParams = typeDef.getTypeParameters();
+        for (int i = 0; i < typeArgs.size() && i < typeParams.size(); i++) {
+            map.put(typeParams.get(i), typeArgs.get(i));
+        }
+        return map;
+    }
+
+    /**
+     * Split generic arguments at depth-0 commas.
+     * "String, TList<Integer>" → ["String", "TList<Integer>"]
+     */
+    private List<String> splitGenericArgs(String argsStr) {
+        List<String> args = new ArrayList<>();
+        int depth = 0;
+        int start = 0;
+        for (int i = 0; i < argsStr.length(); i++) {
+            char c = argsStr.charAt(i);
+            if (c == '<') depth++;
+            else if (c == '>') depth--;
+            else if (c == ',' && depth == 0) {
+                args.add(argsStr.substring(start, i).trim());
+                start = i + 1;
+            }
+        }
+        String last = argsStr.substring(start).trim();
+        if (!last.isEmpty()) args.add(last);
+        return args;
+    }
+
+    /**
+     * Skip backward past bracket/paren expressions to find the actual identifier.
+     * For "ItemsById[0]", if we start at "]", skip to "ItemsById".
+     * For "GetItem(0)", if we start at ")", skip to "GetItem".
+     */
+    private PsiElement skipBackwardToIdentifier(PsiElement element) {
+        if (element == null) return null;
+
+        while (element != null) {
+            var elemType = element.getNode().getElementType();
+            if (elemType == PascalTokenTypes.RPAREN) {
+                element = skipMatchedBackward(element, PascalTokenTypes.LPAREN, PascalTokenTypes.RPAREN);
+                if (element == null) return null;
+                element = PsiTreeUtil.prevLeaf(element);
+                while (element != null && element.getNode().getElementType() == PascalTokenTypes.WHITE_SPACE) {
+                    element = PsiTreeUtil.prevLeaf(element);
+                }
+            } else if (elemType == PascalTokenTypes.RBRACKET) {
+                element = skipMatchedBackward(element, PascalTokenTypes.LBRACKET, PascalTokenTypes.RBRACKET);
+                if (element == null) return null;
+                element = PsiTreeUtil.prevLeaf(element);
+                while (element != null && element.getNode().getElementType() == PascalTokenTypes.WHITE_SPACE) {
+                    element = PsiTreeUtil.prevLeaf(element);
+                }
+            } else if (elemType == PascalTokenTypes.GT) {
+                element = skipMatchedBackward(element, PascalTokenTypes.LT, PascalTokenTypes.GT);
+                if (element == null) return null;
+                element = PsiTreeUtil.prevLeaf(element);
+                while (element != null && element.getNode().getElementType() == PascalTokenTypes.WHITE_SPACE) {
+                    element = PsiTreeUtil.prevLeaf(element);
+                }
+            } else {
+                break;
+            }
+        }
+        return element;
+    }
+
+    private PsiElement skipMatchedBackward(PsiElement close,
+                                            com.intellij.psi.tree.IElementType openType,
+                                            com.intellij.psi.tree.IElementType closeType) {
+        int depth = 1;
+        PsiElement cur = PsiTreeUtil.prevLeaf(close);
+        while (cur != null && depth > 0) {
+            if (cur.getNode().getElementType() == closeType) depth++;
+            else if (cur.getNode().getElementType() == openType) depth--;
+            if (depth == 0) return cur;
+            cur = PsiTreeUtil.prevLeaf(cur);
+        }
+        return null;
     }
 
     private PascalTypeDefinition resolveSimpleQualifier(PsiElement qualifier, PsiFile file) {
@@ -185,23 +309,35 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
     }
 
     private PascalTypeDefinition getTypeOf(PsiElement element, PsiFile originFile) {
-        String typeName = null;
-        if (element instanceof PascalVariableDefinition varDef) {
-            typeName = varDef.getTypeName();
-            if (typeName == null || typeName.isBlank()) {
-                // Try inferred type
-                PascalTypeDefinition inferred = MemberChainResolver.getInferredTypeOf(varDef, originFile);
-                if (inferred != null) return inferred;
+        return getTypeOf(element, originFile, null);
+    }
+
+    private PascalTypeDefinition getTypeOf(PsiElement element, PsiFile originFile, String typeNameOverride) {
+        String typeName = typeNameOverride;
+        if (typeName == null) {
+            if (element instanceof PascalVariableDefinition varDef) {
+                typeName = varDef.getTypeName();
+                if (typeName == null || typeName.isBlank()) {
+                    // Try inferred type
+                    PascalTypeDefinition inferred = MemberChainResolver.getInferredTypeOf(varDef, originFile);
+                    if (inferred != null) return inferred;
+                }
+            } else if (element instanceof PascalProperty prop) {
+                typeName = prop.getTypeName();
+            } else if (element instanceof PascalRoutine routine) {
+                typeName = routine.getReturnTypeName();
+            } else if (element instanceof PascalTypeDefinition td) {
+                return td; // Direct type access (e.g., TClass.Create)
             }
-        } else if (element instanceof PascalProperty prop) {
-            typeName = prop.getTypeName();
-        } else if (element instanceof PascalRoutine routine) {
-            typeName = routine.getReturnTypeName();
-        } else if (element instanceof PascalTypeDefinition td) {
-            return td; // Direct type access (e.g., TClass.Create)
         }
 
         if (typeName == null || typeName.isBlank()) return null;
+
+        // Strip generic arguments: "TEntityList<TRide>" -> "TEntityList"
+        int ltIdx = typeName.indexOf('<');
+        if (ltIdx > 0) {
+            typeName = typeName.substring(0, ltIdx);
+        }
 
         PascalTypeIndex.TypeLookupResult result = PascalTypeIndex.findTypeWithTransitiveDeps(
                 typeName, originFile, 0);
@@ -239,9 +375,13 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
         return null;
     }
 
-    private LookupElementBuilder createMemberLookup(PsiElement member, String name) {
+    private LookupElementBuilder createMemberLookup(PsiElement member, String name, Map<String, String> typeArgMap) {
         if (member instanceof PascalRoutine routine) {
             String returnType = routine.getReturnTypeName();
+            // Apply generic substitution to return type
+            if (returnType != null && typeArgMap.containsKey(returnType)) {
+                returnType = typeArgMap.get(returnType);
+            }
             LookupElementBuilder builder = LookupElementBuilder.create(name)
                     .withIcon(getIcon(member))
                     .withTailText("()", true)
@@ -257,6 +397,10 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
             LookupElementBuilder builder = LookupElementBuilder.create(name)
                     .withIcon(getIcon(member));
             String typeName = prop.getTypeName();
+            // Apply generic substitution
+            if (typeName != null && typeArgMap.containsKey(typeName)) {
+                typeName = typeArgMap.get(typeName);
+            }
             if (typeName != null) {
                 builder = builder.withTypeText(typeName);
             }
@@ -265,6 +409,10 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
             LookupElementBuilder builder = LookupElementBuilder.create(name)
                     .withIcon(getIcon(member));
             String typeName = varDef.getTypeName();
+            // Apply generic substitution
+            if (typeName != null && typeArgMap.containsKey(typeName)) {
+                typeName = typeArgMap.get(typeName);
+            }
             if (typeName != null) {
                 builder = builder.withTypeText(typeName);
             }

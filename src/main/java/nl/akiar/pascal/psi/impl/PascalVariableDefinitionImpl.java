@@ -207,6 +207,19 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
                     }
                 } else if (nextType == PascalTokenTypes.WHITE_SPACE) {
                     next = next.getTreeNext();
+                } else if (nextType == PascalTokenTypes.KW_OF) {
+                    typeName.append(" of ");
+                    next = next.getTreeNext();
+                    while (next != null && next.getElementType() == PascalTokenTypes.WHITE_SPACE) {
+                        next = next.getTreeNext();
+                    }
+                    if (next != null) {
+                        String elementTypeName = buildTypeName(next);
+                        if (elementTypeName != null) {
+                            typeName.append(elementTypeName);
+                        }
+                    }
+                    return typeName.toString();
                 } else {
                     break;
                 }

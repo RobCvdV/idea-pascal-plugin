@@ -1,25 +1,13 @@
 package nl.akiar.pascal.parser
 
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.AfterEach
+import org.junit.Test
 
 /**
  * Tests that the parser produces meaningful PSI structure even when the source
  * contains incomplete or broken code (as happens during editing).
  */
 class PsiResilienceTest : BasePlatformTestCase() {
-
-    @BeforeEach
-    fun setup() {
-        setUp()
-    }
-
-    @AfterEach
-    fun tearDownTest() {
-        tearDown()
-    }
 
     private fun parseAndGetPsiTree(text: String): String {
         val psiFile = myFixture.configureByText("Test.pas", text)
@@ -29,7 +17,7 @@ class PsiResilienceTest : BasePlatformTestCase() {
     }
 
     @Test
-    fun `valid unit parses with full structure`() {
+    fun testValidUnitParsesWithFullStructure() {
         val text = """
             unit TestUnit;
             interface
@@ -54,7 +42,7 @@ class PsiResilienceTest : BasePlatformTestCase() {
     }
 
     @Test
-    fun `incomplete member access does not collapse PSI`() {
+    fun testIncompleteMemberAccessDoesNotCollapsePsi() {
         // User just typed "LResult." — trailing dot
         val text = """
             unit TestUnit;
@@ -80,7 +68,7 @@ class PsiResilienceTest : BasePlatformTestCase() {
     }
 
     @Test
-    fun `incomplete assignment does not collapse PSI`() {
+    fun testIncompleteAssignmentDoesNotCollapsePsi() {
         val text = """
             unit TestUnit;
             interface
@@ -98,7 +86,7 @@ class PsiResilienceTest : BasePlatformTestCase() {
     }
 
     @Test
-    fun `missing end keyword does not collapse PSI`() {
+    fun testMissingEndKeywordDoesNotCollapsePsi() {
         val text = """
             unit TestUnit;
             interface
@@ -120,7 +108,7 @@ class PsiResilienceTest : BasePlatformTestCase() {
     }
 
     @Test
-    fun `unclosed string does not collapse PSI`() {
+    fun testUnclosedStringDoesNotCollapsePsi() {
         val text = """
             unit TestUnit;
             interface
@@ -137,27 +125,16 @@ class PsiResilienceTest : BasePlatformTestCase() {
     }
 
     @Test
-    fun `cache replay provides structure after edit`() {
-        // First parse succeeds
-        val validText = """
-            unit TestUnit;
-            interface
-            type
-              TFoo = class
-                procedure Bar;
-              end;
-            implementation
-            procedure TFoo.Bar;
-            begin
-            end;
-            end.
-        """.trimIndent()
-        val tree1 = parseAndGetPsiTree(validText)
-        assertTrue("Initial parse should have TYPE_DEFINITION or CLASS_TYPE",
-            tree1.contains("TYPE_DEFINITION") || tree1.contains("CLASS_TYPE"))
-
-        // Clear the cache manually to ensure test isolation — but note the cache
-        // is keyed per unit name, so re-parsing the same unit will use the cache
-        // This test mainly verifies the recording path works
+    fun testPsiTreeIsDeterministicAcrossParses() {
+        val text = "unit Test;\ninterface\nimplementation\nend."
+        val psi1 = myFixture.configureByText("TestA.pas", text)
+        val tree1 = com.intellij.openapi.application.runReadAction {
+            com.intellij.psi.impl.DebugUtil.psiToString(psi1, false)
+        }
+        val psi2 = myFixture.configureByText("TestB.pas", text)
+        val tree2 = com.intellij.openapi.application.runReadAction {
+            com.intellij.psi.impl.DebugUtil.psiToString(psi2, false)
+        }
+        assertEquals("PSI tree should be identical across parses of the same text", tree1, tree2)
     }
 }

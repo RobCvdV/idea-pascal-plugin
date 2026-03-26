@@ -31,26 +31,36 @@ public class PascalRoutineCallReference extends PsiReferenceBase<PsiElement> {
         int offset = myElement.getTextOffset();
 
         // 1. Check containing class members (implicit Self.MethodName)
+        // Prefer implementations (code body) over declarations for callsite navigation
         PsiElement at = file.findElementAt(offset);
         PascalTypeDefinition containingClass = findContainingClass(at);
         if (containingClass != null) {
+            PsiElement declarationFallback = null;
             for (PsiElement member : containingClass.getMembers(true)) {
                 if (member instanceof PascalRoutine r
-                        && name.equalsIgnoreCase(r.getName())
-                        && !r.isImplementation()) {
-                    return member;
+                        && name.equalsIgnoreCase(r.getName())) {
+                    if (r.isImplementation()) {
+                        return member;
+                    }
+                    if (declarationFallback == null) {
+                        declarationFallback = member;
+                    }
                 }
+            }
+            if (declarationFallback != null) {
+                return declarationFallback;
             }
         }
 
         // 2. Uses-clause-validated routine lookup
+        // Prefer implementations (code body) over declarations for callsite navigation
         PascalRoutineIndex.RoutineLookupResult result =
             PascalRoutineIndex.findRoutinesWithUsesValidation(name, file, offset);
         for (PascalRoutine r : result.getInScopeRoutines()) {
-            if (!r.isImplementation()) return r;
+            if (r.isImplementation()) return r;
         }
-        if (!result.getInScopeRoutines().isEmpty()) {
-            return result.getInScopeRoutines().get(0);
+        for (PascalRoutine r : result.getInScopeRoutines()) {
+            if (!r.isImplementation()) return r;
         }
         return null;
     }

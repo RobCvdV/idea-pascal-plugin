@@ -78,6 +78,13 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
                         LOG.debug("[PascalNav]  -> Resolved element not accessible due to visibility");
                         continue; // Try next reference
                     }
+                    // Redirect routine declarations to implementations for callsite navigation
+                    if (!(ref instanceof nl.akiar.pascal.reference.PascalRoutineImplementationReference)
+                            && resolved instanceof PascalRoutine routineTarget
+                            && !routineTarget.isImplementation()) {
+                        PascalRoutine impl = routineTarget.getImplementation();
+                        if (impl != null) resolved = impl;
+                    }
                     return new PsiElement[]{resolved};
                 }
             }
@@ -140,6 +147,11 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
                         LOG.debug("[MemberTraversal] Goto: resolved element not accessible due to visibility");
                         return null;
                     }
+                    // Redirect routine declarations to implementations for callsite navigation
+                    if (resolved instanceof PascalRoutine routineTarget && !routineTarget.isImplementation()) {
+                        PascalRoutine impl = routineTarget.getImplementation();
+                        if (impl != null) resolved = impl;
+                    }
                     return new PsiElement[]{resolved};
                 }
             } finally {
@@ -192,6 +204,26 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
             }
         }
 
+        // If this element is a routine's own name identifier, the decl↔impl toggle above
+        // already handled it. Don't fall through to global lookups (which would match
+        // any same-named routine from other units).
+        if (parent instanceof PascalRoutine) {
+            PascalRoutine routine = (PascalRoutine) parent;
+            if (routine.getNameIdentifier() == sourceElement) {
+                return null;
+            }
+        }
+        if (parent != null && parent.getClass().getSimpleName().contains("MethodNameReference")) {
+            PsiElement routineParent = parent.getParent();
+            if (routineParent instanceof PascalRoutine) {
+                PascalRoutine routine = (PascalRoutine) routineParent;
+                if (routine.getNameIdentifier() == sourceElement ||
+                    (routine.getNameIdentifier() != null && PsiTreeUtil.isAncestor(routine.getNameIdentifier(), sourceElement, false))) {
+                    return null;
+                }
+            }
+        }
+
         // If this is a member access (preceded by dot), don't fall through to global lookups.
         // Member resolution was already attempted above via references and chain resolver.
         PsiElement prevForDotCheck = PsiTreeUtil.prevLeaf(sourceElement);
@@ -232,15 +264,26 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
         // Prioritize in-scope types, but still allow navigation to out-of-scope types
         List<PascalTypeDefinition> inScope = result.getInScopeTypes();
         if (!inScope.isEmpty()) {
-            LOG.debug("[PascalNav]  -> Found " + inScope.size() + " in-scope type definition(s)");
-            return inScope.toArray(new PsiElement[0]);
+            // Filter out forward declarations, preferring full definitions
+            List<PascalTypeDefinition> fullDefs = new java.util.ArrayList<>();
+            for (PascalTypeDefinition t : inScope) {
+                if (!t.isForwardDeclaration()) fullDefs.add(t);
+            }
+            List<PascalTypeDefinition> targets = fullDefs.isEmpty() ? inScope : fullDefs;
+            LOG.debug("[PascalNav]  -> Found " + targets.size() + " in-scope type definition(s)");
+            return targets.toArray(new PsiElement[0]);
         }
 
         // Fall back to out-of-scope types (still navigable, just shows error)
         List<PascalTypeDefinition> outOfScope = result.getOutOfScopeTypes();
         if (!outOfScope.isEmpty()) {
-            LOG.debug("[PascalNav]  -> Found " + outOfScope.size() + " out-of-scope type definition(s) - unit not in uses");
-            return outOfScope.toArray(new PsiElement[0]);
+            List<PascalTypeDefinition> fullDefs = new java.util.ArrayList<>();
+            for (PascalTypeDefinition t : outOfScope) {
+                if (!t.isForwardDeclaration()) fullDefs.add(t);
+            }
+            List<PascalTypeDefinition> targets = fullDefs.isEmpty() ? outOfScope : fullDefs;
+            LOG.debug("[PascalNav]  -> Found " + targets.size() + " out-of-scope type definition(s) - unit not in uses");
+            return targets.toArray(new PsiElement[0]);
         }
 
         // Try looking up as a variable - use scoped lookup
@@ -256,14 +299,14 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
                 nl.akiar.pascal.stubs.PascalRoutineIndex.findRoutinesWithUsesValidation(typeName, file, elementOffset);
         List<PascalRoutine> inScopeRoutines = routineResult.getInScopeRoutines();
         if (!inScopeRoutines.isEmpty()) {
-            // Prefer declarations over implementations, and check visibility
+            // Prefer implementations over declarations for callsite navigation, and check visibility
             for (PascalRoutine r : inScopeRoutines) {
-                if (!r.isImplementation() && isAccessible(r, sourceElement)) {
-                    LOG.debug("[PascalNav]  -> Found routine declaration: " + r.getName());
+                if (r.isImplementation() && isAccessible(r, sourceElement)) {
+                    LOG.debug("[PascalNav]  -> Found routine implementation: " + r.getName());
                     return new PsiElement[]{r};
                 }
             }
-            // Fallback to any accessible routine
+            // Fallback to any accessible routine (declaration)
             for (PascalRoutine r : inScopeRoutines) {
                 if (isAccessible(r, sourceElement)) {
                     LOG.debug("[PascalNav]  -> Found routine: " + r.getName());

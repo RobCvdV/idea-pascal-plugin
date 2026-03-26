@@ -35,6 +35,6 @@ public class PascalStubFileElementType extends IStubFileElementType<PsiFileStub<
     public int getStubVersion() {
         // Bump to force reindex after fixing property name extraction (attribute skipping)
         // and routine name extraction (composite node handling)
-        return super.getStubVersion() + 10;
+        return super.getStubVersion() + 11;
     }
 }

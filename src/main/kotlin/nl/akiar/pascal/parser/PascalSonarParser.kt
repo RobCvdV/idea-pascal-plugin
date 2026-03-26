@@ -64,9 +64,6 @@ class PascalSonarParser : PsiParser {
             ParserComponents(preprocessorFactory, typeFactory, config, tempFile)
         }
 
-        /** Per-parse collection of structural elements for PascalPsiCache recording. */
-        private val RECORDED_ELEMENTS = ThreadLocal.withInitial { mutableListOf<PascalPsiCache.CachedElement>() }
-
         private val DIAG_ENABLED: Boolean = java.lang.Boolean.getBoolean("pascal.parser.diag")
         private val DIAG_ONLY_UNIT: String? = System.getProperty("pascal.parser.diag.onlyUnit")
         private val DIAG_ONLY_REGEX: Regex? = System.getProperty("pascal.parser.diag.onlyUnitRegex")?.let { Regex(it, setOf(RegexOption.IGNORE_CASE)) }
@@ -93,9 +90,8 @@ class PascalSonarParser : PsiParser {
         val rootMarker = builder.mark()
         var text = builder.originalText.toString()
 
-        // Reset stats and recorded elements per parse
+        // Reset stats per parse
         STATS_TL.set(ParseStats())
-        RECORDED_ELEMENTS.get().clear()
 
         // Try to detect the unit name early for diagnostics filtering
         val headerRegex = Regex("""(?i)\bunit\s+([A-Za-z_][\w.]*)\s*;""")
@@ -118,9 +114,6 @@ class PascalSonarParser : PsiParser {
         text = text.replace(includeDirectiveRegex) { match ->
             " ".repeat(match.value.length)
         }
-
-        // Derive a stable file key for PSI cache (use unit name if available, else hash)
-        val cacheKey = detectedUnit ?: text.hashCode().toString()
 
         if (text.isNotBlank()) {
             var parseSucceeded = false
@@ -172,25 +165,6 @@ class PascalSonarParser : PsiParser {
                 }
             }
 
-            // Record cache on success for future replay
-            if (parseSucceeded) {
-                val recorded = RECORDED_ELEMENTS.get().toList()
-                if (recorded.isNotEmpty()) {
-                    PascalPsiCache.record(cacheKey, text, recorded)
-                    diag("cache recorded: ${recorded.size} elements for key=$cacheKey")
-                }
-            }
-
-            // Layer 2: Cache Replay — use last-valid PSI structure with offset adjustment
-            if (!parseSucceeded) {
-                val replayed = PascalPsiCache.replay(cacheKey, text)
-                if (replayed != null) {
-                    diag("cache replay: ${replayed.size} elements for key=$cacheKey")
-                    for (elem in replayed) {
-                        synthesize(builder, elem.startOffset, elem.endOffset, elem.elementType)
-                    }
-                }
-            }
         }
 
         // Minimal guarded PSI fallback: if sonar-delphi produced no unit/uses/refs, synthesize from text
@@ -250,20 +224,17 @@ class PascalSonarParser : PsiParser {
 
     /**
      * Layer 3: Reconstruct major structural elements from token patterns in the source text.
-     * This is the last resort when both sanitization and cache replay have failed.
+     * This is the last resort when sanitization has failed.
      *
-     * IMPORTANT: Only non-stub element types may be synthesized here. Stub-based types
-     * (TYPE_DEFINITION, VARIABLE_DEFINITION, ROUTINE_DECLARATION, PROPERTY_DEFINITION,
-     * ATTRIBUTE_DEFINITION) require specific child structure for stub building. Synthesizing
-     * them from raw tokens causes "Failed to build stub tree" errors and NPEs.
+     * Only synthesizes interface and implementation sections — type/var/const sections
+     * overlap with these parent sections and cause empty/misaligned PSI nodes when
+     * the builder has already advanced past their start offset.
      */
     private fun runEnhancedTokenFallback(builder: PsiBuilder, text: String, interfaceMatch: MatchResult?) {
-        // 1. Interface section: from 'interface' keyword (not followed by '(') to 'implementation'
         val implRegex = Regex("""\bimplementation\b""", RegexOption.IGNORE_CASE)
         val implMatch = implRegex.find(text)
 
         if (interfaceMatch != null) {
-            // Check it's not an interface type declaration (followed by '(' or identifier on same line)
             val afterInterface = text.substring(interfaceMatch.range.last + 1).trimStart()
             val isInterfaceSection = !afterInterface.startsWith("(") &&
                 (afterInterface.startsWith("\n") || afterInterface.startsWith("\r") || afterInterface.isBlank() ||
@@ -271,53 +242,18 @@ class PascalSonarParser : PsiParser {
 
             if (isInterfaceSection) {
                 val intfEnd = implMatch?.range?.first ?: text.length
-                if (intfEnd > interfaceMatch.range.first) {
+                if (intfEnd > interfaceMatch.range.first && builder.currentOffset <= interfaceMatch.range.first) {
                     synthesize(builder, interfaceMatch.range.first, intfEnd, nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_SECTION)
                 }
             }
         }
 
-        // 2. Implementation section: from 'implementation' to end (or 'initialization'/'finalization')
         if (implMatch != null) {
             val initRegex = Regex("""\b(?:initialization|finalization)\b""", RegexOption.IGNORE_CASE)
             val initMatch = initRegex.find(text, startIndex = implMatch.range.last)
             val implEnd = initMatch?.range?.first ?: text.length
-            if (implEnd > implMatch.range.first) {
+            if (implEnd > implMatch.range.first && builder.currentOffset <= implMatch.range.first) {
                 synthesize(builder, implMatch.range.first, implEnd, nl.akiar.pascal.psi.PascalElementTypes.IMPLEMENTATION_SECTION)
-            }
-        }
-
-        // 3. Type sections: 'type' keyword through next section keyword (non-stub, safe to synthesize)
-        val typeSectionRegex = Regex("""\btype\b""", RegexOption.IGNORE_CASE)
-        val sectionKeywords = Regex("""\b(?:type|const|var|procedure|function|constructor|destructor|begin|implementation|initialization|finalization)\b""", RegexOption.IGNORE_CASE)
-        for (typeMatch in typeSectionRegex.findAll(text)) {
-            val typeStart = typeMatch.range.first
-            val nextSection = sectionKeywords.find(text, startIndex = typeMatch.range.last + 1)
-            val typeEnd = nextSection?.range?.first ?: text.length
-            if (typeEnd > typeStart) {
-                synthesize(builder, typeStart, typeEnd, nl.akiar.pascal.psi.PascalElementTypes.TYPE_SECTION)
-            }
-        }
-
-        // 4. Variable sections: 'var' keyword through next section keyword (non-stub, safe to synthesize)
-        val varSectionRegex = Regex("""\bvar\b""", RegexOption.IGNORE_CASE)
-        for (varMatch in varSectionRegex.findAll(text)) {
-            val varStart = varMatch.range.first
-            val nextSection = sectionKeywords.find(text, startIndex = varMatch.range.last + 1)
-            val varEnd = nextSection?.range?.first ?: text.length
-            if (varEnd > varStart) {
-                synthesize(builder, varStart, varEnd, nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION)
-            }
-        }
-
-        // 5. Const sections: 'const' keyword through next section keyword (non-stub, safe to synthesize)
-        val constSectionRegex = Regex("""\bconst\b""", RegexOption.IGNORE_CASE)
-        for (constMatch in constSectionRegex.findAll(text)) {
-            val constStart = constMatch.range.first
-            val nextSection = sectionKeywords.find(text, startIndex = constMatch.range.last + 1)
-            val constEnd = nextSection?.range?.first ?: text.length
-            if (constEnd > constStart) {
-                synthesize(builder, constStart, constEnd, nl.akiar.pascal.psi.PascalElementTypes.CONST_SECTION)
             }
         }
 
@@ -794,8 +730,6 @@ class PascalSonarParser : PsiParser {
                 builder.advanceLexer()
             }
             marker.done(markerType!!)
-            // Record for PSI cache
-            RECORDED_ELEMENTS.get().add(PascalPsiCache.CachedElement(nodeStartOffset, nodeEndOffset, markerType))
             if (DIAG_ENABLED) {
                 diag("done: ${markerType} span=${nodeStartOffset}..${nodeEndOffset}")
             }

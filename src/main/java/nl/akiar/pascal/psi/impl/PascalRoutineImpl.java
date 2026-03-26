@@ -220,10 +220,12 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         return false;
     }
 
-    private static List<PascalRoutine> filterByClass(List<PascalRoutine> routines, @Nullable String className) {
+    private static List<PascalRoutine> filterByClass(List<PascalRoutine> routines, @Nullable String className, @Nullable String unitName) {
         if (routines.isEmpty()) return routines;
         List<PascalRoutine> filtered = new ArrayList<>();
         for (PascalRoutine r : routines) {
+            // Skip routines from different units when unit is specified
+            if (unitName != null && !unitName.equalsIgnoreCase(r.getUnitName())) continue;
             if (className == null) {
                 // For global routines (no class), only include routines that also have no class
                 if (r.getContainingClassName() == null) filtered.add(r);
@@ -262,18 +264,28 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
                         }
                     }
                 }
-                // If no exact signature match, accept any declaration with same class
+                // If no exact signature match, try matchesSignature as secondary check
+                nl.akiar.pascal.psi.PascalRoutine declSigMatch = null;
+                int declCount = 0;
+                nl.akiar.pascal.psi.PascalRoutine singleDecl = null;
                 for (nl.akiar.pascal.psi.PascalRoutine r : candidates) {
                     if (!r.isImplementation()) {
-                        return r;
+                        declCount++;
+                        singleDecl = r;
+                        if (matchesSignature(r)) {
+                            declSigMatch = r;
+                        }
                     }
                 }
+                if (declSigMatch != null) return declSigMatch;
+                // Only accept without signature match if exactly 1 declaration candidate
+                if (declCount == 1) return singleDecl;
             }
 
             // 2. Routine index fallback: filter by class
             com.intellij.psi.PsiFile file = getContainingFile();
             nl.akiar.pascal.stubs.PascalRoutineIndex.RoutineLookupResult result = nl.akiar.pascal.stubs.PascalRoutineIndex.findRoutinesWithUsesValidation(name, file, getTextOffset());
-            java.util.List<nl.akiar.pascal.psi.PascalRoutine> inScope = filterByClass(result.getInScopeRoutines(), owner);
+            java.util.List<nl.akiar.pascal.psi.PascalRoutine> inScope = filterByClass(result.getInScopeRoutines(), owner, unit);
             for (nl.akiar.pascal.psi.PascalRoutine r : inScope) {
                 if (!r.isImplementation()) return r;
             }
@@ -311,18 +323,28 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
                         }
                     }
                 }
-                // If no exact signature match, accept any implementation with same class
+                // If no exact signature match, try matchesSignature as secondary check
+                nl.akiar.pascal.psi.PascalRoutine sigMatch = null;
+                int implCount = 0;
+                nl.akiar.pascal.psi.PascalRoutine singleImpl = null;
                 for (nl.akiar.pascal.psi.PascalRoutine r : candidates) {
                     if (r.isImplementation()) {
-                        return r;
+                        implCount++;
+                        singleImpl = r;
+                        if (matchesSignature(r)) {
+                            sigMatch = r;
+                        }
                     }
                 }
+                if (sigMatch != null) return sigMatch;
+                // Only accept without signature match if exactly 1 implementation candidate
+                if (implCount == 1) return singleImpl;
             }
 
             // 2. Routine index fallback: filter by class
             com.intellij.psi.PsiFile file = getContainingFile();
             nl.akiar.pascal.stubs.PascalRoutineIndex.RoutineLookupResult result = nl.akiar.pascal.stubs.PascalRoutineIndex.findRoutinesWithUsesValidation(name, file, getTextOffset());
-            java.util.List<nl.akiar.pascal.psi.PascalRoutine> inScope = filterByClass(result.getInScopeRoutines(), owner);
+            java.util.List<nl.akiar.pascal.psi.PascalRoutine> inScope = filterByClass(result.getInScopeRoutines(), owner, unit);
             for (nl.akiar.pascal.psi.PascalRoutine r : inScope) {
                 if (r.isImplementation()) return r;
             }
@@ -354,8 +376,10 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         PascalRoutineStub stub = getGreenStub();
         if (stub != null && stub.getSignatureHash() != null) return stub.getSignatureHash();
         StringBuilder sb = new StringBuilder();
-        for (PsiElement child = getFirstChild(); child != null; child = child.getNextSibling()) {
-            if (child instanceof PascalVariableDefinition p && p.getVariableKind() == VariableKind.PARAMETER) {
+        // Use PsiTreeUtil to find parameters nested inside FORMAL_PARAMETER_LIST composite nodes
+        Collection<PascalVariableDefinition> allVars = PsiTreeUtil.findChildrenOfType(this, PascalVariableDefinition.class);
+        for (PascalVariableDefinition p : allVars) {
+            if (p.getVariableKind() == VariableKind.PARAMETER) {
                 String tn = p.getTypeName();
                 if (tn != null) sb.append(tn.toLowerCase()).append(";");
             }

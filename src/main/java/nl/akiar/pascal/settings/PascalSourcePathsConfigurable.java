@@ -174,10 +174,35 @@ public class PascalSourcePathsConfigurable implements Configurable {
     @Override
     public void apply() throws ConfigurationException {
         PascalSourcePathsSettings settings = PascalSourcePathsSettings.getInstance(project);
+        List<String> oldPaths = settings.getSourcePaths();
+        List<String> oldScopes = settings.getUnitScopeNames();
         List<String> newPaths = getPathsFromUI();
         List<String> newScopes = getScopesFromUI();
+
+        boolean pathsChanged = !oldPaths.equals(newPaths);
+        boolean scopesChanged = !oldScopes.equals(newScopes);
+
         settings.setSourcePaths(newPaths);
         settings.setUnitScopeNames(newScopes);
+
+        if (pathsChanged) {
+            // Notify IntelliJ that library roots changed so DprLibraryRootsProvider
+            // is re-evaluated and new/removed paths get indexed/de-indexed.
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
+                if (!project.isDisposed()) {
+                    com.intellij.openapi.application.WriteAction.run(() -> {
+                        com.intellij.openapi.roots.ex.ProjectRootManagerEx.getInstanceEx(project)
+                                .makeRootsChange(com.intellij.openapi.util.EmptyRunnable.INSTANCE, false, true);
+                    });
+                }
+            }, com.intellij.openapi.application.ModalityState.nonModal());
+        }
+
+        if (scopesChanged) {
+            // Unit scope names affect type resolution (short name → full name mapping).
+            // Clear resolution caches and restart the daemon to re-analyze.
+            nl.akiar.pascal.resolution.MemberChainResolver.clearCaches(project);
+        }
     }
 
     @Override

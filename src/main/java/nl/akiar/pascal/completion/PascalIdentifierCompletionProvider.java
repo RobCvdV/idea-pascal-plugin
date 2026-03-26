@@ -13,7 +13,6 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.ProcessingContext;
 import nl.akiar.pascal.PascalTokenTypes;
 import nl.akiar.pascal.psi.*;
-import nl.akiar.pascal.resolution.DelphiBuiltIns;
 import nl.akiar.pascal.stubs.PascalRoutineIndex;
 import nl.akiar.pascal.stubs.PascalTypeIndex;
 import nl.akiar.pascal.stubs.PascalVariableIndex;
@@ -75,10 +74,10 @@ public class PascalIdentifierCompletionProvider extends CompletionProvider<Compl
         addClassMembers(position, file, invocationCount, addedNames, result);
 
         // 3. Built-in functions
-        addBuiltInFunctions(addedNames, result);
+        addBuiltInFunctions(project, addedNames, result);
 
         // 4. Built-in types
-        addBuiltInTypes(addedNames, result);
+        addBuiltInTypes(project, addedNames, result);
 
         // 5. Keywords (context-dependent)
         addKeywords(position, addedNames, result);
@@ -311,7 +310,7 @@ public class PascalIdentifierCompletionProvider extends CompletionProvider<Compl
         }
     }
 
-    private void addBuiltInFunctions(Set<String> addedNames, CompletionResultSet result) {
+    private void addBuiltInFunctions(Project project, Set<String> addedNames, CompletionResultSet result) {
         String[] builtInFunctions = {
                 "Assigned", "Addr", "SizeOf", "TypeOf", "TypeInfo",
                 "GetMem", "FreeMem", "ReallocMem", "New", "Dispose", "FillChar", "Move",
@@ -330,6 +329,14 @@ public class PascalIdentifierCompletionProvider extends CompletionProvider<Compl
 
         for (String name : builtInFunctions) {
             if (addedNames.contains(name.toLowerCase())) continue;
+            // Skip entries that exist in the stub index (source-backed versions win in Tier 2)
+            Collection<PascalRoutine> indexed = StubIndex.getElements(
+                    PascalRoutineIndex.KEY, name.toLowerCase(), project,
+                    GlobalSearchScope.allScope(project), PascalRoutine.class);
+            if (!indexed.isEmpty()) {
+                addedNames.add(name.toLowerCase());
+                continue;
+            }
             addedNames.add(name.toLowerCase());
             LookupElementBuilder lookup = LookupElementBuilder.create(name)
                     .withIcon(AllIcons.Nodes.Function)
@@ -343,7 +350,7 @@ public class PascalIdentifierCompletionProvider extends CompletionProvider<Compl
         }
     }
 
-    private void addBuiltInTypes(Set<String> addedNames, CompletionResultSet result) {
+    private void addBuiltInTypes(Project project, Set<String> addedNames, CompletionResultSet result) {
         String[] builtInTypes = {
                 "Integer", "Int64", "Cardinal", "Byte", "Word", "ShortInt", "SmallInt",
                 "LongWord", "LongInt", "NativeInt", "NativeUInt",
@@ -358,6 +365,14 @@ public class PascalIdentifierCompletionProvider extends CompletionProvider<Compl
 
         for (String name : builtInTypes) {
             if (addedNames.contains(name.toLowerCase())) continue;
+            // Skip entries that exist in the stub index (source-backed versions win in Tier 2)
+            Collection<PascalTypeDefinition> indexed = StubIndex.getElements(
+                    PascalTypeIndex.KEY, name.toLowerCase(), project,
+                    GlobalSearchScope.allScope(project), PascalTypeDefinition.class);
+            if (!indexed.isEmpty()) {
+                addedNames.add(name.toLowerCase());
+                continue;
+            }
             addedNames.add(name.toLowerCase());
             LookupElementBuilder lookup = LookupElementBuilder.create(name)
                     .withIcon(AllIcons.Nodes.Type)

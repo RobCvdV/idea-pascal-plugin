@@ -263,7 +263,7 @@ object MemberChainResolver {
                 if (prev != null) prev = skipBackwardWhitespace(PsiTreeUtil.prevLeaf(prev))
                 continue
             }
-            if (prev.node.elementType == PascalTokenTypes.GT) {
+            if (prev.node.elementType == PascalTokenTypes.GT && isLikelyGenericBracket(prev)) {
                 if (diagLog) LOG.info("[GenericChain] backward walk: attempting GT skip from '${prev.text}' at offset=${prev.textOffset}")
                 val matched = skipMatchedBackward(prev, PascalTokenTypes.LT, PascalTokenTypes.GT)
                 if (matched != null) {
@@ -285,7 +285,7 @@ object MemberChainResolver {
                 } else if (beforeDot.node.elementType == PascalTokenTypes.RBRACKET) {
                     beforeDot = skipMatchedBackward(beforeDot, PascalTokenTypes.LBRACKET, PascalTokenTypes.RBRACKET)
                     if (beforeDot != null) beforeDot = skipBackwardWhitespace(PsiTreeUtil.prevLeaf(beforeDot))
-                } else if (beforeDot.node.elementType == PascalTokenTypes.GT) {
+                } else if (beforeDot.node.elementType == PascalTokenTypes.GT && isLikelyGenericBracket(beforeDot)) {
                     if (diagLog) LOG.info("[GenericChain] after-dot backward: attempting GT skip at offset=${beforeDot.textOffset}")
                     val matched = skipMatchedBackward(beforeDot, PascalTokenTypes.LT, PascalTokenTypes.GT)
                     if (matched != null) {
@@ -321,7 +321,7 @@ object MemberChainResolver {
                 next = skipMatchedForward(next, PascalTokenTypes.LBRACKET, PascalTokenTypes.RBRACKET)
                 if (next != null) next = skipForwardWhitespace(PsiTreeUtil.nextLeaf(next))
             }
-            if (next != null && next.node.elementType == PascalTokenTypes.LT) {
+            if (next != null && next.node.elementType == PascalTokenTypes.LT && isLikelyGenericBracket(next)) {
                 if (diagLog) LOG.info("[GenericChain] forward walk: attempting LT skip after '${current.text}'")
                 val matched = skipMatchedForward(next, PascalTokenTypes.LT, PascalTokenTypes.GT)
                 if (matched != null) {
@@ -383,6 +383,44 @@ object MemberChainResolver {
     }
 
     /**
+     * Determine whether a GT or LT token is likely a generic bracket rather than a comparison operator.
+     * Uses surrounding token context to disambiguate.
+     */
+    private fun isLikelyGenericBracket(gtOrLt: PsiElement): Boolean {
+        if (gtOrLt.node.elementType == PascalTokenTypes.GT) {
+            // GT followed by DOT is a generic chain end: Method<T>.Next
+            val next = skipForwardWhitespace(PsiTreeUtil.nextLeaf(gtOrLt))
+            if (next != null && next.node.elementType == PascalTokenTypes.DOT) return true
+            // GT followed by expression context tokens → comparison, not generic
+            if (next != null && isExpressionContextToken(next)) return false
+            // Default for GT: not generic (safe default to avoid false positives)
+            return false
+        }
+
+        if (gtOrLt.node.elementType == PascalTokenTypes.LT) {
+            // LT preceded by identifier → likely generic
+            val prev = skipBackwardWhitespace(PsiTreeUtil.prevLeaf(gtOrLt))
+            if (prev == null) return false
+            if (isChainIdentifier(prev)) return true
+            // LT preceded by operator/keyword → comparison
+            return false
+        }
+        return false
+    }
+
+    /**
+     * Check if a token is in an expression context where `>` or `<` would be comparison operators.
+     */
+    private fun isExpressionContextToken(element: PsiElement): Boolean {
+        val t = element.node.elementType
+        return t == PascalTokenTypes.KW_THEN || t == PascalTokenTypes.KW_DO ||
+               t == PascalTokenTypes.KW_AND || t == PascalTokenTypes.KW_OR ||
+               t == PascalTokenTypes.KW_NOT || t == PascalTokenTypes.KW_XOR ||
+               t == PascalTokenTypes.SEMI || t == PascalTokenTypes.RPAREN ||
+               t == PascalTokenTypes.RBRACKET
+    }
+
+    /**
      * Resolve a member chain starting from an identifier.
      *
      * @param startElement The first identifier in the chain (or any identifier in the chain)
@@ -403,13 +441,8 @@ object MemberChainResolver {
 
             val cached = cache[cacheKey] as? ChainResolutionInternal
             if (cached != null && cached.resolvedElements.size == chain.size) {
-                // Only use cache if it has at least some resolved elements (not all nulls after first)
-                val hasResolutions = cached.resolvedElements.drop(1).any { it != null }
-                if (hasResolutions) {
-                    LOG.info("[GenericChain] CACHE HIT for key='$cacheKey' resolved=[${cached.resolvedElements.joinToString(", ") { it?.javaClass?.simpleName ?: "<null>" }}]")
-                    return cached
-                }
-                LOG.info("[GenericChain] CACHE SKIP (stale/empty) for key='$cacheKey' — re-resolving")
+                LOG.info("[GenericChain] CACHE HIT for key='$cacheKey' resolved=[${cached.resolvedElements.joinToString(", ") { it?.javaClass?.simpleName ?: "<null>" }}]")
+                return cached
             }
 
             val first = chain.first()
@@ -544,11 +577,11 @@ object MemberChainResolver {
                     member = findMemberInType(currentType, name, originFile, includeAncestors = true)
                     LOG.info("[GenericChain] findMemberInType(owner=${currentType.name}, member=$name) -> ${member?.javaClass?.simpleName ?: "<none>"}")
                 } else if (!currentOwnerName.isNullOrBlank()) {
-                    val props = PascalPropertyIndex.findProperties(name, originFile.project)
-                    member = props.firstOrNull { p -> p.containingClass?.name.equals(currentOwnerName, ignoreCase = true) }
+                    val propResult = PascalPropertyIndex.findPropertiesWithUsesValidation(name, originFile, chain[i].textOffset)
+                    member = propResult.inScopeProperties.firstOrNull { p -> p.containingClass?.name.equals(currentOwnerName, ignoreCase = true) }
                     if (member == null) {
-                        val routines = PascalRoutineIndex.findRoutines(name, originFile.project)
-                        member = routines.firstOrNull { r -> r.containingClassName != null && r.containingClassName.equals(currentOwnerName, ignoreCase = true) }
+                        val routineResult = PascalRoutineIndex.findRoutinesWithUsesValidation(name, originFile, chain[i].textOffset)
+                        member = routineResult.inScopeRoutines.firstOrNull { r -> r.containingClassName != null && r.containingClassName.equals(currentOwnerName, ignoreCase = true) }
                     }
                     if (member == null) {
                         member = resolveMemberByOwnerScan(currentOwnerName!!, name, originFile)
@@ -637,12 +670,9 @@ object MemberChainResolver {
                 LOG.info("[GenericChain] step[$i] '$name' RESULT: member=${member?.javaClass?.simpleName ?: "<null>"} nextType=${currentType?.name ?: "<null>"} nextOwner=$currentOwnerName effectiveType=$effectiveTypeName nextTypeArgMap=$currentTypeArgMap")
             }
             val internalResult = ChainResolutionInternal(results, currentTypeArgMap, perElementMaps)
-            // Only cache fully-resolved chains; partial failures should be re-attempted
-            // (indices may become available later, or context may change)
-            val fullyResolved = results.all { it != null }
-            if (fullyResolved) {
-                cache[cacheKey] = internalResult
-            }
+            // Always cache — the key includes modCount so stale results expire when
+            // the file changes. Within the same modCount, results should be deterministic.
+            cache[cacheKey] = internalResult
             return internalResult
         } finally {
             PerformanceMetrics.record("MemberChainResolver.resolveChainElements", System.nanoTime() - start)
@@ -946,9 +976,9 @@ object MemberChainResolver {
                         return variable.typeName
                     }
 
-                    // Try as property
-                    val props = PascalPropertyIndex.findProperties(rhsName, originFile.project)
-                    val prop = props.firstOrNull()
+                    // Try as property (uses-validated)
+                    val propResult = PascalPropertyIndex.findPropertiesWithUsesValidation(rhsName, originFile, identifierNode.startOffset)
+                    val prop = propResult.inScopeProperties.firstOrNull()
                     if (prop != null && !prop.typeName.isNullOrBlank()) {
                         maybeLog("[MemberTraversal] inferType: '$rhsName' is property, typeName='${prop.typeName}'", originFile)
                         return prop.typeName
@@ -1038,28 +1068,30 @@ object MemberChainResolver {
             }
         }
 
-        // 3. Fallback: try global property/routine index with containingClass filter
+        // 3. Fallback: try validated property/routine index with containingClass filter
         // This catches properties that are missed by PSI tree walking (e.g., due to parser quirks)
         if (!DumbService.isDumb(project)) {
-            val globalProps = PascalPropertyIndex.findProperties(name, project)
-            LOG.info("[GenericChain] findMemberInType step 3: global property index for '$name' returned ${globalProps.size} results: [${globalProps.joinToString(", ") { "'${it.name}' in ${it.containingClassName}(${it.unitName})" }}]")
+            val propResult = PascalPropertyIndex.findPropertiesWithUsesValidation(name, callSiteFile, callSiteFile.textLength.coerceAtMost(1))
+            val validatedProps = propResult.inScopeProperties
+            LOG.info("[GenericChain] findMemberInType step 3: validated property index for '$name' returned ${validatedProps.size} results: [${validatedProps.joinToString(", ") { "'${it.name}' in ${it.containingClassName}(${it.unitName})" }}]")
             for (ownerType in owners) {
                 val ownerName = ownerType.name ?: continue
-                val prop = globalProps.firstOrNull { p ->
+                val prop = validatedProps.firstOrNull { p ->
                     p.containingClassName.equals(ownerName, ignoreCase = true) && isVisible(p, callSiteFile)
                 }
                 if (prop != null) {
-                    LOG.info("[GenericChain] findMemberInType: found '$name' via global property index in owner='$ownerName'")
+                    LOG.info("[GenericChain] findMemberInType: found '$name' via validated property index in owner='$ownerName'")
                     return prop
                 }
-                val routines = PascalRoutineIndex.findRoutines(name, project)
-                val routine = routines.firstOrNull { r ->
+                val routineResult = PascalRoutineIndex.findRoutinesWithUsesValidation(name, callSiteFile, callSiteFile.textLength.coerceAtMost(1))
+                val validatedRoutines = routineResult.inScopeRoutines
+                val routine = validatedRoutines.firstOrNull { r ->
                     (r.containingClassName?.equals(ownerName, ignoreCase = true) == true ||
                      r.containingClass?.name?.equals(ownerName, ignoreCase = true) == true) &&
                     isVisible(r, callSiteFile)
                 }
                 if (routine != null) {
-                    LOG.info("[GenericChain] findMemberInType: found '$name' via global routine index in owner='$ownerName'")
+                    LOG.info("[GenericChain] findMemberInType: found '$name' via validated routine index in owner='$ownerName'")
                     return routine
                 }
             }
@@ -1189,7 +1221,7 @@ object MemberChainResolver {
      */
     private fun extractCallSiteTypeArgs(chainElement: PsiElement): List<String> {
         var next = skipForwardWhitespace(PsiTreeUtil.nextLeaf(chainElement))
-        if (next == null || next.node.elementType != PascalTokenTypes.LT) return emptyList()
+        if (next == null || next.node.elementType != PascalTokenTypes.LT || !isLikelyGenericBracket(next)) return emptyList()
 
         // Walk forward collecting the text between < and > with depth tracking
         val args = mutableListOf<String>()

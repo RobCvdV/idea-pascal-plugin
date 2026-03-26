@@ -11,7 +11,6 @@ import com.intellij.psi.stubs.StubIndex;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.ProcessingContext;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
-import nl.akiar.pascal.resolution.DelphiBuiltIns;
 import nl.akiar.pascal.stubs.PascalTypeIndex;
 import nl.akiar.pascal.uses.PascalUsesClauseInfo;
 import nl.akiar.pascal.settings.PascalSourcePathsSettings;
@@ -69,8 +68,16 @@ public class PascalTypeCompletionProvider extends CompletionProvider<CompletionP
         String prefixLower = prefix.toLowerCase();
 
         // Built-in types are always fast — add them first (Tier 1)
+        // Skip entries that exist in the stub index (source-backed versions win in Tier 2)
         for (String builtIn : BUILT_IN_TYPE_NAMES) {
             if (addedNames.contains(builtIn.toLowerCase())) continue;
+            Collection<PascalTypeDefinition> indexed = StubIndex.getElements(
+                    PascalTypeIndex.KEY, builtIn.toLowerCase(), project,
+                    GlobalSearchScope.allScope(project), PascalTypeDefinition.class);
+            if (!indexed.isEmpty()) {
+                addedNames.add(builtIn.toLowerCase());
+                continue; // Will be picked up in Tier 2 with proper unit name
+            }
             addedNames.add(builtIn.toLowerCase());
             LookupElementBuilder lookup = LookupElementBuilder.create(builtIn)
                     .withIcon(AllIcons.Nodes.Type)

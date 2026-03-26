@@ -134,12 +134,6 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         if (contextElement != null && contextElement.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
             String name = contextElement.getText();
 
-            // Check for built-in functions/types FIRST
-            if (DelphiBuiltIns.isBuiltIn(name)) {
-                LOG.debug("[PascalDoc] Built-in identifier: " + name);
-                return contextElement;
-            }
-
             // Check if UNIT_REFERENCE
             PsiElement parent = contextElement.getParent();
             if (parent != null && parent.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
@@ -233,9 +227,10 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 return foundVar;
             }
 
-            Collection<PascalProperty> props = PascalPropertyIndex.findProperties(name, contextElement.getProject());
-            if (!props.isEmpty()) {
-                return props.iterator().next();
+            PascalPropertyIndex.PropertyLookupResult propResult =
+                    PascalPropertyIndex.findPropertiesWithUsesValidation(name, contextElement.getContainingFile(), contextElement.getTextOffset());
+            if (!propResult.getInScopeProperties().isEmpty()) {
+                return propResult.getInScopeProperties().get(0);
             }
 
             PascalRoutineIndex.RoutineLookupResult routineResult =
@@ -253,6 +248,12 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             if (!routineResult.getOutOfScopeRoutines().isEmpty()) {
                 String classCtx = getClassContextForElement(contextElement);
                 return pickBestRoutine(routineResult.getOutOfScopeRoutines(), classCtx);
+            }
+
+            // Final fallback: built-in identifier (only if no source resolution succeeded)
+            if (DelphiBuiltIns.isBuiltIn(name)) {
+                LOG.debug("[PascalDoc] Built-in identifier (fallback): " + name);
+                return contextElement;
             }
         }
         return super.getCustomDocumentationElement(editor, file, contextElement, targetOffset);
@@ -318,6 +319,25 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         if (element.getNode() != null && element.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
             String name = element.getText();
             if (DelphiBuiltIns.isBuiltIn(name)) {
+                // Try to resolve via references first — if a source definition exists, use that
+                PsiReference[] refs = element.getReferences();
+                for (PsiReference ref : refs) {
+                    PsiElement resolved = ref.resolve();
+                    if (resolved != null && resolved != element) {
+                        String sourceDoc = generateDoc(resolved, element);
+                        if (sourceDoc != null) return sourceDoc;
+                    }
+                }
+                // Also try contributed references
+                PsiReference[] contributed = com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry.getReferencesFromProviders(element);
+                for (PsiReference ref : contributed) {
+                    PsiElement resolved = ref.resolve();
+                    if (resolved != null && resolved != element) {
+                        String sourceDoc = generateDoc(resolved, element);
+                        if (sourceDoc != null) return sourceDoc;
+                    }
+                }
+                // No source resolution — fall back to built-in doc
                 return generateBuiltInDoc(name, element);
             }
 

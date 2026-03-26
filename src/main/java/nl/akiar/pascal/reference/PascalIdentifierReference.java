@@ -5,7 +5,6 @@ import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.*;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
 import nl.akiar.pascal.psi.PascalVariableDefinition;
-import nl.akiar.pascal.resolution.DelphiBuiltIns;
 import nl.akiar.pascal.stubs.PascalTypeIndex;
 import nl.akiar.pascal.stubs.PascalVariableIndex;
 import org.jetbrains.annotations.NotNull;
@@ -30,11 +29,6 @@ public class PascalIdentifierReference extends PsiReferenceBase<PsiElement> impl
     @NotNull
     @Override
     public ResolveResult[] multiResolve(boolean incompleteCode) {
-        // Built-in functions and types don't resolve to any specific element
-        if (DelphiBuiltIns.isBuiltInFunction(name)) {
-            return new ResolveResult[0];
-        }
-
         // 1. Variables (local > field > global) — early return if found
         PascalVariableDefinition var = PascalVariableIndex.findVariableAtPosition(
             name, myElement.getContainingFile(), myElement.getTextOffset());
@@ -42,34 +36,28 @@ public class PascalIdentifierReference extends PsiReferenceBase<PsiElement> impl
             return new ResolveResult[]{new PsiElementResolveResult(var)};
         }
 
-        // 2. Types (with uses-clause validation)
+        // 2. Types (with uses-clause validation, in-scope only)
         List<ResolveResult> results = new ArrayList<>();
-        if (!DelphiBuiltIns.isBuiltInType(name)) {
-            PascalTypeIndex.TypeLookupResult typeResult =
-                    PascalTypeIndex.findTypesWithUsesValidation(name, myElement.getContainingFile(), myElement.getTextOffset());
+        PascalTypeIndex.TypeLookupResult typeResult =
+                PascalTypeIndex.findTypesWithUsesValidation(name, myElement.getContainingFile(), myElement.getTextOffset());
 
-            for (PascalTypeDefinition type : typeResult.getInScopeTypes()) {
-                results.add(new PsiElementResolveResult(type));
-            }
-            if (results.isEmpty()) {
-                for (PascalTypeDefinition type : typeResult.getOutOfScopeTypes()) {
-                    results.add(new PsiElementResolveResult(type));
-                }
-            }
+        List<PascalTypeDefinition> inScopeTypes = typeResult.getInScopeTypes();
+        // Filter out forward declarations, preferring full definitions
+        List<PascalTypeDefinition> fullDefs = new ArrayList<>();
+        for (PascalTypeDefinition type : inScopeTypes) {
+            if (!type.isForwardDeclaration()) fullDefs.add(type);
+        }
+        for (PascalTypeDefinition type : (fullDefs.isEmpty() ? inScopeTypes : fullDefs)) {
+            results.add(new PsiElementResolveResult(type));
         }
 
-        // 3. Routines (with uses-clause validation) — needed for Pascal procedure calls without parens
+        // 3. Routines (with uses-clause validation, in-scope only) — needed for Pascal procedure calls without parens
         if (results.isEmpty()) {
             nl.akiar.pascal.stubs.PascalRoutineIndex.RoutineLookupResult routineResult =
                     nl.akiar.pascal.stubs.PascalRoutineIndex.findRoutinesWithUsesValidation(
                         name, myElement.getContainingFile(), myElement.getTextOffset());
             for (nl.akiar.pascal.psi.PascalRoutine routine : routineResult.getInScopeRoutines()) {
                 results.add(new PsiElementResolveResult(routine));
-            }
-            if (results.isEmpty()) {
-                for (nl.akiar.pascal.psi.PascalRoutine routine : routineResult.getOutOfScopeRoutines()) {
-                    results.add(new PsiElementResolveResult(routine));
-                }
             }
         }
 

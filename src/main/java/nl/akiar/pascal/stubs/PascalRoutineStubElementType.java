@@ -172,16 +172,12 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
     }
 
     private String computeSignatureHashFromParams(@NotNull PascalRoutine psi) {
-        List<PascalVariableDefinition> params = new ArrayList<>();
-        for (PsiElement child = psi.getFirstChild(); child != null; child = child.getNextSibling()) {
-            if (child instanceof PascalVariableDefinition var && var.getVariableKind() == VariableKind.PARAMETER) {
-                params.add(var);
-            }
-        }
         StringBuilder sb = new StringBuilder();
-        for (PascalVariableDefinition p : params) {
-            String tn = p.getTypeName();
-            if (tn != null) sb.append(tn.toLowerCase()).append(";");
+        for (PascalVariableDefinition p : com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psi, PascalVariableDefinition.class)) {
+            if (p.getVariableKind() == VariableKind.PARAMETER) {
+                String tn = p.getTypeName();
+                if (tn != null) sb.append(tn.toLowerCase()).append(";");
+            }
         }
         return sb.toString();
     }

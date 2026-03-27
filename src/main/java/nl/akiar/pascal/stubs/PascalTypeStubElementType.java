@@ -10,10 +10,10 @@ import nl.akiar.pascal.psi.PascalTypeDefinition;
 import nl.akiar.pascal.psi.TypeKind;
 import nl.akiar.pascal.psi.impl.PascalTypeDefinitionImpl;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -35,31 +35,33 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
     @Override
     @NotNull
     public PascalTypeStub createStub(@NotNull PascalTypeDefinition psi, StubElement<?> parentStub) {
-        // LOG.info("[PascalStub] Creating stub for: " + psi.getName() + " (" + psi.getTypeKind() + ")");
-        String superClassName = extractSuperClassName(psi);
-        return new PascalTypeStubImpl(parentStub, psi.getName(), psi.getTypeKind(), psi.getTypeParameters(), superClassName);
+        List<String> allAncestors = extractAllAncestorNames(psi);
+        return new PascalTypeStubImpl(parentStub, psi.getName(), psi.getTypeKind(), psi.getTypeParameters(), allAncestors);
     }
 
     /**
-     * Extract the superclass name from a type definition PSI.
-     * Looks for patterns like: class(TBase) or class(TBase, IInterface)
+     * Extract all ancestor names from a type definition PSI.
+     * For "TFoo = class(TBar, IFoo, IBar)", returns ["TBar", "IFoo", "IBar"].
      * The AST structure is:
      *   TYPE_DEFINITION
      *     IDENTIFIER (type name)
      *     CLASS_TYPE / RECORD_TYPE / INTERFACE_TYPE
      *       LPAREN
-     *       IDENTIFIER (superclass name)
+     *       IDENTIFIER/TYPE_REFERENCE (first ancestor)
+     *       COMMA
+     *       IDENTIFIER/TYPE_REFERENCE (second ancestor)
      *       ...
+     *       RPAREN
      */
-    @Nullable
-    private String extractSuperClassName(@NotNull PascalTypeDefinition psi) {
+    @NotNull
+    private List<String> extractAllAncestorNames(@NotNull PascalTypeDefinition psi) {
         ASTNode node = psi.getNode();
-        if (node == null) return null;
+        if (node == null) return Collections.emptyList();
 
         // Check that we're not an enum or alias type
         TypeKind kind = psi.getTypeKind();
         if (kind == TypeKind.ENUM || kind == TypeKind.ALIAS || kind == TypeKind.PROCEDURAL) {
-            return null;
+            return Collections.emptyList();
         }
 
         // Look for CLASS_TYPE, RECORD_TYPE, or INTERFACE_TYPE child node
@@ -79,74 +81,141 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
         // Look for LPAREN within the type node
         ASTNode lparen = typeNode.findChildByType(nl.akiar.pascal.PascalTokenTypes.LPAREN);
         if (lparen == null) {
-            // Also check recursively in children
             lparen = nl.akiar.pascal.psi.PsiUtil.findFirstRecursive(typeNode, nl.akiar.pascal.PascalTokenTypes.LPAREN);
         }
-        if (lparen == null) return null;
+        if (lparen == null) return Collections.emptyList();
 
-        // Find the first identifier after LPAREN - this is the superclass name
-        // Handle both direct IDENTIFIER tokens and TYPE_REFERENCE wrapper nodes
+        List<String> ancestors = new ArrayList<>();
         ASTNode next = lparen.getTreeNext();
-        StringBuilder superName = new StringBuilder();
+
         while (next != null) {
             IElementType type = next.getElementType();
             if (type == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE) {
                 next = next.getTreeNext();
                 continue;
             }
+            if (type == nl.akiar.pascal.PascalTokenTypes.RPAREN) {
+                break;
+            }
+            if (type == nl.akiar.pascal.PascalTokenTypes.COMMA) {
+                next = next.getTreeNext();
+                continue;
+            }
+
             // Handle TYPE_REFERENCE elements created by parser (wraps identifiers)
             if (type == nl.akiar.pascal.psi.PascalElementTypes.TYPE_REFERENCE) {
-                com.intellij.psi.PsiElement typeRefElement = next.getPsi();
-                if (typeRefElement instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
-                    String typeName = ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) typeRefElement).getReferencedTypeName();
-                    if (typeName != null) {
-                        return typeName;
-                    }
+                String extracted = extractNameFromTypeReference(next);
+                if (extracted != null) {
+                    ancestors.add(extracted);
                 }
-                // Fallback: extract identifiers from TYPE_REFERENCE children
-                ASTNode refChild = next.getFirstChildNode();
-                while (refChild != null) {
-                    if (refChild.getElementType() == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
-                        if (superName.length() > 0) superName.append(".");
-                        superName.append(refChild.getText());
-                    } else if (refChild.getElementType() == nl.akiar.pascal.PascalTokenTypes.DOT) {
-                        // handled by prepending dot before next identifier
-                    } else if (refChild.getElementType() == nl.akiar.pascal.PascalTokenTypes.LT) {
-                        break; // Stop at generic arguments
-                    }
-                    refChild = refChild.getTreeNext();
-                }
-                return superName.length() > 0 ? superName.toString() : null;
-            }
-            if (type == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
-                superName.append(next.getText());
                 next = next.getTreeNext();
-                // Handle dotted names like System.TObject
-                while (next != null) {
-                    if (next.getElementType() == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE) {
-                        next = next.getTreeNext();
-                        continue;
-                    }
-                    if (next.getElementType() == nl.akiar.pascal.PascalTokenTypes.DOT) {
-                        superName.append(".");
-                        next = next.getTreeNext();
-                    } else if (next.getElementType() == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
-                        superName.append(next.getText());
-                        next = next.getTreeNext();
-                    } else {
-                        break;
-                    }
+                continue;
+            }
+
+            // Handle bare IDENTIFIER tokens
+            if (type == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                String name = collectDottedName(next);
+                if (name != null && !name.isEmpty()) {
+                    ancestors.add(name);
+                    // Skip past the tokens we consumed
+                    next = skipPastDottedName(next);
+                    continue;
                 }
-                return superName.length() > 0 ? superName.toString() : null;
             }
-            // If we hit RPAREN or COMMA before identifier, no superclass
-            if (type == nl.akiar.pascal.PascalTokenTypes.RPAREN ||
-                type == nl.akiar.pascal.PascalTokenTypes.COMMA) {
-                return null;
-            }
+
             next = next.getTreeNext();
         }
-        return null;
+
+        return ancestors;
+    }
+
+    /**
+     * Extract a type name from a TYPE_REFERENCE AST node.
+     * Handles both PascalTypeReferenceElement and raw identifier children.
+     * Strips generic arguments (stops at '<').
+     */
+    private String extractNameFromTypeReference(ASTNode typeRefNode) {
+        PsiElement typeRefElement = typeRefNode.getPsi();
+        if (typeRefElement instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
+            String typeName = ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) typeRefElement).getReferencedTypeName();
+            if (typeName != null) {
+                // Strip generic args
+                int lt = typeName.indexOf('<');
+                return lt > 0 ? typeName.substring(0, lt) : typeName;
+            }
+        }
+        // Fallback: extract identifiers from TYPE_REFERENCE children
+        StringBuilder sb = new StringBuilder();
+        ASTNode refChild = typeRefNode.getFirstChildNode();
+        while (refChild != null) {
+            if (refChild.getElementType() == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                if (sb.length() > 0) sb.append(".");
+                sb.append(refChild.getText());
+            } else if (refChild.getElementType() == nl.akiar.pascal.PascalTokenTypes.LT) {
+                break; // Stop at generic arguments
+            }
+            refChild = refChild.getTreeNext();
+        }
+        return sb.length() > 0 ? sb.toString() : null;
+    }
+
+    /**
+     * Collect a dotted name starting from an IDENTIFIER node.
+     * E.g., "System.IInterface" from IDENTIFIER DOT IDENTIFIER.
+     */
+    private String collectDottedName(ASTNode identNode) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(identNode.getText());
+        ASTNode next = identNode.getTreeNext();
+        while (next != null) {
+            if (next.getElementType() == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE) {
+                next = next.getTreeNext();
+                continue;
+            }
+            if (next.getElementType() == nl.akiar.pascal.PascalTokenTypes.DOT) {
+                sb.append(".");
+                next = next.getTreeNext();
+            } else if (next.getElementType() == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                sb.append(next.getText());
+                next = next.getTreeNext();
+            } else if (next.getElementType() == nl.akiar.pascal.PascalTokenTypes.LT) {
+                break; // Stop at generic arguments
+            } else {
+                break;
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Skip past a dotted name (IDENTIFIER [DOT IDENTIFIER]*) and return the next node after it.
+     */
+    private ASTNode skipPastDottedName(ASTNode identNode) {
+        ASTNode next = identNode.getTreeNext();
+        while (next != null) {
+            if (next.getElementType() == nl.akiar.pascal.PascalTokenTypes.WHITE_SPACE) {
+                next = next.getTreeNext();
+                continue;
+            }
+            if (next.getElementType() == nl.akiar.pascal.PascalTokenTypes.DOT) {
+                next = next.getTreeNext();
+            } else if (next.getElementType() == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                next = next.getTreeNext();
+            } else if (next.getElementType() == nl.akiar.pascal.PascalTokenTypes.LT) {
+                // Skip generic arguments: <...>
+                int depth = 1;
+                next = next.getTreeNext();
+                while (next != null && depth > 0) {
+                    if (next.getElementType() == nl.akiar.pascal.PascalTokenTypes.LT) depth++;
+                    else if (next.getElementType() == nl.akiar.pascal.PascalTokenTypes.GT) depth--;
+                    next = next.getTreeNext();
+                }
+                break;
+            } else {
+                break;
+            }
+        }
+        return next;
     }
 
     @Override
@@ -164,7 +233,11 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
         for (String param : typeParameters) {
             dataStream.writeName(param);
         }
-        dataStream.writeName(stub.getSuperClassName());
+        List<String> ancestors = stub.getAllAncestorNames();
+        dataStream.writeInt(ancestors.size());
+        for (String ancestor : ancestors) {
+            dataStream.writeName(ancestor);
+        }
     }
 
     @Override
@@ -178,16 +251,33 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
         for (int i = 0; i < paramCount; i++) {
             typeParameters.add(dataStream.readNameString());
         }
-        String superClassName = dataStream.readNameString();
-        return new PascalTypeStubImpl(parentStub, name, kind, typeParameters, superClassName);
+        int ancestorCount = dataStream.readInt();
+        List<String> allAncestorNames = new ArrayList<>(ancestorCount);
+        for (int i = 0; i < ancestorCount; i++) {
+            allAncestorNames.add(dataStream.readNameString());
+        }
+        return new PascalTypeStubImpl(parentStub, name, kind, typeParameters, allAncestorNames);
     }
 
     @Override
     public void indexStub(@NotNull PascalTypeStub stub, @NotNull IndexSink sink) {
         String name = stub.getName();
         if (name != null) {
-            // LOG.info("[PascalStub] Indexing type: " + name + " (" + stub.getTypeKind() + ")");
             sink.occurrence(PascalTypeIndex.KEY, name.toLowerCase());
+        }
+
+        // Index each ancestor name for the implementors reverse index
+        for (String ancestor : stub.getAllAncestorNames()) {
+            String simpleName = ancestor;
+            // Strip generic params (before '<')
+            int ltIdx = simpleName.indexOf('<');
+            if (ltIdx > 0) simpleName = simpleName.substring(0, ltIdx);
+            // Strip unit prefix (after last '.')
+            int dotIdx = simpleName.lastIndexOf('.');
+            if (dotIdx >= 0) simpleName = simpleName.substring(dotIdx + 1);
+            if (!simpleName.isEmpty()) {
+                sink.occurrence(PascalImplementorsIndex.KEY, simpleName.toLowerCase());
+            }
         }
     }
 

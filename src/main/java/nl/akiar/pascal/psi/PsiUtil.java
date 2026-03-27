@@ -321,6 +321,15 @@ public class PsiUtil {
             tokensChecked++;
 
             if (type == nl.akiar.pascal.PascalTokenTypes.LBRACKET) {
+                // Distinguish attribute brackets [Attr] from array brackets [expr1, expr2].
+                // Array brackets are inside PRIMARY_EXPRESSION nodes; attribute brackets are not.
+                PsiElement bracketParent = leaf.getParent();
+                if (bracketParent != null && bracketParent.getNode() != null) {
+                    IElementType parentType = bracketParent.getNode().getElementType();
+                    if (parentType == nl.akiar.pascal.psi.PascalElementTypes.PRIMARY_EXPRESSION) {
+                        return false; // array literal, not attribute
+                    }
+                }
                 return true;
             }
 

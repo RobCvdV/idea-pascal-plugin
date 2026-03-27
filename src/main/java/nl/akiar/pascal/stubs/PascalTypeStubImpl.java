@@ -8,6 +8,7 @@ import nl.akiar.pascal.psi.TypeKind;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -17,15 +18,15 @@ public class PascalTypeStubImpl extends StubBase<PascalTypeDefinition> implement
     private final String name;
     private final TypeKind typeKind;
     private final List<String> typeParameters;
-    private final String superClassName;
+    private final List<String> allAncestorNames;
 
     public PascalTypeStubImpl(StubElement<?> parent, @Nullable String name, @NotNull TypeKind typeKind,
-                              @NotNull List<String> typeParameters, @Nullable String superClassName) {
+                              @NotNull List<String> typeParameters, @NotNull List<String> allAncestorNames) {
         super(parent, PascalElementTypes.TYPE_DEFINITION);
         this.name = name;
         this.typeKind = typeKind;
         this.typeParameters = typeParameters;
-        this.superClassName = superClassName;
+        this.allAncestorNames = allAncestorNames;
     }
 
     @Override
@@ -49,6 +50,12 @@ public class PascalTypeStubImpl extends StubBase<PascalTypeDefinition> implement
     @Override
     @Nullable
     public String getSuperClassName() {
-        return superClassName;
+        return allAncestorNames.isEmpty() ? null : allAncestorNames.get(0);
+    }
+
+    @Override
+    @NotNull
+    public List<String> getAllAncestorNames() {
+        return allAncestorNames;
     }
 }

@@ -58,6 +58,14 @@ public interface PascalTypeDefinition extends PsiNameIdentifierOwner, StubBasedP
     String getSuperClassName();
 
     /**
+     * Get all ancestor names from the type declaration parentheses.
+     * For "TFoo = class(TBar, IFoo, IBar)", returns ["TBar", "IFoo", "IBar"].
+     * For types without parents, returns an empty list.
+     */
+    @NotNull
+    List<String> getAllAncestorNames();
+
+    /**
      * Get the resolved superclass PSI element.
      * This may require type resolution if crossing unit boundaries.
      */

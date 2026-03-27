@@ -105,6 +105,9 @@
         <!-- Pascal Stub Index for attribute definitions -->
         <stubIndex implementation="nl.akiar.pascal.stubs.PascalAttributeIndex"/>
 
+        <!-- Pascal Implementors Index (reverse lookup: ancestor name → implementing types) -->
+        <stubIndex implementation="nl.akiar.pascal.stubs.PascalImplementorsIndex"/>
+
         <!-- Pascal Scoped Indexes (Milestone A) -->
         <stubIndex implementation="nl.akiar.pascal.stubs.PascalScopedRoutineIndex"/>
         <stubIndex implementation="nl.akiar.pascal.stubs.PascalScopedPropertyIndex"/>
@@ -146,6 +149,10 @@
 
         <!-- Pascal Go to Declaration Handler (Cmd+Click navigation) -->
         <gotoDeclarationHandler implementation="nl.akiar.pascal.navigation.PascalGotoDeclarationHandler"/>
+
+        <!-- Pascal Go to Implementation (Cmd+Opt+B) for interface types/methods/properties -->
+        <definitionsScopedSearch implementation="nl.akiar.pascal.navigation.PascalImplementationSearcher"/>
+        <targetElementEvaluator language="ObjectPascal" implementationClass="nl.akiar.pascal.navigation.PascalTargetElementEvaluator"/>
 
         <!-- DPR Library Roots Provider - indexes files referenced by .dpr files -->
         <additionalLibraryRootsProvider implementation="nl.akiar.pascal.dpr.DprLibraryRootsProvider"/>

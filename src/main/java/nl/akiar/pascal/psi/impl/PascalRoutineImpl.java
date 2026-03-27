@@ -45,6 +45,12 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         return nameId != null ? nl.akiar.pascal.psi.PsiUtil.stripEscapePrefix(nameId.getText()) : null;
     }
 
+    @Override
+    public int getTextOffset() {
+        PsiElement nameId = getNameIdentifier();
+        return nameId != null ? nameId.getTextRange().getStartOffset() : super.getTextOffset();
+    }
+
     @Nullable
     public PsiElement getNameIdentifier() {
         // The routine name is the IDENTIFIER that appears AFTER the routine keyword
@@ -376,12 +382,17 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         PascalRoutineStub stub = getGreenStub();
         if (stub != null && stub.getSignatureHash() != null) return stub.getSignatureHash();
         StringBuilder sb = new StringBuilder();
-        // Use PsiTreeUtil to find parameters nested inside FORMAL_PARAMETER_LIST composite nodes
-        Collection<PascalVariableDefinition> allVars = PsiTreeUtil.findChildrenOfType(this, PascalVariableDefinition.class);
-        for (PascalVariableDefinition p : allVars) {
-            if (p.getVariableKind() == VariableKind.PARAMETER) {
-                String tn = p.getTypeName();
-                if (tn != null) sb.append(tn.toLowerCase()).append(";");
+        // Only consider parameters from THIS routine's own FORMAL_PARAMETER_LIST,
+        // not parameters from nested routines/lambdas inside the implementation body.
+        for (PsiElement child = getFirstChild(); child != null; child = child.getNextSibling()) {
+            if (child.getNode().getElementType() == PascalElementTypes.FORMAL_PARAMETER_LIST) {
+                for (PascalVariableDefinition p : PsiTreeUtil.findChildrenOfType(child, PascalVariableDefinition.class)) {
+                    if (p.getVariableKind() == VariableKind.PARAMETER) {
+                        String tn = p.getTypeName();
+                        if (tn != null) sb.append(tn.toLowerCase()).append(";");
+                    }
+                }
+                break; // only the first (own) parameter list
             }
         }
         return sb.toString();
@@ -392,17 +403,13 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         String otherName = other.getName();
         if (name == null || otherName == null || !name.equalsIgnoreCase(otherName)) return false;
 
-        // Compare parameters
-        Collection<PascalVariableDefinition> myParams = PsiTreeUtil.findChildrenOfType(this, PascalVariableDefinition.class);
-        Collection<PascalVariableDefinition> otherParams = PsiTreeUtil.findChildrenOfType(other, PascalVariableDefinition.class);
-
-        // Filter only parameters
-        java.util.List<PascalVariableDefinition> myFormalParams = myParams.stream()
-                .filter(v -> v.getVariableKind() == nl.akiar.pascal.psi.VariableKind.PARAMETER)
-                .collect(java.util.stream.Collectors.toList());
-        java.util.List<PascalVariableDefinition> otherFormalParams = otherParams.stream()
-                .filter(v -> v.getVariableKind() == nl.akiar.pascal.psi.VariableKind.PARAMETER)
-                .collect(java.util.stream.Collectors.toList());
+        // Compare only own formal parameters (not nested routine params)
+        java.util.List<PascalVariableDefinition> myFormalParams = getOwnParameters();
+        java.util.List<PascalVariableDefinition> otherFormalParams =
+                (other instanceof PascalRoutineImpl ri) ? ri.getOwnParameters() :
+                PsiTreeUtil.findChildrenOfType(other, PascalVariableDefinition.class).stream()
+                        .filter(v -> v.getVariableKind() == nl.akiar.pascal.psi.VariableKind.PARAMETER)
+                        .collect(java.util.stream.Collectors.toList());
 
         if (myFormalParams.size() != otherFormalParams.size()) return false;
 
@@ -419,6 +426,26 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
         }
 
         return true;
+    }
+
+    /**
+     * Get only this routine's own formal parameters (from its direct FORMAL_PARAMETER_LIST),
+     * excluding parameters from nested routines/lambdas in the implementation body.
+     */
+    @NotNull
+    List<PascalVariableDefinition> getOwnParameters() {
+        List<PascalVariableDefinition> params = new ArrayList<>();
+        for (PsiElement child = getFirstChild(); child != null; child = child.getNextSibling()) {
+            if (child.getNode().getElementType() == PascalElementTypes.FORMAL_PARAMETER_LIST) {
+                for (PascalVariableDefinition p : PsiTreeUtil.findChildrenOfType(child, PascalVariableDefinition.class)) {
+                    if (p.getVariableKind() == VariableKind.PARAMETER) {
+                        params.add(p);
+                    }
+                }
+                break;
+            }
+        }
+        return params;
     }
 
     private int getModifier(PascalVariableDefinition param) {
@@ -639,6 +666,58 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
     @Override
     public String toString() {
         return "PascalRoutine(" + getName() + ")";
+    }
+
+    @Override
+    public com.intellij.navigation.ItemPresentation getPresentation() {
+        return new com.intellij.navigation.ItemPresentation() {
+            @Override
+            public String getPresentableText() {
+                StringBuilder sb = new StringBuilder();
+                String className = getContainingClassName();
+                if (className != null) {
+                    sb.append(className).append(".");
+                }
+                String name = getName();
+                sb.append(name != null ? name : "?");
+                // Append parameter signature for overload distinction
+                String sig = buildParameterSignature();
+                if (sig != null) {
+                    sb.append(sig);
+                }
+                return sb.toString();
+            }
+
+            @Override
+            public String getLocationString() {
+                return getContainingFile().getName();
+            }
+
+            @Override
+            public javax.swing.Icon getIcon(boolean unused) {
+                return PascalRoutineImpl.this.getIcon(0);
+            }
+        };
+    }
+
+    /**
+     * Build a human-readable parameter signature like "(AOperator: TOperatorId; AActive: Boolean)".
+     * Only considers this routine's own formal parameters, not those in nested routines.
+     */
+    @Nullable
+    private String buildParameterSignature() {
+        java.util.List<String> params = new java.util.ArrayList<>();
+        for (PascalVariableDefinition v : getOwnParameters()) {
+            String pName = v.getName();
+            String pType = v.getTypeName();
+            if (pName != null && pType != null) {
+                params.add(pName + ": " + pType);
+            } else if (pName != null) {
+                params.add(pName);
+            }
+        }
+        if (params.isEmpty()) return "()";
+        return "(" + String.join("; ", params) + ")";
     }
 
     @Override

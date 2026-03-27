@@ -39,6 +39,12 @@ public class PascalPropertyImpl extends StubBasedPsiElementBase<PascalPropertySt
     }
 
     @Override
+    public int getTextOffset() {
+        PsiElement nameId = getNameIdentifier();
+        return nameId != null ? nameId.getTextRange().getStartOffset() : super.getTextOffset();
+    }
+
+    @Override
     @Nullable
     public PsiElement getNameIdentifier() {
         // Find the identifier AFTER the 'property' keyword, skipping any attribute nodes.

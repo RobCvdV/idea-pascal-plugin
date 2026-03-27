@@ -63,6 +63,12 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
     }
 
     @Override
+    public int getTextOffset() {
+        PsiElement nameId = getNameIdentifier();
+        return nameId != null ? nameId.getTextRange().getStartOffset() : super.getTextOffset();
+    }
+
+    @Override
     @NotNull
     public TypeKind getTypeKind() {
         PascalTypeStub stub = getGreenStub();
@@ -380,38 +386,34 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
     @Override
     @Nullable
     public String getSuperClassName() {
-        // Stub-first approach: get from stub if available
+        List<String> all = getAllAncestorNames();
+        return all.isEmpty() ? null : all.get(0);
+    }
+
+    @Override
+    @NotNull
+    public List<String> getAllAncestorNames() {
         PascalTypeStub stub = getGreenStub();
         if (stub != null) {
-            return stub.getSuperClassName();
+            return stub.getAllAncestorNames();
         }
-
-        // Fall back to AST parsing
-        return extractSuperClassNameFromAST();
+        return extractAllAncestorNamesFromAST();
     }
 
     /**
-     * Extract superclass name from AST when stub is not available.
-     * The AST structure is:
-     *   TYPE_DEFINITION
-     *     IDENTIFIER (type name)
-     *     CLASS_TYPE / RECORD_TYPE / INTERFACE_TYPE
-     *       LPAREN
-     *       IDENTIFIER (superclass name)
-     *       ...
+     * Extract all ancestor names from AST when stub is not available.
+     * For "TFoo = class(TBar, IFoo, IBar)", returns ["TBar", "IFoo", "IBar"].
      */
-    @Nullable
-    private String extractSuperClassNameFromAST() {
+    @NotNull
+    private List<String> extractAllAncestorNamesFromAST() {
         ASTNode node = getNode();
-        if (node == null) return null;
+        if (node == null) return Collections.emptyList();
 
-        // Check that we're not an enum or alias type
         TypeKind kind = getTypeKind();
         if (kind == TypeKind.ENUM || kind == TypeKind.ALIAS || kind == TypeKind.PROCEDURAL) {
-            return null;
+            return Collections.emptyList();
         }
 
-        // Look for CLASS_TYPE, RECORD_TYPE, or INTERFACE_TYPE child node
         ASTNode typeNode = node.findChildByType(nl.akiar.pascal.psi.PascalElementTypes.CLASS_TYPE);
         if (typeNode == null) {
             typeNode = node.findChildByType(nl.akiar.pascal.psi.PascalElementTypes.RECORD_TYPE);
@@ -419,69 +421,104 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
         if (typeNode == null) {
             typeNode = node.findChildByType(nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_TYPE);
         }
-
-        // If no specific type node, search in the TYPE_DEFINITION itself
         if (typeNode == null) {
             typeNode = node;
         }
 
-        // Look for LPAREN within the type node
         ASTNode lparen = typeNode.findChildByType(PascalTokenTypes.LPAREN);
         if (lparen == null) {
-            // Also check recursively in children
             lparen = nl.akiar.pascal.psi.PsiUtil.findFirstRecursive(typeNode, PascalTokenTypes.LPAREN);
         }
-        if (lparen == null) return null;
+        if (lparen == null) return Collections.emptyList();
 
-        // Find the first identifier after LPAREN - this is the superclass name
+        List<String> ancestors = new ArrayList<>();
         ASTNode next = lparen.getTreeNext();
-        StringBuilder superName = new StringBuilder();
+
         while (next != null) {
             IElementType type = next.getElementType();
             if (type == PascalTokenTypes.WHITE_SPACE) {
                 next = next.getTreeNext();
                 continue;
             }
+            if (type == PascalTokenTypes.RPAREN) {
+                break;
+            }
+            if (type == PascalTokenTypes.COMMA) {
+                next = next.getTreeNext();
+                continue;
+            }
+
             // Handle TYPE_REFERENCE elements created by parser
             if (type == nl.akiar.pascal.psi.PascalElementTypes.TYPE_REFERENCE) {
                 PsiElement typeRefElement = next.getPsi();
-                if (typeRefElement instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
-                    String typeName = ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) typeRefElement).getReferencedTypeName();
+                if (typeRefElement instanceof PascalTypeReferenceElement) {
+                    String typeName = ((PascalTypeReferenceElement) typeRefElement).getReferencedTypeName();
                     if (typeName != null) {
-                        return typeName;
+                        int ltIdx = typeName.indexOf('<');
+                        ancestors.add(ltIdx > 0 ? typeName.substring(0, ltIdx) : typeName);
                     }
+                } else {
+                    // Fallback: extract identifiers from TYPE_REFERENCE children
+                    String extracted = extractNameFromTypeRefChildren(next);
+                    if (extracted != null) ancestors.add(extracted);
                 }
                 next = next.getTreeNext();
                 continue;
             }
+
+            // Handle bare IDENTIFIER tokens
             if (type == PascalTokenTypes.IDENTIFIER) {
-                superName.append(next.getText());
+                StringBuilder sb = new StringBuilder();
+                sb.append(next.getText());
                 next = next.getTreeNext();
-                // Handle dotted names like System.TObject
                 while (next != null) {
                     if (next.getElementType() == PascalTokenTypes.WHITE_SPACE) {
                         next = next.getTreeNext();
                         continue;
                     }
                     if (next.getElementType() == PascalTokenTypes.DOT) {
-                        superName.append(".");
+                        sb.append(".");
                         next = next.getTreeNext();
                     } else if (next.getElementType() == PascalTokenTypes.IDENTIFIER) {
-                        superName.append(next.getText());
+                        sb.append(next.getText());
                         next = next.getTreeNext();
+                    } else if (next.getElementType() == PascalTokenTypes.LT) {
+                        // Skip generic arguments
+                        int depth = 1;
+                        next = next.getTreeNext();
+                        while (next != null && depth > 0) {
+                            if (next.getElementType() == PascalTokenTypes.LT) depth++;
+                            else if (next.getElementType() == PascalTokenTypes.GT) depth--;
+                            next = next.getTreeNext();
+                        }
+                        break;
                     } else {
                         break;
                     }
                 }
-                return superName.length() > 0 ? superName.toString() : null;
+                if (sb.length() > 0) ancestors.add(sb.toString());
+                continue;
             }
-            // If we hit RPAREN or COMMA before identifier, no superclass
-            if (type == PascalTokenTypes.RPAREN || type == PascalTokenTypes.COMMA) {
-                return null;
-            }
+
             next = next.getTreeNext();
         }
-        return null;
+        return ancestors;
+    }
+
+    @Nullable
+    private String extractNameFromTypeRefChildren(ASTNode typeRefNode) {
+        StringBuilder sb = new StringBuilder();
+        ASTNode refChild = typeRefNode.getFirstChildNode();
+        while (refChild != null) {
+            if (refChild.getElementType() == PascalTokenTypes.IDENTIFIER) {
+                if (sb.length() > 0) sb.append(".");
+                sb.append(refChild.getText());
+            } else if (refChild.getElementType() == PascalTokenTypes.LT) {
+                break;
+            }
+            refChild = refChild.getTreeNext();
+        }
+        return sb.length() > 0 ? sb.toString() : null;
     }
 
     @Override

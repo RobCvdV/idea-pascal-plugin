@@ -33,8 +33,7 @@ public class PascalStubFileElementType extends IStubFileElementType<PsiFileStub<
 
     @Override
     public int getStubVersion() {
-        // Bump to force reindex after fixing property name extraction (attribute skipping)
-        // and routine name extraction (composite node handling)
-        return super.getStubVersion() + 11;
+        // Bump to force reindex after fixing signature hash to exclude nested routine params
+        return super.getStubVersion() + 13;
     }
 }

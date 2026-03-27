@@ -173,10 +173,17 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
 
     private String computeSignatureHashFromParams(@NotNull PascalRoutine psi) {
         StringBuilder sb = new StringBuilder();
-        for (PascalVariableDefinition p : com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psi, PascalVariableDefinition.class)) {
-            if (p.getVariableKind() == VariableKind.PARAMETER) {
-                String tn = p.getTypeName();
-                if (tn != null) sb.append(tn.toLowerCase()).append(";");
+        // Only consider parameters from THIS routine's own FORMAL_PARAMETER_LIST,
+        // not parameters from nested routines/lambdas in the implementation body.
+        for (com.intellij.psi.PsiElement child = psi.getFirstChild(); child != null; child = child.getNextSibling()) {
+            if (child.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER_LIST) {
+                for (PascalVariableDefinition p : com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(child, PascalVariableDefinition.class)) {
+                    if (p.getVariableKind() == VariableKind.PARAMETER) {
+                        String tn = p.getTypeName();
+                        if (tn != null) sb.append(tn.toLowerCase()).append(";");
+                    }
+                }
+                break;
             }
         }
         return sb.toString();

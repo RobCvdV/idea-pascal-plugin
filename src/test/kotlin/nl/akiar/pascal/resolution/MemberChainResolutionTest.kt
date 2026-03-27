@@ -743,4 +743,50 @@ class MemberChainResolutionTest : BasePlatformTestCase() {
         assertNotNull("'DoWork' should be resolved via GetInner return type", result.resolvedElements[2])
         assertTrue("'DoWork' should resolve to PascalRoutine", result.resolvedElements[2] is PascalRoutine)
     }
+
+    // ==================== Function Reference Type Resolution ====================
+
+    @Test
+    fun testFunctionReferenceTypeUnwrapsToReturnType() {
+        myFixture.configureByText("SettingsUnit.pas", """
+            unit SettingsUnit;
+            interface
+            type
+              TEoSettings = class
+              public
+                property MendrixMobile: Integer read FMendrixMobile;
+              end;
+
+              TEoSettingsFunctionReference = reference to function(AForceRefresh: Boolean): TEoSettings;
+            implementation
+            end.
+        """.trimIndent())
+
+        val mainFile = myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            uses SettingsUnit;
+            implementation
+            procedure Test;
+            var
+              EoSettingsXmlReadOnly: TEoSettingsFunctionReference;
+            begin
+              EoSettingsXmlReadOnly.MendrixMobile<caret>;
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'MendrixMobile' identifier", element)
+
+        val result = MemberChainResolver.resolveChain(element!!)
+
+        assertEquals("Chain should have 2 elements", 2, result.chainElements.size)
+        assertEquals("First element should be 'EoSettingsXmlReadOnly'", "EoSettingsXmlReadOnly", result.chainElements[0].text)
+        assertEquals("Second element should be 'MendrixMobile'", "MendrixMobile", result.chainElements[1].text)
+
+        assertNotNull("'EoSettingsXmlReadOnly' should be resolved", result.resolvedElements[0])
+        assertNotNull("'MendrixMobile' should be resolved through function reference return type", result.resolvedElements[1])
+        assertTrue("'MendrixMobile' should resolve to PascalProperty", result.resolvedElements[1] is PascalProperty)
+    }
 }

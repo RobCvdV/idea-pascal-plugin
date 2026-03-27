@@ -720,6 +720,36 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
         return null;
     }
 
+    @Nullable
+    public String getProceduralReturnTypeName() {
+        if (getTypeKind() != TypeKind.PROCEDURAL) return null;
+
+        // Look for RETURN_TYPE descendant (created by parser from RoutineReturnTypeNode)
+        nl.akiar.pascal.psi.PascalReturnType returnType =
+                PsiTreeUtil.findChildOfType(this, nl.akiar.pascal.psi.PascalReturnType.class);
+        if (returnType != null) {
+            String typeName = returnType.getTypeName();
+            if (typeName != null && !typeName.isBlank()) {
+                return typeName;
+            }
+        }
+
+        // Fallback: parse from text — find ): <ReturnType> after last closing paren
+        String text = getText();
+        int lastRparen = text.lastIndexOf(')');
+        if (lastRparen >= 0) {
+            int colonAfterRparen = text.indexOf(':', lastRparen);
+            if (colonAfterRparen >= 0) {
+                String afterColon = text.substring(colonAfterRparen + 1).trim();
+                if (afterColon.endsWith(";")) {
+                    afterColon = afterColon.substring(0, afterColon.length() - 1).trim();
+                }
+                if (!afterColon.isEmpty()) return afterColon;
+            }
+        }
+        return null;
+    }
+
     @Override
     public boolean isForwardDeclaration() {
         // Forward declarations only apply to class, record, and interface types

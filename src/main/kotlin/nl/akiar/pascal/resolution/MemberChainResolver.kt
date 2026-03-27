@@ -14,6 +14,8 @@ import nl.akiar.pascal.psi.PascalProperty
 import nl.akiar.pascal.psi.PascalRoutine
 import nl.akiar.pascal.psi.PascalTypeDefinition
 import nl.akiar.pascal.psi.PascalVariableDefinition
+import nl.akiar.pascal.psi.TypeKind
+import nl.akiar.pascal.psi.impl.PascalTypeDefinitionImpl
 import nl.akiar.pascal.stubs.PascalPropertyIndex
 import nl.akiar.pascal.stubs.PascalRoutineIndex
 import nl.akiar.pascal.stubs.PascalTypeIndex
@@ -890,12 +892,31 @@ object MemberChainResolver {
             }
         }
 
-        return if (typeNameOverride != null) {
+        val resolved = if (typeNameOverride != null) {
             // Bypass cache: type name override changes the meaning of the lookup
             computeType()
         } else {
             MemberResolutionCache.getOrComputeTypeOf(element, originFile, contextFile, computeType)
         }
+
+        // Unwrap PROCEDURAL types (function references) to their return type.
+        // When code says `FuncRefVar.Member`, Delphi implicitly calls the function
+        // and accesses Member on the result.
+        if (resolved != null && resolved.typeKind == TypeKind.PROCEDURAL) {
+            val returnTypeName = (resolved as? PascalTypeDefinitionImpl)?.proceduralReturnTypeName
+            if (returnTypeName != null) {
+                val (unwrappedName, _) = parseTypeArguments(returnTypeName)
+                val unwrapped = PascalTypeIndex.findTypeWithTransitiveDeps(unwrappedName, contextFile, element.textOffset)
+                val unwrappedType = unwrapped.inScopeTypes.firstOrNull()
+                    ?: PascalTypeIndex.findTypesWithUsesValidation(unwrappedName, contextFile, element.textOffset).inScopeTypes.firstOrNull()
+                if (unwrappedType != null) {
+                    maybeLog("[MemberTraversal] unwrapped PROCEDURAL '${resolved.name}' -> return type '${unwrappedType.name}'", contextFile)
+                    return unwrappedType
+                }
+            }
+        }
+
+        return resolved
     }
 
     /**

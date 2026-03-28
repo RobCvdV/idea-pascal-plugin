@@ -188,6 +188,24 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 LOG.info("[GenericChain][Doc] chain resolution FAILED for member: " + name + " — falling through to index lookups");
             }
 
+            // Handle 'inherited Method' — resolve to ancestor's method
+            if (!isMemberAccess) {
+                PsiElement inheritedCheck = com.intellij.psi.util.PsiTreeUtil.prevLeaf(contextElement);
+                while (inheritedCheck instanceof PsiWhiteSpace || inheritedCheck instanceof com.intellij.psi.PsiComment) {
+                    inheritedCheck = com.intellij.psi.util.PsiTreeUtil.prevLeaf(inheritedCheck);
+                }
+                if (inheritedCheck != null && inheritedCheck.getNode().getElementType() == PascalTokenTypes.KW_INHERITED) {
+                    PsiReference[] providerRefs = com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry
+                            .getReferencesFromProviders(contextElement);
+                    for (PsiReference ref : providerRefs) {
+                        PsiElement resolved = ref.resolve();
+                        if (resolved != null) {
+                            return redirectForwardDeclaration(resolved);
+                        }
+                    }
+                }
+            }
+
             // Check if the context element is a name identifier of a declaration
             PsiNameIdentifierOwner owner = com.intellij.psi.util.PsiTreeUtil.getParentOfType(contextElement, PsiNameIdentifierOwner.class);
             if (owner != null && owner.getNameIdentifier() == contextElement) {

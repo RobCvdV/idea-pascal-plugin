@@ -789,4 +789,61 @@ class MemberChainResolutionTest : BasePlatformTestCase() {
         assertNotNull("'MendrixMobile' should be resolved through function reference return type", result.resolvedElements[1])
         assertTrue("'MendrixMobile' should resolve to PascalProperty", result.resolvedElements[1] is PascalProperty)
     }
+
+    // ==================== Inherited Keyword Tests ====================
+
+    @Test
+    fun testInheritedCreateResolvesToAncestor() {
+        myFixture.configureByText("BaseUnit.pas", """
+            unit BaseUnit;
+            interface
+            type
+              TTabledGateway = class
+              public
+                constructor Create(const ATable: ITable; const AQueryJson: IQueryJson; const ADbConnectionPool: ICoPoolDbConnection);
+              end;
+            implementation
+            constructor TTabledGateway.Create(const ATable: ITable; const AQueryJson: IQueryJson; const ADbConnectionPool: ICoPoolDbConnection);
+            begin
+            end;
+            end.
+        """.trimIndent())
+
+        val mainFile = myFixture.configureByText("ChildUnit.pas", """
+            unit ChildUnit;
+            interface
+            uses BaseUnit;
+            type
+              TGoodsForMobileGateway = class(TTabledGateway)
+              public
+                constructor Create(const ATable: IGoodsForMobileTable; const AQueryJson: IQueryJson; const APtTable: IPackagingTransactionsTable);
+              end;
+            implementation
+            constructor TGoodsForMobileGateway.Create(const ATable: IGoodsForMobileTable; const AQueryJson: IQueryJson; const APtTable: IPackagingTransactionsTable);
+            begin
+              inherited Create<caret>(ATable, AQueryJson, CoPoolDbConnection);
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'Create' identifier after inherited", element)
+
+        // Resolve via the reference system (PascalRoutineCallReference)
+        val allRefs = com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry
+            .getReferencesFromProviders(element!!)
+        assertTrue("Should have at least one reference", allRefs.isNotEmpty())
+        val resolved = allRefs[0].resolve()
+        assertNotNull("inherited Create should resolve", resolved)
+        assertTrue("Should resolve to PascalRoutine", resolved is PascalRoutine)
+
+        val routine = resolved as PascalRoutine
+        val containingClass = routine.containingClass
+        assertNotNull("Resolved routine should have a containing class", containingClass)
+        assertEquals(
+            "inherited Create should resolve to TTabledGateway, not TGoodsForMobileGateway",
+            "TTabledGateway",
+            containingClass!!.name
+        )
+    }
 }

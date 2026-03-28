@@ -3,6 +3,7 @@ package nl.akiar.pascal.reference;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
+import nl.akiar.pascal.PascalTokenTypes;
 import nl.akiar.pascal.psi.PascalRoutine;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
 import nl.akiar.pascal.stubs.PascalRoutineIndex;
@@ -29,26 +30,31 @@ public class PascalRoutineCallReference extends PsiReferenceBase<PsiElement> {
     public PsiElement resolve() {
         PsiFile file = myElement.getContainingFile();
         int offset = myElement.getTextOffset();
+        boolean isInherited = isPrecededByInherited(myElement);
 
         // 1. Check containing class members (implicit Self.MethodName)
         // Prefer implementations (code body) over declarations for callsite navigation
         PsiElement at = file.findElementAt(offset);
         PascalTypeDefinition containingClass = findContainingClass(at);
         if (containingClass != null) {
-            PsiElement declarationFallback = null;
-            for (PsiElement member : containingClass.getMembers(true)) {
-                if (member instanceof PascalRoutine r
-                        && name.equalsIgnoreCase(r.getName())) {
-                    if (r.isImplementation()) {
-                        return member;
-                    }
-                    if (declarationFallback == null) {
-                        declarationFallback = member;
+            // For 'inherited Method()', skip the current class and search only in ancestors
+            PascalTypeDefinition searchClass = isInherited ? containingClass.getSuperClass() : containingClass;
+            if (searchClass != null) {
+                PsiElement declarationFallback = null;
+                for (PsiElement member : searchClass.getMembers(true)) {
+                    if (member instanceof PascalRoutine r
+                            && name.equalsIgnoreCase(r.getName())) {
+                        if (r.isImplementation()) {
+                            return member;
+                        }
+                        if (declarationFallback == null) {
+                            declarationFallback = member;
+                        }
                     }
                 }
-            }
-            if (declarationFallback != null) {
-                return declarationFallback;
+                if (declarationFallback != null) {
+                    return declarationFallback;
+                }
             }
         }
 
@@ -63,6 +69,14 @@ public class PascalRoutineCallReference extends PsiReferenceBase<PsiElement> {
             if (!r.isImplementation()) return r;
         }
         return null;
+    }
+
+    private static boolean isPrecededByInherited(@NotNull PsiElement element) {
+        PsiElement prev = PsiTreeUtil.prevLeaf(element);
+        while (prev instanceof PsiWhiteSpace || prev instanceof PsiComment) {
+            prev = PsiTreeUtil.prevLeaf(prev);
+        }
+        return prev != null && prev.getNode().getElementType() == PascalTokenTypes.KW_INHERITED;
     }
 
     private PascalTypeDefinition findContainingClass(PsiElement element) {

@@ -95,7 +95,26 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         return types.get(0);
     }
 
+    /**
+     * Resolve a member name preceded by 'inherited' to the ancestor class's member.
+     */
     @Nullable
+    private PsiElement resolveInheritedMember(String memberName, PsiElement contextElement) {
+        PascalTypeDefinition containingClass = MemberChainResolver.findContainingClass(contextElement);
+        if (containingClass == null) return null;
+        PascalTypeDefinition superClass = containingClass.getSuperClass();
+        if (superClass == null) return null;
+        for (PsiElement member : superClass.getMembers(true)) {
+            if (member instanceof PsiNameIdentifierOwner) {
+                String name = ((PsiNameIdentifierOwner) member).getName();
+                if (memberName.equalsIgnoreCase(name)) {
+                    return member;
+                }
+            }
+        }
+        return null;
+    }
+
     private String getClassContextForElement(PsiElement element) {
         PsiElement current = element;
         while (current != null) {
@@ -195,13 +214,9 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                     inheritedCheck = com.intellij.psi.util.PsiTreeUtil.prevLeaf(inheritedCheck);
                 }
                 if (inheritedCheck != null && inheritedCheck.getNode().getElementType() == PascalTokenTypes.KW_INHERITED) {
-                    PsiReference[] providerRefs = com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry
-                            .getReferencesFromProviders(contextElement);
-                    for (PsiReference ref : providerRefs) {
-                        PsiElement resolved = ref.resolve();
-                        if (resolved != null) {
-                            return redirectForwardDeclaration(resolved);
-                        }
+                    PsiElement resolved = resolveInheritedMember(name, contextElement);
+                    if (resolved != null) {
+                        return redirectForwardDeclaration(resolved);
                     }
                 }
             }

@@ -61,6 +61,25 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
             }
         }
 
+        // Handle 'inherited Method' — resolve to ancestor's method
+        if (sourceElement.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
+            PsiElement prevForInherited = PsiTreeUtil.prevLeaf(sourceElement);
+            while (prevForInherited instanceof com.intellij.psi.PsiWhiteSpace || prevForInherited instanceof com.intellij.psi.PsiComment) {
+                prevForInherited = PsiTreeUtil.prevLeaf(prevForInherited);
+            }
+            if (prevForInherited != null && prevForInherited.getNode().getElementType() == PascalTokenTypes.KW_INHERITED) {
+                PsiElement resolved = resolveInheritedMember(sourceElement.getText(), sourceElement);
+                if (resolved != null) {
+                    // Redirect routine declarations to implementations for callsite navigation
+                    if (resolved instanceof PascalRoutine routineTarget && !routineTarget.isImplementation()) {
+                        PascalRoutine impl = routineTarget.getImplementation();
+                        if (impl != null) resolved = impl;
+                    }
+                    return new PsiElement[]{resolved};
+                }
+            }
+        }
+
         // Try to resolve using references first (handles Member access, unit references, etc)
         // element.getReferences() only returns the element's own references;
         // contributed references from PsiReferenceContributor need the registry.
@@ -322,6 +341,25 @@ public class PascalGotoDeclarationHandler implements GotoDeclarationHandler {
     @Override
     @Nullable
     public String getActionText(@NotNull DataContext context) {
+        return null;
+    }
+
+    /**
+     * Resolve a member name preceded by 'inherited' to the ancestor class's member.
+     */
+    @Nullable
+    private PsiElement resolveInheritedMember(String memberName, PsiElement contextElement) {
+        PascalTypeDefinition containingClass = MemberChainResolver.findContainingClass(contextElement);
+        if (containingClass == null) return null;
+        PascalTypeDefinition superClass = containingClass.getSuperClass();
+        if (superClass == null) return null;
+        for (PsiElement member : superClass.getMembers(true)) {
+            if (member instanceof com.intellij.psi.PsiNameIdentifierOwner named) {
+                if (memberName.equalsIgnoreCase(named.getName())) {
+                    return member;
+                }
+            }
+        }
         return null;
     }
 

@@ -10,6 +10,7 @@ import com.intellij.psi.PsiFile
 import com.intellij.psi.util.PsiTreeUtil
 import nl.akiar.pascal.PascalTokenTypes
 import com.intellij.psi.PsiManager
+import nl.akiar.pascal.psi.PascalForStatement
 import nl.akiar.pascal.psi.PascalProperty
 import nl.akiar.pascal.psi.PascalRoutine
 import nl.akiar.pascal.psi.PascalTypeDefinition
@@ -100,6 +101,9 @@ object MemberChainResolver {
 
     // Reentrancy guard to avoid infinite resolution loops across handlers
     private val RESOLVE_IN_PROGRESS: Key<Boolean> = Key.create("pascal.member.resolve.in.progress")
+
+    // Reentrancy guard for inline var type inference (prevents cycles when var A := B and B := A)
+    private val inferenceInProgress: ThreadLocal<MutableSet<Int>> = ThreadLocal.withInitial { mutableSetOf() }
 
     /**
      * Result of resolving a member chain.
@@ -538,6 +542,7 @@ object MemberChainResolver {
                 }
                 currentOwnerName = when (resolvedFirst) {
                     is PascalVariableDefinition -> resolvedFirst.typeName
+                        ?: inferTypeFromInitializer(resolvedFirst, originFile)
                     is PascalProperty -> resolvedFirst.typeName
                     is PascalRoutine -> resolvedFirst.returnTypeName
                     is PascalTypeDefinition -> resolvedFirst.name
@@ -553,7 +558,9 @@ object MemberChainResolver {
                     // Build generic substitution map from the first element's type name
                     val rawFirstTypeName = when (resolvedFirst) {
                         is PascalVariableDefinition -> resolvedFirst.typeName
+                            ?: inferTypeFromInitializer(resolvedFirst, originFile)
                         is PascalProperty -> resolvedFirst.typeName
+                        is PascalRoutine -> resolvedFirst.returnTypeName
                         else -> null
                     }
                     if (rawFirstTypeName != null) {
@@ -933,11 +940,90 @@ object MemberChainResolver {
     }
 
     /**
+     * Public entry point for getting the inferred type NAME of an inline variable.
+     * Unlike [getInferredTypeOf], this returns the raw type name string, which works
+     * for primitive types like "string" and "Integer" that have no PascalTypeDefinition in the index.
+     */
+    @JvmStatic
+    fun getInferredTypeName(varDef: PascalVariableDefinition, originFile: PsiFile): String? {
+        if (!varDef.typeName.isNullOrBlank()) return null // has explicit type
+        return inferTypeFromInitializer(varDef, originFile)
+    }
+
+    private const val NIL_SENTINEL = "\u0000NIL"
+
+    /**
+     * Map a literal token element type to its Delphi type name.
+     * Returns [NIL_SENTINEL] for nil (caller must handle).
+     */
+    private fun literalTypeForElementType(elementType: com.intellij.psi.tree.IElementType): String? {
+        return when (elementType) {
+            PascalTokenTypes.STRING_LITERAL, PascalTokenTypes.CHAR_LITERAL -> "string"
+            PascalTokenTypes.INTEGER_LITERAL, PascalTokenTypes.HEX_LITERAL -> "Integer"
+            PascalTokenTypes.FLOAT_LITERAL -> "Extended"
+            PascalTokenTypes.KW_TRUE, PascalTokenTypes.KW_FALSE -> "Boolean"
+            PascalTokenTypes.KW_NIL -> NIL_SENTINEL
+            else -> null
+        }
+    }
+
+    /**
+     * Check if an identifier text is a known boolean literal (sonar-delphi may parse True/False as identifiers).
+     */
+    private fun isBooleanLiteralText(text: String): Boolean {
+        return text.equals("True", ignoreCase = true) || text.equals("False", ignoreCase = true)
+    }
+
+    /**
+     * Check if an AST node (or its descendants) is a literal and return the type name.
+     * Returns [NIL_SENTINEL] for nil, null if not a literal.
+     * Sonar-delphi wraps literals in expression nodes: PRIMARY_EXPRESSION → NAME_REFERENCE → TRUE/NIL etc.
+     */
+    private fun inferTypeFromLiteral(node: com.intellij.lang.ASTNode): String? {
+        // Direct literal token
+        literalTypeForElementType(node.elementType)?.let { return it }
+        if (node.elementType == PascalTokenTypes.IDENTIFIER && isBooleanLiteralText(node.text)) return "Boolean"
+
+        // Check if this is a simple expression wrapping a single literal
+        // Only descend if the node text is short (a literal won't be a complex expression)
+        val text = node.text
+        if (text.length <= 20) {
+            // Walk down through firstChild chain (PRIMARY_EXPRESSION → NAME_REFERENCE → TRUE)
+            var cur = node.firstChildNode
+            while (cur != null) {
+                literalTypeForElementType(cur.elementType)?.let { return it }
+                if (cur.elementType == PascalTokenTypes.IDENTIFIER && isBooleanLiteralText(cur.text)) return "Boolean"
+                // Only descend into single-child nodes (a real literal expression has one child per level)
+                cur = if (cur.treeNext == null) cur.firstChildNode else null
+            }
+        }
+        return null // not a literal
+    }
+
+    /**
      * Infer the type of an inline variable from its initializer expression.
      * For `var X := SomeFunc()`, resolves SomeFunc and returns its return type name.
      * For `var X := SomeVar`, resolves SomeVar and returns its type name.
+     * For `var X := SomeObj.Method.Prop`, resolves the full member chain.
+     * For `var X := 'hello'`, returns "string".
      */
     private fun inferTypeFromInitializer(varDef: PascalVariableDefinition, originFile: PsiFile): String? {
+        // Reentrancy guard: prevent cycles (var A := B; var B := A)
+        val guard = inferenceInProgress.get()
+        val offset = varDef.textOffset
+        if (!guard.add(offset)) return null
+        try {
+            return inferTypeFromInitializerImpl(varDef, originFile)
+        } finally {
+            guard.remove(offset)
+        }
+    }
+
+    private fun inferTypeFromInitializerImpl(varDef: PascalVariableDefinition, originFile: PsiFile): String? {
+        // Check for-in loop first: `for var LItem in Collection do` — infer from Collection's element type
+        val forInType = inferTypeFromForInCollection(varDef, originFile)
+        if (forInType != null) return forInType
+
         // Walk AST siblings after the variable definition looking for ASSIGN (:=)
         val node = varDef.node ?: return null
         val parentNode = node.treeParent ?: return null
@@ -966,49 +1052,187 @@ object MemberChainResolver {
                     continue
                 }
                 // Found the first meaningful node after :=
-                // The identifier may be a direct child (simple assignment) or nested
-                // inside an expression node (e.g. PRIMARY_EXPRESSION for function calls)
+
+                // Check for literals first (strings, integers, booleans, nil)
+                val literalType = inferTypeFromLiteral(child)
+                if (literalType != null) {
+                    if (literalType == NIL_SENTINEL) {
+                        maybeLog("[MemberTraversal] inferType: nil literal, no type inferred", originFile)
+                        return null
+                    }
+                    maybeLog("[MemberTraversal] inferType: literal detected, type='$literalType'", originFile)
+                    return literalType
+                }
+
+                // Find the first identifier to use as chain start
                 val identifierNode = if (elementType == PascalTokenTypes.IDENTIFIER) {
                     child
                 } else {
-                    // Drill into expression nodes to find the first identifier
                     nl.akiar.pascal.psi.PsiUtil.findFirstRecursiveAnyOf(
                         child,
                         PascalTokenTypes.IDENTIFIER
                     )
                 }
                 if (identifierNode != null) {
-                    val rhsName = identifierNode.text
-                    maybeLog("[MemberTraversal] inferType: trying RHS identifier '$rhsName'", originFile)
+                    val identifierPsi = identifierNode.psi
+                    maybeLog("[MemberTraversal] inferType: collecting chain from '${identifierNode.text}'", originFile)
 
-                    // Try as routine first (function call)
-                    val routineResult = PascalRoutineIndex.findRoutinesWithUsesValidation(rhsName, originFile, identifierNode.startOffset)
-                    val routine = routineResult.inScopeRoutines.firstOrNull()
-                    if (routine != null && !routine.returnTypeName.isNullOrBlank()) {
-                        maybeLog("[MemberTraversal] inferType: '$rhsName' is routine, returnType='${routine.returnTypeName}'", originFile)
-                        return routine.returnTypeName
-                    }
-
-                    // Try as variable
-                    val varResult = PascalVariableIndex.findVariablesWithUsesValidation(rhsName, originFile, identifierNode.startOffset)
-                    val variable = varResult.inScopeVariables.firstOrNull()
-                    if (variable != null && !variable.typeName.isNullOrBlank()) {
-                        maybeLog("[MemberTraversal] inferType: '$rhsName' is variable, typeName='${variable.typeName}'", originFile)
-                        return variable.typeName
-                    }
-
-                    // Try as property (uses-validated)
-                    val propResult = PascalPropertyIndex.findPropertiesWithUsesValidation(rhsName, originFile, identifierNode.startOffset)
-                    val prop = propResult.inScopeProperties.firstOrNull()
-                    if (prop != null && !prop.typeName.isNullOrBlank()) {
-                        maybeLog("[MemberTraversal] inferType: '$rhsName' is property, typeName='${prop.typeName}'", originFile)
-                        return prop.typeName
+                    // Use collectChain + resolveChainElements to resolve the full member chain
+                    val chain = collectChain(identifierPsi)
+                    if (chain.isNotEmpty()) {
+                        val resolved = resolveChainElements(chain, originFile)
+                        // Extract type name from the LAST resolved element
+                        val lastResolvedIndex = resolved.resolvedElements.indexOfLast { it != null }
+                        val lastResolved = if (lastResolvedIndex >= 0) resolved.resolvedElements[lastResolvedIndex] else null
+                        if (lastResolved != null) {
+                            var typeName = when (lastResolved) {
+                                is PascalRoutine -> lastResolved.returnTypeName
+                                is PascalVariableDefinition -> lastResolved.typeName
+                                is PascalProperty -> lastResolved.typeName
+                                is PascalTypeDefinition -> lastResolved.name
+                                else -> null
+                            }
+                            // Apply generic type argument substitution using per-element map
+                            // (the map active when that element was resolved, i.e. the owner's context)
+                            val activeTypeArgMap = if (lastResolvedIndex in resolved.perElementTypeArgMaps.indices)
+                                resolved.perElementTypeArgMaps[lastResolvedIndex]
+                            else
+                                resolved.finalTypeArgMap
+                            if (typeName != null && activeTypeArgMap.containsKey(typeName)) {
+                                val substituted = activeTypeArgMap[typeName]
+                                maybeLog("[MemberTraversal] inferType: substituting generic '$typeName' -> '$substituted'", originFile)
+                                typeName = substituted
+                            }
+                            if (!typeName.isNullOrBlank()) {
+                                maybeLog("[MemberTraversal] inferType: chain resolved to '${lastResolved.javaClass.simpleName}', typeName='$typeName'", originFile)
+                                return typeName
+                            }
+                        }
                     }
                 }
                 break
             }
             child = child.treeNext
         }
+        return null
+    }
+
+    /**
+     * Infer the element type for a for-in loop variable.
+     * For `for var LItem in AList` where AList is `TList<TMyClass>`, returns "TMyClass".
+     * Uses three strategies in order:
+     *  A) Generic type argument extraction (IList<T>, TList<T>, TArray<T>)
+     *  B) GetEnumerator().Current resolution (non-generic iterables)
+     *  C) Hardcoded string → Char
+     */
+    private fun inferTypeFromForInCollection(varDef: PascalVariableDefinition, originFile: PsiFile): String? {
+        // Only apply to the loop variable itself (direct child of the for-statement),
+        // not to variables declared inside the loop body
+        val forStmt = varDef.parent as? PascalForStatement ?: return null
+        if (!forStmt.isForIn) return null
+
+        // Find the iterable expression: the first meaningful element after 'in' and before 'do'
+        // We walk children directly because getIterableExpression() requires PascalExpression interface
+        var iterableNode: com.intellij.lang.ASTNode? = null
+        var foundIn = false
+        var child = forStmt.node.firstChildNode
+        while (child != null) {
+            if (child.elementType == PascalTokenTypes.KW_IN) {
+                foundIn = true
+                child = child.treeNext
+                continue
+            }
+            if (child.elementType == PascalTokenTypes.KW_DO) break
+            if (foundIn && child.elementType != PascalTokenTypes.WHITE_SPACE) {
+                iterableNode = child
+                break
+            }
+            child = child.treeNext
+        }
+        if (iterableNode == null) return null
+
+        maybeLog("[MemberTraversal] inferForIn: iterableExpr='${iterableNode.text}'", originFile)
+
+        // Find the first identifier in the iterable expression
+        val identNode = if (iterableNode.elementType == PascalTokenTypes.IDENTIFIER) iterableNode
+            else nl.akiar.pascal.psi.PsiUtil.findFirstRecursiveAnyOf(iterableNode, PascalTokenTypes.IDENTIFIER)
+        val firstIdent = identNode?.psi ?: return null
+
+        // Resolve the iterable's type via chain resolution
+        val chain = collectChain(firstIdent)
+        if (chain.isEmpty()) return null
+        val resolved = resolveChainElements(chain, originFile)
+        val lastResolvedIndex = resolved.resolvedElements.indexOfLast { it != null }
+        val lastResolved = if (lastResolvedIndex >= 0) resolved.resolvedElements[lastResolvedIndex] else null
+        if (lastResolved == null) return null
+
+        var iterableTypeName = when (lastResolved) {
+            is PascalRoutine -> lastResolved.returnTypeName
+            is PascalVariableDefinition -> lastResolved.typeName
+                ?: inferTypeFromInitializer(lastResolved, originFile)
+            is PascalProperty -> lastResolved.typeName
+            is PascalTypeDefinition -> lastResolved.name
+            else -> null
+        }
+        // Apply generic substitution from chain context
+        val activeTypeArgMap = if (lastResolvedIndex in resolved.perElementTypeArgMaps.indices)
+            resolved.perElementTypeArgMaps[lastResolvedIndex]
+        else
+            resolved.finalTypeArgMap
+        if (iterableTypeName != null && activeTypeArgMap.containsKey(iterableTypeName)) {
+            iterableTypeName = activeTypeArgMap[iterableTypeName]
+        }
+        if (iterableTypeName.isNullOrBlank()) return null
+
+        maybeLog("[MemberTraversal] inferForIn: iterableTypeName='$iterableTypeName'", originFile)
+
+        // Strategy C: string → Char
+        if (iterableTypeName.equals("string", ignoreCase = true) ||
+            iterableTypeName.equals("AnsiString", ignoreCase = true) ||
+            iterableTypeName.equals("UnicodeString", ignoreCase = true)) {
+            maybeLog("[MemberTraversal] inferForIn: string iteration → Char", originFile)
+            return "Char"
+        }
+
+        // Strategy A: Generic type argument extraction
+        val (baseName, typeArgs) = parseTypeArguments(iterableTypeName)
+        if (typeArgs.isNotEmpty()) {
+            val elementType = typeArgs[0]
+            maybeLog("[MemberTraversal] inferForIn: generic arg → '$elementType'", originFile)
+            return elementType
+        }
+
+        // Strategy B: GetEnumerator().Current resolution
+        val iterableTypeDef = PascalTypeIndex.findTypeWithTransitiveDeps(baseName, originFile, varDef.textOffset)
+            .inScopeTypes.firstOrNull()
+            ?: PascalTypeIndex.findTypesWithUsesValidation(baseName, originFile, varDef.textOffset)
+                .inScopeTypes.firstOrNull()
+        if (iterableTypeDef != null) {
+            val getEnumerator = findMemberInType(iterableTypeDef, "GetEnumerator", originFile, true)
+            if (getEnumerator is PascalRoutine) {
+                val enumeratorTypeName = getEnumerator.returnTypeName
+                if (!enumeratorTypeName.isNullOrBlank()) {
+                    val enumeratorTypeDef = PascalTypeIndex.findTypeWithTransitiveDeps(enumeratorTypeName, originFile, varDef.textOffset)
+                        .inScopeTypes.firstOrNull()
+                        ?: PascalTypeIndex.findTypesWithUsesValidation(enumeratorTypeName, originFile, varDef.textOffset)
+                            .inScopeTypes.firstOrNull()
+                    if (enumeratorTypeDef != null) {
+                        val currentMember = findMemberInType(enumeratorTypeDef, "Current", originFile, true)
+                        val currentTypeName = when (currentMember) {
+                            is PascalProperty -> currentMember.typeName
+                            is PascalRoutine -> currentMember.returnTypeName
+                            is PascalVariableDefinition -> currentMember.typeName
+                            else -> null
+                        }
+                        if (!currentTypeName.isNullOrBlank()) {
+                            maybeLog("[MemberTraversal] inferForIn: GetEnumerator.Current → '$currentTypeName'", originFile)
+                            return currentTypeName
+                        }
+                    }
+                }
+            }
+        }
+
         return null
     }
 
@@ -1037,7 +1261,7 @@ object MemberChainResolver {
                 fieldKey, project, com.intellij.psi.search.GlobalSearchScope.allScope(project),
                 PascalVariableDefinition::class.java
             )
-            val field = fields.firstOrNull { isVisible(it, callSiteFile) }
+            val field = fields.firstOrNull { isVisible(it, callSiteFile, typeDef) }
             if (field != null) return field
 
             // Properties
@@ -1047,13 +1271,13 @@ object MemberChainResolver {
                 propKey, project, com.intellij.psi.search.GlobalSearchScope.allScope(project),
                 PascalProperty::class.java
             )
-            val prop = props.firstOrNull { isVisible(it, callSiteFile) }
+            val prop = props.firstOrNull { isVisible(it, callSiteFile, typeDef) }
             if (prop != null) return prop
 
             // Routines
             val routineKey = "${ownerUnit}#${ownerName}#${name}".lowercase()
             val routines = nl.akiar.pascal.stubs.PascalScopedRoutineIndex.find(routineKey, project)
-            val routine = routines.firstOrNull { isVisible(it, callSiteFile) }
+            val routine = routines.firstOrNull { isVisible(it, callSiteFile, typeDef) }
             if (routine != null) return routine
         }
 
@@ -1080,7 +1304,7 @@ object MemberChainResolver {
                         is PascalVariableDefinition -> m.visibility
                         else -> null
                     }
-                    if (isVisible(m, callSiteFile)) {
+                    if (isVisible(m, callSiteFile, typeDef)) {
                         return m
                     } else {
                         LOG.info("[GenericChain] findMemberInType: found '$name' but NOT visible (visibility='$vis')")
@@ -1098,7 +1322,7 @@ object MemberChainResolver {
             for (ownerType in owners) {
                 val ownerName = ownerType.name ?: continue
                 val prop = validatedProps.firstOrNull { p ->
-                    p.containingClassName.equals(ownerName, ignoreCase = true) && isVisible(p, callSiteFile)
+                    p.containingClassName.equals(ownerName, ignoreCase = true) && isVisible(p, callSiteFile, typeDef)
                 }
                 if (prop != null) {
                     LOG.info("[GenericChain] findMemberInType: found '$name' via validated property index in owner='$ownerName'")
@@ -1109,7 +1333,7 @@ object MemberChainResolver {
                 val routine = validatedRoutines.firstOrNull { r ->
                     (r.containingClassName?.equals(ownerName, ignoreCase = true) == true ||
                      r.containingClass?.name?.equals(ownerName, ignoreCase = true) == true) &&
-                    isVisible(r, callSiteFile)
+                    isVisible(r, callSiteFile, typeDef)
                 }
                 if (routine != null) {
                     LOG.info("[GenericChain] findMemberInType: found '$name' via validated routine index in owner='$ownerName'")
@@ -1122,7 +1346,7 @@ object MemberChainResolver {
         return null
     }
 
-    private fun isVisible(member: PsiElement, callSiteFile: PsiFile): Boolean {
+    private fun isVisible(member: PsiElement, callSiteFile: PsiFile, searchContextType: PascalTypeDefinition? = null): Boolean {
         val visibility = when (member) {
             is PascalRoutine -> member.visibility
             is PascalProperty -> member.visibility
@@ -1148,9 +1372,16 @@ object MemberChainResolver {
         // Different unit: private/strict are hidden
         if (visibility.contains("private", ignoreCase = true)) return false
 
-        // Protected is also hidden across units unless we are in a subclass
-        // (Simplified for now: hide unless we have proof of subclassing)
-        if (visibility.contains("protected", ignoreCase = true)) return false
+        // Protected: allow access if call site is inside a subclass of the member's declaring class
+        if (visibility.contains("protected", ignoreCase = true)) {
+            if (searchContextType != null) {
+                val memberClassName = getContainingClassName(member)
+                if (memberClassName != null && InheritanceChainCache.isDescendantOf(searchContextType, memberClassName)) {
+                    return true
+                }
+            }
+            return false
+        }
 
         return true
     }

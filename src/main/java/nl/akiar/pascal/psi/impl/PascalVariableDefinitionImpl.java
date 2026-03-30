@@ -252,10 +252,16 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
             return VariableKind.CONSTANT;
         }
 
-        // 4. Check containing section
+        // 4. Check if direct parent is a for-statement (inline var in for loop)
         PsiElement parent = getParent();
         if (parent == null) return VariableKind.UNKNOWN;
 
+        ASTNode parentNode = parent.getNode();
+        if (parentNode != null && parentNode.getElementType() == nl.akiar.pascal.psi.PascalElementTypes.FOR_STATEMENT) {
+            return VariableKind.LOOP_VAR;
+        }
+
+        // 5. Check containing section
         PsiElement section = parent;
         while (section != null) {
             ASTNode sectionNode = section.getNode();

@@ -16,8 +16,12 @@ import nl.akiar.pascal.psi.VariableKind;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import nl.akiar.pascal.resolution.InheritanceChainCache;
+import nl.akiar.pascal.psi.PascalTypeDefinition;
+
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -203,6 +207,13 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
                 // should never shadow identifiers in the current file.
                 if (fromFile.equals(var.getContainingFile())) {
                     inScope.add(var);
+                } else if (kind == VariableKind.FIELD) {
+                    // Fields from other files may be inherited ancestor fields — include them
+                    // if the unit is in the uses clause. The ancestor check is done in findVariableAtPosition.
+                    String targetUnit = var.getUnitName();
+                    if (usesInfo.findUnitInUses(targetUnit, offset, scopes) != null) {
+                        inScope.add(var);
+                    }
                 }
             }
         }
@@ -268,6 +279,9 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
         PascalVariableDefinition bestGlobalMatch = null;
         int bestGlobalDistance = Integer.MAX_VALUE;
 
+        // Lazily computed set of ancestor type keys for FIELD matching
+        Set<String> ancestorKeys = null;
+
         for (PascalVariableDefinition var : inScope) {
             int varOffset = var.getTextOffset();
             // Defined after the offset - only allowed for fields or if in different file
@@ -293,7 +307,18 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
             } else if (kind == VariableKind.FIELD) {
                 nl.akiar.pascal.psi.PascalTypeDefinition varClass =
                         com.intellij.psi.util.PsiTreeUtil.getParentOfType(var, nl.akiar.pascal.psi.PascalTypeDefinition.class);
-                if (varClass != null && varClass.equals(containingClass)) {
+                boolean isMatch = varClass != null && varClass.equals(containingClass);
+                if (!isMatch && containingClass != null && varClass != null) {
+                    if (ancestorKeys == null) {
+                        ancestorKeys = new HashSet<>();
+                        for (PascalTypeDefinition a : InheritanceChainCache.getAllAncestorTypes(containingClass)) {
+                            ancestorKeys.add((a.getUnitName() + "#" + a.getName()).toLowerCase());
+                        }
+                    }
+                    String varKey = (varClass.getUnitName() + "#" + varClass.getName()).toLowerCase();
+                    isMatch = ancestorKeys.contains(varKey);
+                }
+                if (isMatch) {
                     if (distance < bestFieldDistance) {
                         bestFieldDistance = distance;
                         bestFieldMatch = var;

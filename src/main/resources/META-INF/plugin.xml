@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>nl.akiar.pascal</id>
     <name>Delphi Pascal</name>
-    <version>0.0.3</version>
+    <version>0.0.4</version>
     <vendor>Akiar</vendor>
 
     <description><![CDATA[
@@ -156,6 +156,9 @@
 
         <!-- DPR Library Roots Provider - indexes files referenced by .dpr files -->
         <additionalLibraryRootsProvider implementation="nl.akiar.pascal.dpr.DprLibraryRootsProvider"/>
+
+        <!-- Built-in Library Roots Provider - bundled System.pas with compiler intrinsics -->
+        <additionalLibraryRootsProvider implementation="nl.akiar.pascal.builtin.PascalBuiltInLibraryRootsProvider"/>
 
         <!-- Pascal Source Paths Settings Page -->
         <projectConfigurable

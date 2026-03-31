@@ -6,6 +6,7 @@ import com.intellij.psi.SmartPointerManager
 import com.intellij.psi.SmartPsiElementPointer
 import com.intellij.psi.util.PsiModificationTracker
 import nl.akiar.pascal.psi.PascalTypeDefinition
+import nl.akiar.pascal.psi.TypeKind
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -173,6 +174,23 @@ object InheritanceChainCache {
                 ancestorNames.add(currentSuperName)
                 ancestorPtrs.add(null)
                 break  // Can't continue chain without resolved type
+            }
+        }
+
+        // Implicit TObject ancestor: classes without an explicit TObject ancestor
+        // implicitly inherit from TObject (Delphi compiler magic).
+        if (!hasCycle && typeDef.typeKind == TypeKind.CLASS
+            && !"TObject".equals(typeDef.name, ignoreCase = true)
+            && !com.intellij.openapi.project.DumbService.isDumb(typeDef.project)) {
+            val lastAncestor = ancestorNames.lastOrNull()
+            if (lastAncestor == null || !lastAncestor.equals("TObject", ignoreCase = true)) {
+                val tObjectTypes = nl.akiar.pascal.stubs.PascalTypeIndex.findTypes("TObject", typeDef.project)
+                val tObj = tObjectTypes.firstOrNull()
+                if (tObj != null) {
+                    if (superClassName == null) superClassName = "TObject"
+                    ancestorNames.add("TObject")
+                    ancestorPtrs.add(spm.createSmartPsiElementPointer(tObj))
+                }
             }
         }
 

@@ -241,6 +241,16 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
             return MemberChainResolver.findContainingClass(qualifier);
         }
 
+        // Handle Result keyword — resolve to the return type of the enclosing function
+        if (qualifier.getNode().getElementType() == PascalTokenTypes.KW_RESULT) {
+            PascalRoutine routine = com.intellij.psi.util.PsiTreeUtil.getParentOfType(qualifier, PascalRoutine.class);
+            while (routine != null) {
+                if (routine.getReturnTypeName() != null) return getTypeOf(routine, file);
+                routine = com.intellij.psi.util.PsiTreeUtil.getParentOfType(routine, PascalRoutine.class);
+            }
+            return null;
+        }
+
         String name = qualifier.getText();
         int offset = qualifier.getTextOffset();
 

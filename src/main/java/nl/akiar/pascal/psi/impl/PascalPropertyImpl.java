@@ -97,24 +97,63 @@ public class PascalPropertyImpl extends StubBasedPsiElementBase<PascalPropertySt
         if (stub != null) return stub.getTypeName();
 
         ASTNode node = getNode();
+
+        // Approach 1: Find COLON as direct child, then look for TYPE_REFERENCE or IDENTIFIER after it
         ASTNode colon = node.findChildByType(PascalTokenTypes.COLON);
         if (colon != null) {
-            ASTNode next = colon.getTreeNext();
-            while (next != null && (next.getElementType() == PascalTokenTypes.WHITE_SPACE)) {
-                next = next.getTreeNext();
-            }
-            if (next != null) {
-                // Handle TYPE_REFERENCE PSI elements created by parser
-                if (next.getElementType() == PascalElementTypes.TYPE_REFERENCE) {
-                    PsiElement typeRefElement = next.getPsi();
+            String result = extractTypeAfterColon(colon);
+            if (result != null) return result;
+        }
+
+        // Approach 2: Recursive COLON search — handles cases where COLON is nested in an intermediate AST node.
+        // For indexed properties (property Items[Index: Integer]: Pointer), skip colons inside brackets.
+        if (colon == null) {
+            boolean pastBracket = true; // true if no brackets seen yet (non-indexed property)
+            for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+                if (child.getElementType() == PascalTokenTypes.LBRACKET) pastBracket = false;
+                if (child.getElementType() == PascalTokenTypes.RBRACKET) pastBracket = true;
+                if (pastBracket && child.getElementType() == PascalElementTypes.TYPE_REFERENCE) {
+                    PsiElement typeRefElement = child.getPsi();
                     if (typeRefElement instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
                         return ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) typeRefElement).getFullTypeName();
                     }
                 }
-                // Fallback to IDENTIFIER for keyword types that don't get TYPE_REFERENCE
-                if (next.getElementType() == PascalTokenTypes.IDENTIFIER) {
-                    return next.getText();
+            }
+        }
+
+        // Approach 3: Text-based fallback — extract type from property text
+        String text = node.getText();
+        if (text != null) {
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                ":\\s*([A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*(<[^>]+>)?)\\s*(read|write|stored|default|;|$)",
+                java.util.regex.Pattern.CASE_INSENSITIVE
+            ).matcher(text);
+            // For indexed properties, find the last match (after the bracket parameters)
+            String lastMatch = null;
+            while (m.find()) {
+                lastMatch = m.group(1);
+            }
+            if (lastMatch != null) return lastMatch;
+        }
+
+        return null;
+    }
+
+    @Nullable
+    private String extractTypeAfterColon(ASTNode colon) {
+        ASTNode next = colon.getTreeNext();
+        while (next != null && (next.getElementType() == PascalTokenTypes.WHITE_SPACE)) {
+            next = next.getTreeNext();
+        }
+        if (next != null) {
+            if (next.getElementType() == PascalElementTypes.TYPE_REFERENCE) {
+                PsiElement typeRefElement = next.getPsi();
+                if (typeRefElement instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
+                    return ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) typeRefElement).getFullTypeName();
                 }
+            }
+            if (next.getElementType() == PascalTokenTypes.IDENTIFIER) {
+                return next.getText();
             }
         }
         return null;

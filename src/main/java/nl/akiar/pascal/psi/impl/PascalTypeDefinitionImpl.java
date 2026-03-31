@@ -527,7 +527,7 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
         // Step 1: Get superclass name (fast path via stub, or slow path via AST)
         String superClassName = getSuperClassName();
         if (superClassName == null) {
-            return null;
+            return getImplicitSuperClass();
         }
 
         // Strip generic arguments for lookup: "TEntity<TRide>" -> "TEntity"
@@ -579,6 +579,21 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
 
         LOG.info("[GenericChain] getSuperClass: FAILED to resolve '" + lookupName + "' (raw='" + superClassName + "') for type " + getName() + " in unit " + getUnitName());
         return null;
+    }
+
+    /**
+     * Returns the implicit superclass (TObject) for classes without an explicit ancestor.
+     * This mirrors the Delphi compiler behavior where all classes implicitly inherit from TObject.
+     */
+    @Nullable
+    private PascalTypeDefinition getImplicitSuperClass() {
+        if (getTypeKind() != TypeKind.CLASS) return null;
+        if ("TObject".equalsIgnoreCase(getName())) return null;
+        if (com.intellij.openapi.project.DumbService.isDumb(getProject())) return null;
+
+        Collection<PascalTypeDefinition> tObjectTypes =
+                nl.akiar.pascal.stubs.PascalTypeIndex.findTypes("TObject", getProject());
+        return tObjectTypes.isEmpty() ? null : tObjectTypes.iterator().next();
     }
 
     @Override

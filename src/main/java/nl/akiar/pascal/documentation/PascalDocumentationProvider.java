@@ -150,6 +150,10 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             PascalTypeDefinition containingClass = MemberChainResolver.findContainingClass(contextElement);
             if (containingClass != null) return containingClass;
         }
+        // Handle Result keyword -> return the keyword itself so generateDoc renders the return type
+        if (contextElement != null && contextElement.getNode().getElementType() == PascalTokenTypes.KW_RESULT) {
+            return contextElement;
+        }
         if (contextElement != null && contextElement.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
             String name = contextElement.getText();
 
@@ -342,6 +346,28 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
         LOG.debug("[PascalDoc] generateDoc called for element: " + element + " class: " + (element != null ? element.getClass().getName() : "null"));
 
         if (element == null) return null;
+
+        // Result keyword documentation — show the return type of the enclosing function
+        if (element.getNode() != null && element.getNode().getElementType() == PascalTokenTypes.KW_RESULT) {
+            PascalRoutine routine = com.intellij.psi.util.PsiTreeUtil.getParentOfType(element, PascalRoutine.class);
+            while (routine != null) {
+                String returnType = routine.getReturnTypeName();
+                if (returnType != null) {
+                    StringBuilder sb = new StringBuilder();
+                    sb.append(DocumentationMarkup.DEFINITION_START);
+                    sb.append("<b>Result</b>: ");
+                    appendTypeLink(sb, returnType);
+                    sb.append(DocumentationMarkup.DEFINITION_END);
+                    sb.append(DocumentationMarkup.CONTENT_START);
+                    sb.append("Return value of <b>");
+                    sb.append(escapeHtml(routine.getName() != null ? routine.getName() : "function"));
+                    sb.append("</b>");
+                    sb.append(DocumentationMarkup.CONTENT_END);
+                    return sb.toString();
+                }
+                routine = com.intellij.psi.util.PsiTreeUtil.getParentOfType(routine, PascalRoutine.class);
+            }
+        }
 
         // Unit reference documentation
         if (element.getNode() != null && element.getNode().getElementType() == PascalElementTypes.UNIT_REFERENCE) {
@@ -1031,10 +1057,10 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             // Try to infer type from initializer (inline var)
             PsiFile originFile = varDef.getContainingFile();
             if (originFile != null) {
-                PascalTypeDefinition inferredType = MemberChainResolver.getInferredTypeOf(varDef, originFile);
-                if (inferredType != null && inferredType.getName() != null) {
+                String inferredTypeName = MemberChainResolver.getInferredTypeName(varDef, originFile);
+                if (inferredTypeName != null && !inferredTypeName.isEmpty()) {
                     sb.append(": ");
-                    appendTypeLink(sb, inferredType.getName());
+                    appendTypeLink(sb, inferredTypeName);
                     sb.append(" <span class='").append(DocumentationMarkup.CLASS_GRAYED).append("'>(inferred)</span>");
                 }
             }

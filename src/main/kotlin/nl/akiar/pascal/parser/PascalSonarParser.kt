@@ -483,7 +483,8 @@ class PascalSonarParser : PsiParser {
                         parentName.contains("FieldDeclaration", ignoreCase = true) ||
                         parentName.contains("FormalParameter", ignoreCase = true) ||
                         parentName.contains("NameDeclarationList", ignoreCase = true) ||
-                        parentName.contains("VarDeclaration", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_DEFINITION
+                        parentName.contains("VarDeclaration", ignoreCase = true) ||
+                        parentName.contains("VarStatement", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_DEFINITION
                     else -> {
                         diag("NameDeclarationNode: unhandled parentName=$parentName")
                         null
@@ -495,6 +496,7 @@ class PascalSonarParser : PsiParser {
             // Declaration Sections
             // ============================================================================
             node is org.sonar.plugins.communitydelphi.api.ast.VarSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION
+            node is org.sonar.plugins.communitydelphi.api.ast.VarStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_SECTION
             node is org.sonar.plugins.communitydelphi.api.ast.ConstSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.CONST_SECTION
             node is org.sonar.plugins.communitydelphi.api.ast.TypeSectionNode -> nl.akiar.pascal.psi.PascalElementTypes.TYPE_SECTION
 

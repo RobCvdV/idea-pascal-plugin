@@ -43,6 +43,10 @@ public class PascalReferenceContributor extends PsiReferenceContributor {
                     return new PsiReference[]{new PascalSelfReference(element)};
                 }
 
+                if (type == PascalTokenTypes.KW_RESULT) {
+                    return new PsiReference[]{new PascalResultReference(element)};
+                }
+
                 if (type == PascalTokenTypes.IDENTIFIER || type == PascalElementTypes.METHOD_NAME_REFERENCE) {
                     PsiElement parent = element.getParent();
 

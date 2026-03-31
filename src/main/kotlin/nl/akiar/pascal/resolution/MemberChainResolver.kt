@@ -240,6 +240,7 @@ object MemberChainResolver {
     private fun isChainIdentifier(element: PsiElement): Boolean {
         val elemType = element.node.elementType
         if (elemType == PascalTokenTypes.KW_SELF) return true
+        if (elemType == PascalTokenTypes.KW_RESULT) return true
         for (idType in nl.akiar.pascal.psi.PsiUtil.IDENTIFIER_LIKE_TYPES) {
             if (elemType == idType) return true
         }
@@ -475,6 +476,14 @@ object MemberChainResolver {
                 currentOwnerName = containingClass?.name
                 maybeLog("[MemberTraversal] first resolved as Self -> class '${containingClass?.name}'", originFile)
             }
+            // Check for Result keyword as first element
+            else if (first.node.elementType == PascalTokenTypes.KW_RESULT) {
+                val routine = findEnclosingFunction(first)
+                results[0] = routine
+                currentType = getTypeOf(routine, originFile)
+                currentOwnerName = routine?.returnTypeName
+                maybeLog("[MemberTraversal] first resolved as Result -> function '${routine?.name}' returnType='${routine?.returnTypeName}'", originFile)
+            }
             // Try unit-qualified prefix (e.g. Spring.Collections.Lists.TList)
             else if (chain.size >= 2) {
                 val unitPrefixResult = tryResolveUnitPrefix(chain, availableUnitsAtOffset, originFile.project)
@@ -516,7 +525,19 @@ object MemberChainResolver {
                 }
             }
 
-            // Normal first-element resolution (if not handled by Self or unit prefix)
+            // Check for "as" type cast prefix: (expr as TType).Member
+            // In this case the chain is [Member, ...] and we need to extract the cast type
+            if (startIndex == 1 && results[0] == null) {
+                val asCastType = tryResolveAsCastPrefix(first, originFile)
+                if (asCastType != null) {
+                    currentType = asCastType
+                    currentOwnerName = asCastType.name
+                    startIndex = 0
+                    maybeLog("[MemberTraversal] as-cast prefix resolved to type '${asCastType.name}'", originFile)
+                }
+            }
+
+            // Normal first-element resolution (if not handled by Self, unit prefix, or as-cast)
             if (startIndex == 1 && results[0] == null) {
                 // Use scope-aware variable lookup (local > field > global) for proper anonymous routine support
                 val resolvedVar = nl.akiar.pascal.stubs.PascalVariableIndex.findVariableAtPosition(first.text, originFile, first.textOffset)
@@ -1603,6 +1624,78 @@ object MemberChainResolver {
             }
         }
         return map
+    }
+
+    /**
+     * Detect an "as" type cast prefix before the first chain element.
+     * For `(expr as TType).Member`, the chain starts at `Member` and this method
+     * walks backward to find the `)`, scans inside the parens for KW_AS, and
+     * resolves the type name that follows it.
+     */
+    private fun tryResolveAsCastPrefix(firstChainElement: PsiElement, originFile: PsiFile): PascalTypeDefinition? {
+        // Walk backward from the first chain element: expect DOT then RPAREN
+        var prev = skipBackwardWhitespace(PsiTreeUtil.prevLeaf(firstChainElement))
+        if (prev == null || prev.node.elementType != PascalTokenTypes.DOT) return null
+        prev = skipBackwardWhitespace(PsiTreeUtil.prevLeaf(prev))
+        if (prev == null || prev.node.elementType != PascalTokenTypes.RPAREN) return null
+
+        // We have ")." before the first chain element. Scan backward inside the parens for KW_AS.
+        val rparen = prev
+        var depth = 1
+        var cur = PsiTreeUtil.prevLeaf(rparen)
+        var castTypeName: String? = null
+        while (cur != null && depth > 0) {
+            val elemType = cur.node.elementType
+            if (elemType == PascalTokenTypes.RPAREN) {
+                depth++
+            } else if (elemType == PascalTokenTypes.LPAREN) {
+                depth--
+            } else if (depth == 1 && elemType == PascalTokenTypes.KW_AS) {
+                // Found 'as' — collect the type name after it
+                var typeNamePart = skipForwardWhitespace(PsiTreeUtil.nextLeaf(cur))
+                val sb = StringBuilder()
+                while (typeNamePart != null && typeNamePart != rparen) {
+                    val partType = typeNamePart.node.elementType
+                    if (partType == PascalTokenTypes.RPAREN) break
+                    if (partType == PascalTokenTypes.IDENTIFIER || partType == PascalTokenTypes.DOT) {
+                        sb.append(typeNamePart.text)
+                    } else if (partType != PascalTokenTypes.WHITE_SPACE
+                        && !(typeNamePart is com.intellij.psi.PsiWhiteSpace)
+                        && !(typeNamePart is com.intellij.psi.PsiComment)) {
+                        break
+                    }
+                    typeNamePart = PsiTreeUtil.nextLeaf(typeNamePart)
+                }
+                if (sb.isNotEmpty()) {
+                    // Take just the last segment for type lookup (strip unit prefix)
+                    val fullName = sb.toString()
+                    castTypeName = if (fullName.contains('.')) fullName.substringAfterLast('.') else fullName
+                }
+                break
+            }
+            cur = PsiTreeUtil.prevLeaf(cur)
+        }
+
+        if (castTypeName == null) return null
+
+        // Resolve the cast type
+        val typeResult = PascalTypeIndex.findTypeWithTransitiveDeps(castTypeName, originFile, firstChainElement.textOffset)
+        if (typeResult.inScopeTypes.isNotEmpty()) return typeResult.inScopeTypes.first()
+
+        val globalTypes = PascalTypeIndex.findTypes(castTypeName, originFile.project)
+        return globalTypes.firstOrNull()
+    }
+
+    /**
+     * Find the enclosing function (routine with a return type) for the Result keyword.
+     */
+    private fun findEnclosingFunction(element: PsiElement): PascalRoutine? {
+        var routine = PsiTreeUtil.getParentOfType(element, PascalRoutine::class.java)
+        while (routine != null) {
+            if (routine.returnTypeName != null) return routine
+            routine = PsiTreeUtil.getParentOfType(routine, PascalRoutine::class.java)
+        }
+        return null
     }
 
     /**

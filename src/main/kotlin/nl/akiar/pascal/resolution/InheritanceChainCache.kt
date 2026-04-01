@@ -79,7 +79,11 @@ object InheritanceChainCache {
 
         // Compute inheritance chain
         val (info, ancestorPtrs) = computeInheritanceChain(typeDef, spm)
-        cache[key] = CacheValue(info, ancestorPtrs)
+        // Don't cache during dumb mode — superclass resolution relies on stub indices
+        // which return empty during indexing, producing truncated chains.
+        if (!com.intellij.openapi.project.DumbService.isDumb(project)) {
+            cache[key] = CacheValue(info, ancestorPtrs)
+        }
         return info
     }
 
@@ -106,7 +110,9 @@ object InheritanceChainCache {
 
         // Compute and cache
         val (info, ancestorPtrs) = computeInheritanceChain(typeDef, spm)
-        cache[key] = CacheValue(info, ancestorPtrs)
+        if (!com.intellij.openapi.project.DumbService.isDumb(project)) {
+            cache[key] = CacheValue(info, ancestorPtrs)
+        }
         return ancestorPtrs.mapNotNull { it?.element?.takeIf { el -> el.isValid } }
     }
 

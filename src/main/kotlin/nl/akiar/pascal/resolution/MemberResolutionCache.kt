@@ -82,8 +82,12 @@ object MemberResolutionCache {
             if (cachedEl != null && cachedEl.isValid) return cachedEl
         }
         val computed = compute()
-        val valPtr = computed?.let { spm.createSmartPsiElementPointer(it) }
-        typeOfCache[key] = TypeOfVal(valPtr)
+        // Don't cache null results during dumb mode — stub indices return empty
+        // during indexing, and caching that null would persist after smart mode resumes.
+        if (computed != null || !com.intellij.openapi.project.DumbService.isDumb(originFile.project)) {
+            val valPtr = computed?.let { spm.createSmartPsiElementPointer(it) }
+            typeOfCache[key] = TypeOfVal(valPtr)
+        }
         return computed
     }
 
@@ -124,8 +128,12 @@ object MemberResolutionCache {
         }
 
         val computed = compute()
-        val ptrs = computed.map { spm.createSmartPsiElementPointer(it) }
-        memberListCache[key] = MemberListValue(ptrs)
+        // Don't cache empty member lists during dumb mode — ancestor resolution may
+        // fail because stub indices return empty during indexing.
+        if (computed.isNotEmpty() || !com.intellij.openapi.project.DumbService.isDumb(project)) {
+            val ptrs = computed.map { spm.createSmartPsiElementPointer(it) }
+            memberListCache[key] = MemberListValue(ptrs)
+        }
         return computed
     }
 

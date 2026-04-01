@@ -700,9 +700,11 @@ object MemberChainResolver {
                 LOG.info("[GenericChain] step[$i] '$name' RESULT: member=${member?.javaClass?.simpleName ?: "<null>"} nextType=${currentType?.name ?: "<null>"} nextOwner=$currentOwnerName effectiveType=$effectiveTypeName nextTypeArgMap=$currentTypeArgMap")
             }
             val internalResult = ChainResolutionInternal(results, currentTypeArgMap, perElementMaps)
-            // Always cache — the key includes modCount so stale results expire when
-            // the file changes. Within the same modCount, results should be deterministic.
-            cache[cacheKey] = internalResult
+            // Cache deterministic results, but skip caching during dumb mode to avoid
+            // persisting under-resolved nulls from empty stub index returns.
+            if (!DumbService.isDumb(originFile.project)) {
+                cache[cacheKey] = internalResult
+            }
             return internalResult
         } finally {
             PerformanceMetrics.record("MemberChainResolver.resolveChainElements", System.nanoTime() - start)

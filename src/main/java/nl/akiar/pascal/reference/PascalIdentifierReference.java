@@ -61,6 +61,14 @@ public class PascalIdentifierReference extends PsiReferenceBase<PsiElement> impl
             }
         }
 
+        // 4. Enum values — search in-scope enum types for a matching value
+        if (results.isEmpty()) {
+            PsiElement enumElement = findEnumValueInScope(name);
+            if (enumElement != null) {
+                results.add(new PsiElementResolveResult(enumElement));
+            }
+        }
+
         return results.toArray(new ResolveResult[0]);
     }
 
@@ -69,6 +77,68 @@ public class PascalIdentifierReference extends PsiReferenceBase<PsiElement> impl
     public PsiElement resolve() {
         ResolveResult[] resolveResults = multiResolve(false);
         return resolveResults.length > 0 ? resolveResults[0].getElement() : null;
+    }
+
+    /**
+     * Search for an enum value with the given name across all in-scope enum types.
+     * In Delphi, enum values can be used without the type prefix (e.g., taLeftJustify instead of TAlignment.taLeftJustify).
+     */
+    @Nullable
+    private PsiElement findEnumValueInScope(String valueName) {
+        PsiFile file = myElement.getContainingFile();
+        if (file == null) return null;
+
+        // Search all types in the stub index for enum types that contain this value
+        java.util.Collection<String> allTypeKeys = com.intellij.psi.stubs.StubIndex.getInstance()
+                .getAllKeys(PascalTypeIndex.KEY, myElement.getProject());
+
+        for (String key : allTypeKeys) {
+            java.util.Collection<PascalTypeDefinition> types = com.intellij.psi.stubs.StubIndex.getElements(
+                    PascalTypeIndex.KEY, key, myElement.getProject(),
+                    com.intellij.psi.search.GlobalSearchScope.allScope(myElement.getProject()),
+                    PascalTypeDefinition.class);
+
+            for (PascalTypeDefinition typeDef : types) {
+                if (typeDef.getTypeKind() != nl.akiar.pascal.psi.TypeKind.ENUM) continue;
+
+                // Check if this enum type is in scope
+                PascalTypeIndex.TypeLookupResult scopeCheck =
+                        PascalTypeIndex.findTypesWithUsesValidation(
+                                typeDef.getName(), file, myElement.getTextOffset());
+                if (scopeCheck.getInScopeTypes().isEmpty()) continue;
+
+                // Search enum values — ENUM_ELEMENT nodes are nested inside ENUM_TYPE, not direct children
+                java.util.List<PsiElement> enumElements = new ArrayList<>();
+                com.intellij.psi.util.PsiTreeUtil.processElements(typeDef, element -> {
+                    if (element.getNode() != null &&
+                        element.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.ENUM_ELEMENT) {
+                        enumElements.add(element);
+                    }
+                    return true;
+                });
+                for (PsiElement enumEl : enumElements) {
+                    // ENUM_ELEMENT may be a leaf node with no children; compare getText() directly
+                    String enumName = null;
+                    for (PsiElement idChild : enumEl.getChildren()) {
+                        if (idChild.getNode() != null &&
+                            idChild.getNode().getElementType() == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                            enumName = idChild.getText();
+                            break;
+                        }
+                    }
+                    if (enumName == null) {
+                        // Strip ordinal assignment: "askForMileageMode_Always = 2" → "askForMileageMode_Always"
+                        String rawText = enumEl.getText();
+                        int eqIdx = rawText.indexOf('=');
+                        enumName = eqIdx > 0 ? rawText.substring(0, eqIdx).trim() : rawText.trim();
+                    }
+                    if (valueName.equalsIgnoreCase(enumName)) {
+                        return enumEl; // Return the ENUM_ELEMENT node
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     @NotNull

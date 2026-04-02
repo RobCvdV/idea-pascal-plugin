@@ -438,10 +438,73 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             return generateRoutineDoc((PascalRoutine) element, typeArgMap);
         }
 
+        // Enum element documentation
+        if (element.getNode() != null &&
+            element.getNode().getElementType() == PascalElementTypes.ENUM_ELEMENT) {
+            return generateEnumElementDoc(element);
+        }
+
         return null;
     }
 
     // ==================== Document Generation Methods ====================
+
+    private String generateEnumElementDoc(PsiElement enumElement) {
+        // Extract the enum value name from the ENUM_ELEMENT's IDENTIFIER child
+        String valueName = null;
+        for (PsiElement child : enumElement.getChildren()) {
+            if (child.getNode() != null &&
+                child.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
+                valueName = child.getText();
+                break;
+            }
+        }
+        if (valueName == null) {
+            // Strip ordinal assignment: "askForMileageMode_Always = 2" → "askForMileageMode_Always"
+            String rawText = enumElement.getText();
+            int eqIdx = rawText.indexOf('=');
+            valueName = eqIdx > 0 ? rawText.substring(0, eqIdx).trim() : rawText.trim();
+        }
+
+        // Find the containing enum type
+        PascalTypeDefinition enumType = com.intellij.psi.util.PsiTreeUtil.getParentOfType(
+            enumElement, PascalTypeDefinition.class);
+        String typeName = enumType != null ? enumType.getName() : "enum";
+
+        // Calculate ordinal position — ENUM_ELEMENT nodes are nested inside ENUM_TYPE
+        int ordinal = 0;
+        if (enumType != null) {
+            int[] ord = {0};
+            boolean[] found = {false};
+            com.intellij.psi.util.PsiTreeUtil.processElements(enumType, child -> {
+                if (child.getNode() != null &&
+                    child.getNode().getElementType() == PascalElementTypes.ENUM_ELEMENT) {
+                    if (child.equals(enumElement)) {
+                        found[0] = true;
+                        return false; // stop processing
+                    }
+                    ord[0]++;
+                }
+                return true;
+            });
+            ordinal = ord[0];
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(DocumentationMarkup.DEFINITION_START);
+        sb.append(escapeHtml(valueName));
+        sb.append(" = ").append(ordinal);
+        sb.append(DocumentationMarkup.DEFINITION_END);
+
+        sb.append(DocumentationMarkup.CONTENT_START);
+        sb.append("Enum value of ");
+        appendTypeLink(sb, typeName);
+        sb.append(DocumentationMarkup.CONTENT_END);
+
+        appendSourceLocation(sb, enumElement);
+
+        return sb.toString();
+    }
 
     private String generateUnitDoc(String unitName, PsiElement element) {
         StringBuilder sb = new StringBuilder();
@@ -793,6 +856,12 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 PsiElement resolved = ref.resolve();
                 if (resolved instanceof PascalVariableDefinition) {
                     qualifierTypeName = ((PascalVariableDefinition) resolved).getTypeName();
+                    // Fallback: try inferred type for inline variables
+                    if (qualifierTypeName == null) {
+                        PascalTypeDefinition inferred = MemberChainResolver.getInferredTypeOf(
+                            (PascalVariableDefinition) resolved, context.getContainingFile());
+                        if (inferred != null) qualifierTypeName = inferred.getName();
+                    }
                     break;
                 } else if (resolved instanceof PascalProperty) {
                     qualifierTypeName = ((PascalProperty) resolved).getTypeName();
@@ -873,28 +942,16 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
     /**
      * Apply generic type parameter substitution to a routine signature string.
      * Replaces type parameter names (e.g., "T") with their concrete types (e.g., "TRide")
-     * in the return type position (after the last ":").
+     * in both parameter types and return type positions.
      */
     private String applyGenericSubstitutionToSignature(String signature, Map<String, String> typeArgMap) {
-        // Find the return type portion: after the closing paren and last ":"
-        // e.g., "function GetItem(Index: Integer): T;" → replace T with TRide
-        int lastColon = signature.lastIndexOf(':');
-        if (lastColon < 0) return signature;
-
-        // Only substitute after the last colon if it comes after the closing paren
-        int lastParen = signature.lastIndexOf(')');
-        if (lastParen >= 0 && lastColon < lastParen) return signature;
-
-        String beforeReturn = signature.substring(0, lastColon + 1);
-        String returnPart = signature.substring(lastColon + 1);
-
-        // Replace type parameter names in the return part
+        String result = signature;
         for (Map.Entry<String, String> entry : typeArgMap.entrySet()) {
             // Use word boundary replacement to avoid partial matches
-            returnPart = returnPart.replaceAll("\\b" + java.util.regex.Pattern.quote(entry.getKey()) + "\\b", entry.getValue());
+            result = result.replaceAll("\\b" + java.util.regex.Pattern.quote(entry.getKey()) + "\\b",
+                java.util.regex.Matcher.quoteReplacement(entry.getValue()));
         }
-
-        return beforeReturn + returnPart;
+        return result;
     }
 
     private String buildTypeSignature(PascalTypeDefinition typeDef) {

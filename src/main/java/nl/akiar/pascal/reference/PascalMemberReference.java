@@ -179,17 +179,35 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
     private PsiElement findMemberInType(PascalTypeDefinition typeDef, String name, boolean includeAncestors) {
         List<PsiElement> members = typeDef.getMembers(includeAncestors);
         for (PsiElement member : members) {
+            String memberName = null;
             if (member instanceof PsiNameIdentifierOwner) {
-                String memberName = ((PsiNameIdentifierOwner) member).getName();
-                if (name.equalsIgnoreCase(memberName)) {
-                    // Check visibility
-                    if (isAccessible(member)) {
-                        return member;
-                    }
+                memberName = ((PsiNameIdentifierOwner) member).getName();
+            } else if (member.getNode() != null &&
+                       member.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.ENUM_ELEMENT) {
+                memberName = getEnumElementName(member);
+            }
+            if (memberName != null && name.equalsIgnoreCase(memberName)) {
+                if (isAccessible(member)) {
+                    return member;
                 }
             }
         }
         return null;
+    }
+
+    @Nullable
+    private String getEnumElementName(PsiElement enumElement) {
+        // ENUM_ELEMENT nodes may be leaf nodes with no children; use getText() directly
+        for (PsiElement child : enumElement.getChildren()) {
+            if (child.getNode() != null &&
+                child.getNode().getElementType() == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                return child.getText();
+            }
+        }
+        // Strip ordinal assignment: "askForMileageMode_Always = 2" → "askForMileageMode_Always"
+        String text = enumElement.getText();
+        int eqIdx = text.indexOf('=');
+        return eqIdx > 0 ? text.substring(0, eqIdx).trim() : text.trim();
     }
 
     private boolean isAccessible(PsiElement member) {

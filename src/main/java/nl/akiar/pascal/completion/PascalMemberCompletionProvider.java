@@ -89,12 +89,19 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
         // Get all members (including inherited)
         List<PsiElement> members = typeDef.getMembers(true);
         for (PsiElement member : members) {
-            if (!(member instanceof PsiNameIdentifierOwner named)) continue;
-            String name = named.getName();
+            String name;
+            if (member instanceof PsiNameIdentifierOwner named) {
+                name = named.getName();
+            } else if (member.getNode() != null &&
+                       member.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.ENUM_ELEMENT) {
+                name = getEnumElementName(member);
+            } else {
+                continue;
+            }
             if (name == null || name.isEmpty()) continue;
 
-            // Visibility check
-            if (!isAccessible(member, file)) continue;
+            // Visibility check (enum values are always public)
+            if (member instanceof PsiNameIdentifierOwner && !isAccessible(member, file)) continue;
 
             LookupElementBuilder lookup = createMemberLookup(member, name, typeArgMap);
             if (lookup != null) {
@@ -428,7 +435,30 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
             }
             return builder;
         }
+        // Enum element
+        if (member.getNode() != null &&
+            member.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.ENUM_ELEMENT) {
+            PascalTypeDefinition enumType = com.intellij.psi.util.PsiTreeUtil.getParentOfType(member, PascalTypeDefinition.class);
+            String typeName = enumType != null ? enumType.getName() : "enum";
+            return LookupElementBuilder.create(name)
+                    .withIcon(AllIcons.Nodes.Enum)
+                    .withTypeText(typeName);
+        }
         return LookupElementBuilder.create(name).withIcon(AllIcons.Nodes.Variable);
+    }
+
+    private String getEnumElementName(PsiElement enumElement) {
+        // ENUM_ELEMENT nodes may be leaf nodes with no children; use getText() directly
+        for (PsiElement child : enumElement.getChildren()) {
+            if (child.getNode() != null &&
+                child.getNode().getElementType() == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                return child.getText();
+            }
+        }
+        // Strip ordinal assignment: "askForMileageMode_Always = 2" → "askForMileageMode_Always"
+        String text = enumElement.getText();
+        int eqIdx = text.indexOf('=');
+        return eqIdx > 0 ? text.substring(0, eqIdx).trim() : text.trim();
     }
 
     private Icon getIcon(PsiElement member) {
@@ -442,6 +472,9 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
         if (member instanceof PascalProperty) return 200;
         if (member instanceof PascalRoutine) return 150;
         if (member instanceof PascalVariableDefinition) return 100;
+        // Enum values should have reasonable priority
+        if (member.getNode() != null &&
+            member.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.ENUM_ELEMENT) return 100;
         return 50;
     }
 }

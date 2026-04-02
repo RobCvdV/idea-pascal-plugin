@@ -233,6 +233,10 @@ object MemberChainResolver {
         }
     }
 
+    /** Strip the Delphi escape prefix `&` from an identifier name. */
+    private fun stripEscape(name: String): String =
+        if (name.startsWith("&") && name.length > 1) name.substring(1) else name
+
     /**
      * Collect all identifiers in a member access chain.
      * For "a.b.c", returns [a, b, c]
@@ -492,7 +496,7 @@ object MemberChainResolver {
                     for (idx in 0 until prefixLen) {
                         results[idx] = unitPsiFile
                     }
-                    val memberName = chain[prefixLen].text
+                    val memberName = stripEscape(chain[prefixLen].text)
                     val unitName = nl.akiar.pascal.psi.PsiUtil.getUnitName(unitPsiFile)
                     val globalMember = findGlobalMemberInUnit(memberName, unitName, originFile.project)
                     results[prefixLen] = globalMember
@@ -540,16 +544,17 @@ object MemberChainResolver {
             // Normal first-element resolution (if not handled by Self, unit prefix, or as-cast)
             if (startIndex == 1 && results[0] == null) {
                 // Use scope-aware variable lookup (local > field > global) for proper anonymous routine support
-                val resolvedVar = nl.akiar.pascal.stubs.PascalVariableIndex.findVariableAtPosition(first.text, originFile, first.textOffset)
+                val firstName = stripEscape(first.text)
+                val resolvedVar = nl.akiar.pascal.stubs.PascalVariableIndex.findVariableAtPosition(firstName, originFile, first.textOffset)
                 val resolvedFirst: PsiElement? = if (resolvedVar != null) {
-                    maybeLog("[MemberTraversal] first resolved as variable '${first.text}' (scope-aware)", originFile)
+                    maybeLog("[MemberTraversal] first resolved as variable '${firstName}' (scope-aware)", originFile)
                     resolvedVar
                 } else {
-                    val typeResult = nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(first.text, originFile, first.textOffset)
-                    typeResult.inScopeTypes.firstOrNull()?.also { maybeLog("[MemberTraversal] first resolved as type '${first.text}' -> ${it.name}", originFile) }
+                    val typeResult = nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(firstName, originFile, first.textOffset)
+                    typeResult.inScopeTypes.firstOrNull()?.also { maybeLog("[MemberTraversal] first resolved as type '${firstName}' -> ${it.name}", originFile) }
                         ?: run {
                             // Try routine index (function as first element in chain, e.g. CoStatus.HandleStatus)
-                            val routineResult = PascalRoutineIndex.findRoutinesWithUsesValidation(first.text, originFile, first.textOffset)
+                            val routineResult = PascalRoutineIndex.findRoutinesWithUsesValidation(firstName, originFile, first.textOffset)
                             routineResult.inScopeRoutines.firstOrNull()?.also {
                                 maybeLog("[MemberTraversal] first resolved as routine '${first.text}' -> returnType=${it.returnTypeName}", originFile)
                             }
@@ -594,13 +599,27 @@ object MemberChainResolver {
                     currentOwnerName = currentType.name
                 }
                 LOG.info("[GenericChain] first element resolved: '${first.text}' -> ${resolvedFirst?.javaClass?.simpleName ?: "<null>"} type=${currentType?.name ?: "<null>"} ownerName=$currentOwnerName typeArgMap=$currentTypeArgMap")
+
+                // If first element has brackets [i], resolve through the indexer to get element type
+                if (chain.isNotEmpty() && hasBracketsAfter(chain[0]) && currentType != null) {
+                    val indexerResult = resolveIndexerElementType(currentType, currentTypeArgMap, originFile)
+                    if (indexerResult != null) {
+                        val (newType, newOwner, newMap) = indexerResult
+                        if (newType != null) {
+                            LOG.info("[GenericChain] bracket indexer on first element: ${currentType.name}[i] -> ${newType.name} typeArgMap=$newMap")
+                            currentType = newType
+                            currentOwnerName = newOwner ?: newType.name
+                            currentTypeArgMap = newMap
+                        }
+                    }
+                }
             }
 
             // Resolve subsequent chain parts using member lookup on currentType
             for (i in startIndex until chain.size) {
                 // Record the typeArgMap that is active for this element (the owner's context)
                 perElementMaps[i] = currentTypeArgMap
-                val name = chain[i].text
+                val name = stripEscape(chain[i].text)
                 LOG.info("[GenericChain] resolving step[$i] member='$name' currentType=${currentType?.name ?: "<null>"} currentOwnerName=$currentOwnerName typeArgMap=$currentTypeArgMap")
                 var member: PsiElement? = null
                 if (currentType != null) {
@@ -633,6 +652,7 @@ object MemberChainResolver {
                     is PascalVariableDefinition -> member.typeName
                     is PascalProperty -> member.typeName
                     is PascalRoutine -> member.returnTypeName
+                        ?: if (isConstructor(member)) currentType?.name else null
                     else -> null
                 }
                 LOG.info("[GenericChain] step[$i] '$name' rawTypeName='$memberRawTypeName' currentTypeArgMap=$currentTypeArgMap")
@@ -671,8 +691,9 @@ object MemberChainResolver {
                     memberRawTypeName
                 }
 
-                currentType = if (substitutedTypeName != null && substitutedTypeName != memberRawTypeName) {
-                    // Use the substituted type name for lookup
+                currentType = if (substitutedTypeName != null) {
+                    // Use the (possibly substituted) type name for lookup — also needed for
+                    // constructors where returnTypeName is null but memberRawTypeName was set
                     getTypeOf(member, originFile, substitutedTypeName)
                 } else {
                     getTypeOf(member, originFile)
@@ -698,6 +719,20 @@ object MemberChainResolver {
                 }
 
                 LOG.info("[GenericChain] step[$i] '$name' RESULT: member=${member?.javaClass?.simpleName ?: "<null>"} nextType=${currentType?.name ?: "<null>"} nextOwner=$currentOwnerName effectiveType=$effectiveTypeName nextTypeArgMap=$currentTypeArgMap")
+
+                // If this chain element has brackets [i] after it, resolve through the indexer
+                if (hasBracketsAfter(chain[i]) && currentType != null) {
+                    val indexerResult = resolveIndexerElementType(currentType, currentTypeArgMap, originFile)
+                    if (indexerResult != null) {
+                        val (newType, newOwner, newMap) = indexerResult
+                        if (newType != null) {
+                            LOG.info("[GenericChain] bracket indexer on step[$i]: ${currentType.name}[i] -> ${newType.name} typeArgMap=$newMap")
+                            currentType = newType
+                            currentOwnerName = newOwner ?: newType.name
+                            currentTypeArgMap = newMap
+                        }
+                    }
+                }
             }
             val internalResult = ChainResolutionInternal(results, currentTypeArgMap, perElementMaps)
             // Cache deterministic results, but skip caching during dumb mode to avoid
@@ -1110,6 +1145,17 @@ object MemberChainResolver {
                         if (lastResolved != null) {
                             var typeName = when (lastResolved) {
                                 is PascalRoutine -> lastResolved.returnTypeName
+                                    ?: if (isConstructor(lastResolved) && lastResolvedIndex > 0) {
+                                        // Constructor: infer type from preceding chain element (the class name)
+                                        val prevElement = resolved.resolvedElements.getOrNull(lastResolvedIndex - 1)
+                                        when (prevElement) {
+                                            is PascalTypeDefinition -> {
+                                                extractTypeNameWithGenericsFromChain(chain, lastResolvedIndex - 1)
+                                                    ?: prevElement.name
+                                            }
+                                            else -> null
+                                        }
+                                    } else null
                                 is PascalVariableDefinition -> lastResolved.typeName
                                 is PascalProperty -> lastResolved.typeName
                                 is PascalTypeDefinition -> lastResolved.name
@@ -1309,18 +1355,27 @@ object MemberChainResolver {
             val allMembers = typeDef.getMembers(true)
             // Log with types for debugging property vs field vs routine
             val memberInfo = allMembers.joinToString(", ") { m ->
-                val mName = (m as? com.intellij.psi.PsiNameIdentifierOwner)?.name ?: "?"
+                val mName = when {
+                    m is com.intellij.psi.PsiNameIdentifierOwner -> m.name ?: "?"
+                    m.node?.elementType == nl.akiar.pascal.psi.PascalElementTypes.ENUM_ELEMENT -> getEnumElementName(m) ?: "?"
+                    else -> "?"
+                }
                 val mType = when (m) {
                     is PascalProperty -> "prop"
                     is PascalRoutine -> "routine"
                     is PascalVariableDefinition -> "field"
-                    else -> m.javaClass.simpleName
+                    else -> if (m.node?.elementType == nl.akiar.pascal.psi.PascalElementTypes.ENUM_ELEMENT) "enum" else m.javaClass.simpleName
                 }
                 "'$mName'($mType)"
             }
             LOG.info("[GenericChain] findMemberInType PSI fallback for '$name' in '${typeDef.name}': ${allMembers.size} members: [$memberInfo]")
             for (m in allMembers) {
-                if (m is com.intellij.psi.PsiNameIdentifierOwner && m.name.equals(name, ignoreCase = true)) {
+                val memberName = when {
+                    m is com.intellij.psi.PsiNameIdentifierOwner -> m.name
+                    m.node?.elementType == nl.akiar.pascal.psi.PascalElementTypes.ENUM_ELEMENT -> getEnumElementName(m)
+                    else -> null
+                }
+                if (memberName != null && memberName.equals(name, ignoreCase = true)) {
                     val vis = when (m) {
                         is PascalRoutine -> m.visibility
                         is PascalProperty -> m.visibility
@@ -1367,6 +1422,102 @@ object MemberChainResolver {
 
         LOG.info("[GenericChain] findMemberInType: NO MATCH for '$name' in type='${typeDef.name}' unit='${typeDef.unitName}' ancestors=[${if (owners.size > 1) owners.drop(1).joinToString(", ") { "${it.name}(${it.unitName})" } else "none"}]")
         return null
+    }
+
+    private fun getEnumElementName(element: PsiElement): String? {
+        // ENUM_ELEMENT nodes may be leaf nodes with no children; use text directly
+        for (child in element.children) {
+            if (child.node?.elementType == PascalTokenTypes.IDENTIFIER) {
+                return child.text
+            }
+        }
+        // Strip ordinal assignment: "askForMileageMode_Always = 2" → "askForMileageMode_Always"
+        val text = element.text
+        val eqIdx = text.indexOf('=')
+        return if (eqIdx > 0) text.substring(0, eqIdx).trim() else text.trim()
+    }
+
+    private fun isConstructor(routine: PascalRoutine): Boolean {
+        val node = routine.node ?: return false
+        var child = node.firstChildNode
+        while (child != null) {
+            val type = child.elementType
+            if (type == PascalTokenTypes.KW_CONSTRUCTOR) return true
+            if (type == PascalTokenTypes.KW_PROCEDURE ||
+                type == PascalTokenTypes.KW_FUNCTION ||
+                type == PascalTokenTypes.KW_DESTRUCTOR) return false
+            child = child.treeNext
+        }
+        return false
+    }
+
+    /**
+     * Extract a type name with generic arguments from the chain PSI.
+     * e.g., for chain element "TDictionary" followed by "<Integer, TTaskTypeInfo>",
+     * returns "TDictionary<Integer, TTaskTypeInfo>".
+     */
+    private fun extractTypeNameWithGenericsFromChain(chain: List<PsiElement>, typeIndex: Int): String? {
+        val typeElement = chain.getOrNull(typeIndex) ?: return null
+        val next = skipForwardWhitespace(PsiTreeUtil.nextLeaf(typeElement))
+        if (next?.node?.elementType == PascalTokenTypes.LT) {
+            val gt = skipMatchedForward(next, PascalTokenTypes.LT, PascalTokenTypes.GT)
+            if (gt != null) {
+                val startOffset = typeElement.textRange.startOffset
+                val endOffset = gt.textRange.endOffset
+                return typeElement.containingFile.text.substring(startOffset, endOffset)
+            }
+        }
+        return null
+    }
+
+    /**
+     * Check if a chain element is followed by bracket indexer `[...]` in the source.
+     * Skips generic args and parenthesized expressions first.
+     */
+    private fun hasBracketsAfter(element: PsiElement): Boolean {
+        var next = skipForwardWhitespace(PsiTreeUtil.nextLeaf(element))
+        // Skip generic args <...>
+        if (next?.node?.elementType == PascalTokenTypes.LT && isLikelyGenericBracket(next)) {
+            val matched = skipMatchedForward(next, PascalTokenTypes.LT, PascalTokenTypes.GT)
+            if (matched != null) next = skipForwardWhitespace(PsiTreeUtil.nextLeaf(matched))
+        }
+        // Skip parenthesized expressions (...)
+        if (next?.node?.elementType == PascalTokenTypes.LPAREN) {
+            val matched = skipMatchedForward(next, PascalTokenTypes.LPAREN, PascalTokenTypes.RPAREN)
+            if (matched != null) next = skipForwardWhitespace(PsiTreeUtil.nextLeaf(matched))
+        }
+        return next?.node?.elementType == PascalTokenTypes.LBRACKET
+    }
+
+    /**
+     * Resolve the element type when brackets `[i]` are applied to a collection type.
+     * Finds the default indexed property (typically "Items") and returns its type after
+     * generic substitution.
+     */
+    private fun resolveIndexerElementType(
+        currentType: PascalTypeDefinition,
+        typeArgMap: Map<String, String>,
+        originFile: PsiFile
+    ): Triple<PascalTypeDefinition?, String?, Map<String, String>>? {
+        // Find the default indexed property — in Delphi this is conventionally "Items"
+        val itemsMember = findMemberInType(currentType, "Items", originFile, includeAncestors = true)
+        val rawTypeName = when (itemsMember) {
+            is PascalProperty -> itemsMember.typeName
+            is PascalRoutine -> itemsMember.returnTypeName
+            else -> null
+        } ?: return null
+
+        // Apply generic substitution
+        val substituted = if (typeArgMap.containsKey(rawTypeName)) typeArgMap[rawTypeName]!! else rawTypeName
+
+        val newType = getTypeOf(itemsMember, originFile, substituted)
+        val (_, typeArgs) = parseTypeArguments(substituted)
+        val newMap = if (newType != null && typeArgs.isNotEmpty()) {
+            buildTypeArgMap(newType, typeArgs)
+        } else {
+            emptyMap()
+        }
+        return Triple(newType, substituted, newMap)
     }
 
     private fun isVisible(member: PsiElement, callSiteFile: PsiFile, searchContextType: PascalTypeDefinition? = null): Boolean {

@@ -66,7 +66,9 @@ object MemberResolutionCache {
 
     fun getOrComputeTypeOf(element: PsiElement?, originFile: PsiFile, contextFile: PsiFile, compute: () -> PascalTypeDefinition?): PascalTypeDefinition? {
         if (element == null) return null
-        val tn = typeNameOf(element) ?: return null
+        // If element has no explicit type name (e.g. inferred-type variable), bypass cache and compute directly.
+        // The compute lambda handles inference via inferTypeFromInitializer().
+        val tn = typeNameOf(element) ?: return compute()
         ensureFresh(originFile.project)
         val spm = SmartPointerManager.getInstance(originFile.project)
         val ePtr = spm.createSmartPsiElementPointer(element)

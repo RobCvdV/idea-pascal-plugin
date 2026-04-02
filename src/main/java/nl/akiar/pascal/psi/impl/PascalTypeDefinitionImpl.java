@@ -596,6 +596,26 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
         return tObjectTypes.isEmpty() ? null : tObjectTypes.iterator().next();
     }
 
+    /**
+     * Get enum values for ENUM type kinds.
+     * Returns the ENUM_ELEMENT PSI nodes, each containing an IDENTIFIER child.
+     */
+    @NotNull
+    public List<PsiElement> getEnumValues() {
+        if (getTypeKind() != TypeKind.ENUM) return Collections.emptyList();
+        List<PsiElement> values = new ArrayList<>();
+        // ENUM_ELEMENT nodes are nested inside ENUM_TYPE, not direct children of TYPE_DEFINITION.
+        // Tree: TYPE_DEFINITION → ENUM_TYPE → ENUM_ELEMENT → IDENTIFIER
+        PsiTreeUtil.processElements(this, element -> {
+            if (element.getNode() != null &&
+                element.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.ENUM_ELEMENT) {
+                values.add(element);
+            }
+            return true; // continue processing
+        });
+        return values;
+    }
+
     @Override
     @NotNull
     public List<PsiElement> getMembers(boolean includeAncestors) {
@@ -609,6 +629,7 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
                     members.addAll(getMethods());
                     members.addAll(getProperties());
                     members.addAll(getFields());
+                    members.addAll(getEnumValues());
                     return members;
                 }
                 // Use visited set to detect circular references in inheritance
@@ -626,6 +647,7 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
         members.addAll(getMethods());
         members.addAll(getProperties());
         members.addAll(getFields());
+        members.addAll(getEnumValues());
 
         // Create a unique key for this type
         String myKey = getUnitName() + "." + getName();

@@ -260,6 +260,10 @@ public class PascalSemanticAnnotator implements Annotator {
                 } else if (resolved instanceof PascalProperty) {
                     applyHighlight(element, holder, PascalSyntaxHighlighter.METHOD_CALL);
                     return;
+                } else if (resolved.getNode() != null &&
+                           resolved.getNode().getElementType() == PascalElementTypes.ENUM_ELEMENT) {
+                    applyHighlight(element, holder, PascalSyntaxHighlighter.ENUM_ELEMENT);
+                    return;
                 }
             }
         }

@@ -261,6 +261,11 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
             return VariableKind.LOOP_VAR;
         }
 
+        // 4b. Check if inside an exception handler (on E: Exception do)
+        if (parentNode != null && parentNode.getElementType() == nl.akiar.pascal.psi.PascalElementTypes.EXCEPT_HANDLER) {
+            return VariableKind.EXCEPTION_VAR;
+        }
+
         // 5. Check containing section
         PsiElement section = parent;
         while (section != null) {

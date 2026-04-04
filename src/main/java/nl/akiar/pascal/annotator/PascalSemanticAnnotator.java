@@ -387,6 +387,7 @@ public class PascalSemanticAnnotator implements Annotator {
             case CONSTANT: return PascalSyntaxHighlighter.VAR_CONSTANT;
             case THREADVAR: return PascalSyntaxHighlighter.VAR_THREADVAR;
             case LOOP_VAR: return PascalSyntaxHighlighter.VAR_LOCAL;
+            case EXCEPTION_VAR: return PascalSyntaxHighlighter.VAR_LOCAL;
             default: return null;
         }
     }

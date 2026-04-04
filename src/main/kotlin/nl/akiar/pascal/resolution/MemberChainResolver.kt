@@ -460,7 +460,12 @@ object MemberChainResolver {
             maybeLog("[MemberTraversal] resolving first '${first.text}' at offset=${first.textOffset}", originFile)
 
             val usesInfo = nl.akiar.pascal.uses.PascalUsesClauseInfo.parse(originFile)
-            val availableUnitsAtOffset = usesInfo.getAvailableUnits(first.textOffset)
+            var availableUnitsAtOffset = usesInfo.getAvailableUnits(first.textOffset)
+            // System is implicitly available in Delphi — ensure it's in the available units list
+            // so that tryResolveUnitPrefix can match "System.Default(...)" etc.
+            if (availableUnitsAtOffset.none { it.equals("system", ignoreCase = true) }) {
+                availableUnitsAtOffset = availableUnitsAtOffset + "system"
+            }
             maybeLog("[MemberTraversal] uses at offset=${first.textOffset} size=${availableUnitsAtOffset.size} sample=${availableUnitsAtOffset.take(10)}", originFile)
 
             var startIndex = 1
@@ -600,6 +605,17 @@ object MemberChainResolver {
                 }
                 LOG.info("[GenericChain] first element resolved: '${first.text}' -> ${resolvedFirst?.javaClass?.simpleName ?: "<null>"} type=${currentType?.name ?: "<null>"} ownerName=$currentOwnerName typeArgMap=$currentTypeArgMap")
 
+                // Fallback: check if first element is a generic type parameter with a constraint
+                if (resolvedFirst == null && chain.size >= 2) {
+                    val constraintType = resolveTypeParameterConstraint(firstName, first, originFile)
+                    if (constraintType != null) {
+                        currentType = constraintType
+                        currentOwnerName = constraintType.name
+                        results[0] = constraintType
+                        maybeLog("[MemberTraversal] first resolved as type parameter '$firstName' -> constraint '${constraintType.name}'", originFile)
+                    }
+                }
+
                 // If first element has brackets [i], resolve through the indexer to get element type
                 if (chain.isNotEmpty() && hasBracketsAfter(chain[0]) && currentType != null) {
                     val indexerResult = resolveIndexerElementType(currentType, currentTypeArgMap, originFile)
@@ -612,6 +628,18 @@ object MemberChainResolver {
                             currentTypeArgMap = newMap
                         }
                     }
+                }
+            }
+
+            // If the first element's type couldn't be resolved (e.g., Result with return type "T"),
+            // check if the owner name is a generic type parameter and substitute with the constraint type.
+            // This runs after ALL first-element resolution paths (Self, Result, normal, etc.)
+            if (currentType == null && !currentOwnerName.isNullOrBlank() && chain.size >= 2) {
+                val constraintType = resolveTypeParameterConstraint(currentOwnerName!!, first, originFile)
+                if (constraintType != null) {
+                    currentType = constraintType
+                    currentOwnerName = constraintType.name
+                    maybeLog("[MemberTraversal] owner type parameter substitution: '${currentOwnerName}' -> '${constraintType.name}'", originFile)
                 }
             }
 
@@ -697,6 +725,15 @@ object MemberChainResolver {
                     getTypeOf(member, originFile, substitutedTypeName)
                 } else {
                     getTypeOf(member, originFile)
+                }
+
+                // If type lookup failed and the type name is a generic type parameter, substitute with constraint
+                if (currentType == null && substitutedTypeName != null) {
+                    val constraintType = resolveTypeParameterConstraint(substitutedTypeName, chain[i], originFile)
+                    if (constraintType != null) {
+                        currentType = constraintType
+                        maybeLog("[MemberTraversal] step[$i] type parameter substitution: '$substitutedTypeName' -> '${constraintType.name}'", originFile)
+                    }
                 }
 
                 // Rebuild the type arg map for the new current type
@@ -1847,6 +1884,171 @@ object MemberChainResolver {
         while (routine != null) {
             if (routine.returnTypeName != null) return routine
             routine = PsiTreeUtil.getParentOfType(routine, PascalRoutine::class.java)
+        }
+        return null
+    }
+
+    /**
+     * Resolve a type parameter constraint for a given parameter name within enclosing routines/types.
+     * For `function ToValidatedStruct<T: TStruct>`, resolving "T" returns the PascalTypeDefinition for TStruct.
+     * For unconstrained type parameters, falls back to TObject.
+     *
+     * @return The constraint type definition, or null if the name is not a type parameter
+     */
+    private fun resolveTypeParameterConstraint(paramName: String, element: PsiElement, originFile: PsiFile): PascalTypeDefinition? {
+        // Check enclosing routines for generic type parameters
+        var routine = PsiTreeUtil.getParentOfType(element, PascalRoutine::class.java)
+        while (routine != null) {
+            var result = findConstraintInGenericParams(paramName, routine.node, originFile, element.textOffset)
+            if (result != null) return result
+
+            // Implementation routines may not have GENERIC_PARAMETER nodes — they're in the declaration.
+            // Fall back to the declaration routine's GENERIC_PARAMETER children.
+            if (routine.isImplementation) {
+                val declaration = routine.declaration
+                if (declaration != null) {
+                    result = findConstraintInGenericParams(paramName, declaration.node, originFile, element.textOffset)
+                    if (result != null) return result
+                }
+            }
+
+            // Also check the containing class for type-level type parameters
+            val cls = routine.containingClass
+            if (cls != null) {
+                val clsResult = findConstraintInGenericParams(paramName, cls.node, originFile, element.textOffset)
+                if (clsResult != null) return clsResult
+            }
+
+            routine = PsiTreeUtil.getParentOfType(routine, PascalRoutine::class.java)
+        }
+        // Check if directly inside a type definition (not through a routine)
+        val typeDef = PsiTreeUtil.getParentOfType(element, PascalTypeDefinition::class.java)
+        if (typeDef != null) {
+            val tdResult = findConstraintInGenericParams(paramName, typeDef.node, originFile, element.textOffset)
+            if (tdResult != null) return tdResult
+        }
+        return null
+    }
+
+    /**
+     * Scan GENERIC_PARAMETER children of a node for a type parameter matching paramName,
+     * and return the resolved constraint type (or TObject if unconstrained).
+     */
+    private fun findConstraintInGenericParams(
+        paramName: String,
+        node: com.intellij.lang.ASTNode?,
+        originFile: PsiFile,
+        offset: Int
+    ): PascalTypeDefinition? {
+        if (node == null) return null
+        for (child in generateSequence(node.firstChildNode) { it.treeNext }) {
+            if (child.elementType == nl.akiar.pascal.psi.PascalElementTypes.GENERIC_PARAMETER) {
+                // GENERIC_PARAMETER structure: IDENTIFIER(T) [COLON IDENTIFIER/TYPE_REFERENCE(TStruct)]
+                var foundParam = false
+                var constraintName: String? = null
+                var pastColon = false
+                var gpChild = child.firstChildNode
+                while (gpChild != null) {
+                    if (!pastColon && gpChild.elementType == PascalTokenTypes.IDENTIFIER &&
+                        gpChild.text.equals(paramName, ignoreCase = true)) {
+                        foundParam = true
+                    }
+                    if (foundParam && gpChild.elementType == PascalTokenTypes.COLON) {
+                        pastColon = true
+                    }
+                    if (pastColon && gpChild.elementType == PascalTokenTypes.IDENTIFIER) {
+                        constraintName = gpChild.text
+                        break
+                    }
+                    if (pastColon && gpChild.elementType == nl.akiar.pascal.psi.PascalElementTypes.TYPE_REFERENCE) {
+                        constraintName = gpChild.text.trim()
+                        break
+                    }
+                    gpChild = gpChild.treeNext
+                }
+                if (foundParam && constraintName != null) {
+                    val typeResult = PascalTypeIndex.findTypeWithTransitiveDeps(constraintName, originFile, offset)
+                    return typeResult.inScopeTypes.firstOrNull()
+                }
+                if (foundParam) {
+                    // Unconstrained type parameter — falls back to TObject
+                    val typeResult = PascalTypeIndex.findTypeWithTransitiveDeps("TObject", originFile, offset)
+                    return typeResult.inScopeTypes.firstOrNull()
+                }
+            }
+            // Stop at param list or return type — generic params appear before these
+            if (child.elementType == nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER_LIST ||
+                child.elementType == nl.akiar.pascal.psi.PascalElementTypes.RETURN_TYPE ||
+                child.elementType == PascalTokenTypes.SEMI) break
+        }
+        return null
+    }
+
+    /**
+     * Check if a name is a type parameter of the enclosing routine/type.
+     * Returns the constraint type name (e.g., "TStruct") or "TObject" if unconstrained,
+     * or null if the name is not a type parameter.
+     */
+    @JvmStatic
+    fun findTypeParameterConstraintName(paramName: String, element: PsiElement): String? {
+        var routine = PsiTreeUtil.getParentOfType(element, PascalRoutine::class.java)
+        while (routine != null) {
+            var result = findConstraintNameInGenericParams(paramName, routine.node)
+            if (result != null) return result
+            // Implementation routines may not have GENERIC_PARAMETER nodes — check the declaration
+            if (routine.isImplementation) {
+                val declaration = routine.declaration
+                if (declaration != null) {
+                    result = findConstraintNameInGenericParams(paramName, declaration.node)
+                    if (result != null) return result
+                }
+            }
+            val cls = routine.containingClass
+            if (cls != null) {
+                val clsResult = findConstraintNameInGenericParams(paramName, cls.node)
+                if (clsResult != null) return clsResult
+            }
+            routine = PsiTreeUtil.getParentOfType(routine, PascalRoutine::class.java)
+        }
+        val typeDef = PsiTreeUtil.getParentOfType(element, PascalTypeDefinition::class.java)
+        if (typeDef != null) {
+            val tdResult = findConstraintNameInGenericParams(paramName, typeDef.node)
+            if (tdResult != null) return tdResult
+        }
+        return null
+    }
+
+    private fun findConstraintNameInGenericParams(paramName: String, node: com.intellij.lang.ASTNode?): String? {
+        if (node == null) return null
+        for (child in generateSequence(node.firstChildNode) { it.treeNext }) {
+            if (child.elementType == nl.akiar.pascal.psi.PascalElementTypes.GENERIC_PARAMETER) {
+                var foundParam = false
+                var constraintName: String? = null
+                var pastColon = false
+                var gpChild = child.firstChildNode
+                while (gpChild != null) {
+                    if (!pastColon && gpChild.elementType == PascalTokenTypes.IDENTIFIER &&
+                        gpChild.text.equals(paramName, ignoreCase = true)) {
+                        foundParam = true
+                    }
+                    if (foundParam && gpChild.elementType == PascalTokenTypes.COLON) {
+                        pastColon = true
+                    }
+                    if (pastColon && gpChild.elementType == PascalTokenTypes.IDENTIFIER) {
+                        constraintName = gpChild.text
+                        break
+                    }
+                    if (pastColon && gpChild.elementType == nl.akiar.pascal.psi.PascalElementTypes.TYPE_REFERENCE) {
+                        constraintName = gpChild.text.trim()
+                        break
+                    }
+                    gpChild = gpChild.treeNext
+                }
+                if (foundParam) return constraintName ?: "TObject"
+            }
+            if (child.elementType == nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER_LIST ||
+                child.elementType == nl.akiar.pascal.psi.PascalElementTypes.RETURN_TYPE ||
+                child.elementType == PascalTokenTypes.SEMI) break
         }
         return null
     }

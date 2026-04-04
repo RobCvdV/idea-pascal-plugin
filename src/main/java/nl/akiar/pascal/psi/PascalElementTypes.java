@@ -332,6 +332,11 @@ public interface PascalElementTypes {
     com.intellij.psi.tree.IElementType EXCEPT_BLOCK = new nl.akiar.pascal.PascalTokenType("EXCEPT_BLOCK");
 
     /**
+     * Element type for individual exception handler (on E: Exception do ...).
+     */
+    com.intellij.psi.tree.IElementType EXCEPT_HANDLER = new nl.akiar.pascal.PascalTokenType("EXCEPT_HANDLER");
+
+    /**
      * Element type for finally blocks.
      */
     com.intellij.psi.tree.IElementType FINALLY_BLOCK = new nl.akiar.pascal.PascalTokenType("FINALLY_BLOCK");

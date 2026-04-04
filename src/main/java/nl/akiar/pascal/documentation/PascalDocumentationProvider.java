@@ -240,6 +240,12 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
                 }
             }
 
+            // Check if this is a generic type parameter of the enclosing routine/type
+            String constraintTypeName = MemberChainResolver.findTypeParameterConstraintName(name, contextElement);
+            if (constraintTypeName != null) {
+                return contextElement; // Will generate type parameter doc in generateDoc
+            }
+
             // Fallback to index lookups
             PascalTypeIndex.TypeLookupResult typeResult =
                     PascalTypeIndex.findTypesWithUsesValidation(name, contextElement.getContainingFile(), contextElement.getTextOffset());
@@ -374,6 +380,15 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
             return generateUnitDoc(element.getText(), element);
         }
 
+        // Generic type parameter documentation
+        if (element.getNode() != null && element.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
+            String name = element.getText();
+            String constraintType = MemberChainResolver.findTypeParameterConstraintName(name, element);
+            if (constraintType != null) {
+                return generateTypeParameterDoc(name, constraintType);
+            }
+        }
+
         // Built-in or unresolved identifier
         if (element.getNode() != null && element.getNode().getElementType() == PascalTokenTypes.IDENTIFIER) {
             String name = element.getText();
@@ -503,6 +518,28 @@ public class PascalDocumentationProvider extends AbstractDocumentationProvider {
 
         appendSourceLocation(sb, enumElement);
 
+        return sb.toString();
+    }
+
+    private String generateTypeParameterDoc(String paramName, String constraintTypeName) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(DocumentationMarkup.DEFINITION_START);
+        sb.append("<b>type parameter</b> ").append(escapeHtml(paramName));
+        if (!"TObject".equals(constraintTypeName)) {
+            sb.append(": ");
+            appendTypeLink(sb, constraintTypeName);
+        }
+        sb.append(DocumentationMarkup.DEFINITION_END);
+        sb.append(DocumentationMarkup.CONTENT_START);
+        if ("TObject".equals(constraintTypeName)) {
+            sb.append("Unconstrained generic type parameter (implicitly constrained to ");
+            appendTypeLink(sb, "TObject");
+            sb.append(")");
+        } else {
+            sb.append("Generic type parameter constrained to ");
+            appendTypeLink(sb, constraintTypeName);
+        }
+        sb.append(DocumentationMarkup.CONTENT_END);
         return sb.toString();
     }
 

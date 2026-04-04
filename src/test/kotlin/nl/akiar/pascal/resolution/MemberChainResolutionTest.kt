@@ -1,6 +1,5 @@
 package nl.akiar.pascal.resolution
 
-import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import nl.akiar.pascal.PascalTokenTypes
 import nl.akiar.pascal.psi.PascalProperty
@@ -845,5 +844,234 @@ class MemberChainResolutionTest : BasePlatformTestCase() {
             "TTabledGateway",
             containingClass!!.name
         )
+    }
+
+    // ==================== Implicit System Availability Tests ====================
+
+    @Test
+    fun testSystemQualifiedDefaultResolves() {
+        // System.Default(X) should resolve even without 'uses System'
+        val mainFile = myFixture.configureByText("TestUnit.pas", """
+            unit TestUnit;
+            interface
+            type
+              TMyRecord = record
+                Value: Integer;
+              end;
+            implementation
+            procedure Test;
+            var
+              LRec: TMyRecord;
+            begin
+              LRec := System<caret>.Default(TMyRecord);
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'System' identifier", element)
+
+        val result = MemberChainResolver.resolveChain(element!!)
+        // System prefix should be resolved (matched as unit prefix)
+        assertTrue("Chain should have at least 2 elements", result.chainElements.size >= 2)
+        assertNotNull("System prefix should be resolved", result.resolvedElements[0])
+    }
+
+    // ==================== Generic Type Parameter Constraint Tests ====================
+
+    @Test
+    fun testTypeParameterWithConstraintResolvesMembers() {
+        // T.Create(...) should resolve when T: TStruct constraint is on the class type parameter
+        myFixture.configureByText("StructUnit.pas", """
+            unit StructUnit;
+            interface
+            type
+              TStruct = class
+              public
+                constructor Create(const AValue: Integer);
+                function GetValue: Integer;
+              end;
+            implementation
+            constructor TStruct.Create(const AValue: Integer);
+            begin
+            end;
+            function TStruct.GetValue: Integer;
+            begin
+              Result := 0;
+            end;
+            end.
+        """.trimIndent())
+
+        val mainFile = myFixture.configureByText("GenericUnit.pas", """
+            unit GenericUnit;
+            interface
+            uses StructUnit;
+            type
+              TValidator<T: TStruct> = class
+              public
+                class function Validate: T;
+              end;
+            implementation
+            class function TValidator<T>.Validate: T;
+            begin
+              Result := T.Create<caret>(42);
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'Create' identifier", element)
+
+        val result = MemberChainResolver.resolveChain(element!!)
+        assertTrue("Chain should have 2 elements (T.Create)", result.chainElements.size == 2)
+        // T should resolve to the constraint type TStruct
+        assertNotNull("T should be resolved (as type parameter)", result.resolvedElements[0])
+        // Create should resolve to TStruct.Create
+        assertNotNull("Create should be resolved", result.resolvedElements[1])
+        assertTrue("Create should resolve to PascalRoutine", result.resolvedElements[1] is PascalRoutine)
+    }
+
+    @Test
+    fun testResultWithTypeParameterReturnTypeResolves() {
+        // Result.Validate should resolve when the function returns T (constrained to TStruct)
+        myFixture.configureByText("StructUnit2.pas", """
+            unit StructUnit2;
+            interface
+            type
+              TStruct = class
+              public
+                constructor Create(const AValue: Integer);
+                function Validate: Boolean;
+              end;
+            implementation
+            constructor TStruct.Create(const AValue: Integer);
+            begin
+            end;
+            function TStruct.Validate: Boolean;
+            begin
+              Result := True;
+            end;
+            end.
+        """.trimIndent())
+
+        val mainFile = myFixture.configureByText("GenericUnit2.pas", """
+            unit GenericUnit2;
+            interface
+            uses StructUnit2;
+            type
+              TFactory<T: TStruct> = class
+              public
+                class function Make: T;
+              end;
+            implementation
+            class function TFactory<T>.Make: T;
+            begin
+              Result := T.Create(42);
+              Result.Validate<caret>;
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'Validate' identifier", element)
+
+        val result = MemberChainResolver.resolveChain(element!!)
+        assertTrue("Chain should have 2 elements (Result.Validate)", result.chainElements.size == 2)
+        // Result should be resolved (enclosing function)
+        assertNotNull("Result should be resolved", result.resolvedElements[0])
+        // Validate should resolve to TStruct.Validate via type parameter substitution
+        assertNotNull("Validate should be resolved (through T -> TStruct constraint)", result.resolvedElements[1])
+        assertTrue("Validate should resolve to PascalRoutine", result.resolvedElements[1] is PascalRoutine)
+    }
+
+    @Test
+    fun testTypeParameterWithoutConstraintDefaultsToTObject() {
+        // Unconstrained T should resolve members from TObject via class-level generic
+        val mainFile = myFixture.configureByText("UnconstrainedUnit.pas", """
+            unit UnconstrainedUnit;
+            interface
+            type
+              TWrapper<T> = class
+              public
+                class function GetName: string;
+              end;
+            implementation
+            class function TWrapper<T>.GetName: string;
+            begin
+              Result := T.ClassName<caret>;
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'ClassName' identifier", element)
+
+        val result = MemberChainResolver.resolveChain(element!!)
+        assertTrue("Chain should have 2 elements (T.ClassName)", result.chainElements.size == 2)
+        // T should resolve via TObject fallback
+        assertNotNull("T should be resolved (as unconstrained type parameter -> TObject)", result.resolvedElements[0])
+    }
+
+    // ==================== Exception Handler Variable Tests ====================
+
+    @Test
+    fun testExceptionHandlerVariableResolves() {
+        val mainFile = myFixture.configureByText("ExceptUnit.pas", """
+            unit ExceptUnit;
+            interface
+            type
+              EMyException = class(TObject)
+              public
+                property Message: string;
+              end;
+            implementation
+            procedure Test;
+            var S: string;
+            begin
+              try
+              except
+                on E: EMyException do
+                begin
+                  S := E<caret>.Message;
+                end;
+              end;
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'E' identifier", element)
+
+        val varDef = nl.akiar.pascal.stubs.PascalVariableIndex.findVariableAtPosition("E", mainFile, element!!.textOffset)
+        assertNotNull("E should be found via variable index", varDef)
+        assertEquals("E should have type EMyException", "EMyException", varDef?.typeName)
+    }
+
+    @Test
+    fun testExceptionHandlerVariableKind() {
+        val mainFile = myFixture.configureByText("ExceptKindUnit.pas", """
+            unit ExceptKindUnit;
+            interface
+            implementation
+            procedure Test;
+            begin
+              try
+              except
+                on E<caret>: TObject do
+                  ;
+              end;
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(mainFile)
+        assertNotNull("Should find 'E' identifier", element)
+
+        val varDef = element!!.parent
+        assertTrue("E should be a PascalVariableDefinition",
+            varDef is nl.akiar.pascal.psi.PascalVariableDefinition)
+        assertEquals("E should have EXCEPTION_VAR kind",
+            nl.akiar.pascal.psi.VariableKind.EXCEPTION_VAR,
+            (varDef as nl.akiar.pascal.psi.PascalVariableDefinition).variableKind)
     }
 }

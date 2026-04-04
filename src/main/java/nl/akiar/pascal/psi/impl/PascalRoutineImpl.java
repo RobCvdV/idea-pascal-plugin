@@ -735,6 +735,16 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
             parent = parent.getParent();
         }
 
+        // Check for CLASS_TYPE_REFERENCE child (implementation methods like TClass.Method or TClass<T>.Method)
+        for (PsiElement child = getFirstChild(); child != null; child = child.getNextSibling()) {
+            if (child.getNode().getElementType() == PascalElementTypes.CLASS_TYPE_REFERENCE) {
+                String refText = child.getText().trim();
+                // Strip generic parameters: "THelper<T>" -> "THelper"
+                int ltIdx = refText.indexOf('<');
+                return ltIdx > 0 ? refText.substring(0, ltIdx) : refText;
+            }
+        }
+
         // Fallback for implementation methods: extract from qualified name (TClass.Method pattern)
         // Use prevLeaf to handle cases where IDENTIFIER/DOT may be inside composite nodes
         PsiElement nameId = getNameIdentifier();

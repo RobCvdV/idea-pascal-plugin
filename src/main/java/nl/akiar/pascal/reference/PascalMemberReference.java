@@ -117,6 +117,19 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
                     break;
                 }
             }
+            // System is implicitly available in Delphi — try it as a unit qualifier even if not in uses
+            if (qualifierName.equalsIgnoreCase("System")) {
+                nl.akiar.pascal.project.PascalProjectService svc = nl.akiar.pascal.project.PascalProjectService.getInstance(myElement.getProject());
+                com.intellij.openapi.vfs.VirtualFile vf = svc.resolveUnit("System", true);
+                if (vf != null) {
+                    PsiFile unitPsiFile = com.intellij.psi.PsiManager.getInstance(myElement.getProject()).findFile(vf);
+                    if (unitPsiFile != null) {
+                        String unitName = nl.akiar.pascal.psi.PsiUtil.getUnitName(unitPsiFile);
+                        PsiElement unitMember = nl.akiar.pascal.resolution.MemberChainResolver.findGlobalMemberInUnit(memberName, unitName, myElement.getProject());
+                        if (unitMember != null) return unitMember;
+                    }
+                }
+            }
             LOG.debug("[MemberTraversal] qualifier unresolved for '" + myElement.getText() + "'");
             return null;
         }

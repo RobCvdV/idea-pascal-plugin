@@ -40,9 +40,18 @@ public class PascalRoutineStubElementType extends IStubElementType<PascalRoutine
             parent = parent.getParent();
         }
         if (ownerName == null) {
-            // For implementation methods like "procedure TClass.Method;", extract TClass
-            // from the qualified name. The name parts may be inside a METHOD_NAME_REFERENCE
-            // composite node, so use prevLeaf from the name identifier.
+            // Check for CLASS_TYPE_REFERENCE child (handles TClass<T>.Method)
+            for (PsiElement child = psi.getFirstChild(); child != null; child = child.getNextSibling()) {
+                if (child.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.CLASS_TYPE_REFERENCE) {
+                    String refText = child.getText().trim();
+                    int ltIdx = refText.indexOf('<');
+                    ownerName = ltIdx > 0 ? refText.substring(0, ltIdx) : refText;
+                    break;
+                }
+            }
+        }
+        if (ownerName == null) {
+            // Fallback for implementation methods: extract TClass from TClass.Method via prevLeaf
             PsiElement nameId = psi.getNameIdentifier();
             if (nameId != null) {
                 PsiElement prev = com.intellij.psi.util.PsiTreeUtil.prevLeaf(nameId);

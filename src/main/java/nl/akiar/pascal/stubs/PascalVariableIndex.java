@@ -293,7 +293,7 @@ public class PascalVariableIndex extends StringStubIndexExtension<PascalVariable
             int distance = Math.abs(offset - varOffset);
             VariableKind kind = var.getVariableKind();
 
-            if (kind == VariableKind.LOCAL || kind == VariableKind.PARAMETER || kind == VariableKind.LOOP_VAR) {
+            if (kind == VariableKind.LOCAL || kind == VariableKind.PARAMETER || kind == VariableKind.LOOP_VAR || kind == VariableKind.EXCEPTION_VAR) {
                 nl.akiar.pascal.psi.PascalRoutine varRoutine =
                         com.intellij.psi.util.PsiTreeUtil.getParentOfType(var, nl.akiar.pascal.psi.PascalRoutine.class);
                 // Check if the variable's routine is the same as or an ancestor of the containing routine.

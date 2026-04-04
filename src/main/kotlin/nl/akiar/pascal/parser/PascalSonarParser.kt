@@ -402,6 +402,7 @@ class PascalSonarParser : PsiParser {
             node is org.sonar.plugins.communitydelphi.api.ast.CaseItemStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.CASE_ITEM
             node is org.sonar.plugins.communitydelphi.api.ast.TryStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.TRY_STATEMENT
             node is org.sonar.plugins.communitydelphi.api.ast.ExceptBlockNode -> nl.akiar.pascal.psi.PascalElementTypes.EXCEPT_BLOCK
+            node is org.sonar.plugins.communitydelphi.api.ast.ExceptItemNode -> nl.akiar.pascal.psi.PascalElementTypes.EXCEPT_HANDLER
             node is org.sonar.plugins.communitydelphi.api.ast.FinallyBlockNode -> nl.akiar.pascal.psi.PascalElementTypes.FINALLY_BLOCK
             node is org.sonar.plugins.communitydelphi.api.ast.WithStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.WITH_STATEMENT
             node is org.sonar.plugins.communitydelphi.api.ast.RaiseStatementNode -> nl.akiar.pascal.psi.PascalElementTypes.RAISE_STATEMENT
@@ -484,7 +485,8 @@ class PascalSonarParser : PsiParser {
                         parentName.contains("FormalParameter", ignoreCase = true) ||
                         parentName.contains("NameDeclarationList", ignoreCase = true) ||
                         parentName.contains("VarDeclaration", ignoreCase = true) ||
-                        parentName.contains("VarStatement", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_DEFINITION
+                        parentName.contains("VarStatement", ignoreCase = true) ||
+                        parentName.contains("ExceptItem", ignoreCase = true) -> nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_DEFINITION
                     else -> {
                         diag("NameDeclarationNode: unhandled parentName=$parentName")
                         null

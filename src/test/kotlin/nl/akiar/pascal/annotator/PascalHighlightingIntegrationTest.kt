@@ -62,13 +62,9 @@ class PascalHighlightingIntegrationTest : BasePlatformTestCase() {
                 key == PascalSyntaxHighlighter.METHOD_CALL ||
                 key == PascalSyntaxHighlighter.ROUTINE_CALL)
         } else {
-            // Check if it at least has some highlighting
+            // At minimum, DoWork should have some semantic highlighting
             val anyHighlight = highlights.find { it.text == "DoWork" && it.severity == HighlightSeverity.INFORMATION }
-            if (anyHighlight != null) {
-                println("DoWork has highlighting with key: ${anyHighlight.forcedTextAttributesKey}")
-            } else {
-                println("NOTE: 'DoWork' member call does not receive semantic highlighting")
-            }
+            assertNotNull("'DoWork' member call should receive semantic highlighting", anyHighlight)
         }
     }
 
@@ -111,11 +107,7 @@ class PascalHighlightingIntegrationTest : BasePlatformTestCase() {
             info.startOffset > file.text.indexOf("Obj.Caption")
         }
 
-        if (captionHighlight != null) {
-            println("'Caption' field has highlighting with key: ${captionHighlight.forcedTextAttributesKey}")
-        } else {
-            println("NOTE: 'Caption' member field does not receive semantic highlighting at usage site")
-        }
+        assertNotNull("'Caption' member field should receive semantic highlighting at usage site", captionHighlight)
     }
 
     // ==================== Member Property Highlighting ====================
@@ -160,11 +152,7 @@ class PascalHighlightingIntegrationTest : BasePlatformTestCase() {
             info.startOffset > file.text.indexOf("Obj.Value")
         }
 
-        if (valueHighlight != null) {
-            println("'Value' property has highlighting with key: ${valueHighlight.forcedTextAttributesKey}")
-        } else {
-            println("NOTE: 'Value' member property does not receive semantic highlighting at usage site")
-        }
+        assertNotNull("'Value' member property should receive semantic highlighting at usage site", valueHighlight)
     }
 
     // ==================== Local Variable Highlighting ====================
@@ -228,11 +216,7 @@ class PascalHighlightingIntegrationTest : BasePlatformTestCase() {
             info.startOffset > file.text.indexOf("Obj: TMyClass")
         }
 
-        if (typeHighlight != null) {
-            println("'TMyClass' reference has highlighting with key: ${typeHighlight.forcedTextAttributesKey}")
-        } else {
-            println("NOTE: 'TMyClass' type reference does not receive highlighting at usage site")
-        }
+        assertNotNull("'TMyClass' type reference should receive highlighting at usage site", typeHighlight)
     }
 
     // ==================== Enum Element Highlighting at Declaration ====================

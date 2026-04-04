@@ -8,7 +8,6 @@ import nl.akiar.pascal.psi.PascalProperty;
 import nl.akiar.pascal.psi.PascalRoutine;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
 import nl.akiar.pascal.psi.PascalVariableDefinition;
-import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 

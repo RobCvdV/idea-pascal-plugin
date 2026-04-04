@@ -46,7 +46,7 @@ function Succ(X: Integer): Integer;
 function Abs(X: Integer): Integer;
 function Assigned(P: Pointer): Boolean;
 function SizeOf(X: Integer): Integer;
-function TypeInfo(T: Integer): Pointer;
+function TypeInfo(X): Pointer;
 
 implementation
 

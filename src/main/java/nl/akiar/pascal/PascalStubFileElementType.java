@@ -33,7 +33,7 @@ public class PascalStubFileElementType extends IStubFileElementType<PsiFileStub<
 
     @Override
     public int getStubVersion() {
-        // Bump to force reindex after fixing signature hash to exclude nested routine params
-        return super.getStubVersion() + 13;
+        // Bump to force reindex after adding EXCEPTION_VAR kind
+        return super.getStubVersion() + 15;
     }
 }

@@ -260,6 +260,10 @@ public class PascalSemanticAnnotator implements Annotator {
                 } else if (resolved instanceof PascalProperty) {
                     applyHighlight(element, holder, PascalSyntaxHighlighter.METHOD_CALL);
                     return;
+                } else if (resolved.getNode() != null &&
+                           resolved.getNode().getElementType() == PascalElementTypes.ENUM_ELEMENT) {
+                    applyHighlight(element, holder, PascalSyntaxHighlighter.ENUM_ELEMENT);
+                    return;
                 }
             }
         }
@@ -383,6 +387,7 @@ public class PascalSemanticAnnotator implements Annotator {
             case CONSTANT: return PascalSyntaxHighlighter.VAR_CONSTANT;
             case THREADVAR: return PascalSyntaxHighlighter.VAR_THREADVAR;
             case LOOP_VAR: return PascalSyntaxHighlighter.VAR_LOCAL;
+            case EXCEPTION_VAR: return PascalSyntaxHighlighter.VAR_LOCAL;
             default: return null;
         }
     }

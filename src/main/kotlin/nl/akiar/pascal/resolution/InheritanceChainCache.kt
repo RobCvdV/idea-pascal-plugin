@@ -31,7 +31,6 @@ object InheritanceChainCache {
     )
 
     private data class CacheKey(
-        val typePtr: SmartPsiElementPointer<PascalTypeDefinition>,
         val typeName: String,
         val unitName: String?
     )
@@ -68,9 +67,7 @@ object InheritanceChainCache {
         val project = typeDef.project
         ensureFresh(project)
 
-        val spm = SmartPointerManager.getInstance(project)
-        val typePtr = spm.createSmartPsiElementPointer(typeDef)
-        val key = CacheKey(typePtr, typeDef.name ?: "", typeDef.unitName)
+        val key = CacheKey(typeDef.name ?: "", typeDef.unitName)
 
         val cached = cache[key]
         if (cached != null) {
@@ -78,8 +75,13 @@ object InheritanceChainCache {
         }
 
         // Compute inheritance chain
+        val spm = SmartPointerManager.getInstance(project)
         val (info, ancestorPtrs) = computeInheritanceChain(typeDef, spm)
-        cache[key] = CacheValue(info, ancestorPtrs)
+        // Don't cache during dumb mode — superclass resolution relies on stub indices
+        // which return empty during indexing, producing truncated chains.
+        if (!com.intellij.openapi.project.DumbService.isDumb(project)) {
+            cache[key] = CacheValue(info, ancestorPtrs)
+        }
         return info
     }
 
@@ -95,9 +97,7 @@ object InheritanceChainCache {
         val project = typeDef.project
         ensureFresh(project)
 
-        val spm = SmartPointerManager.getInstance(project)
-        val typePtr = spm.createSmartPsiElementPointer(typeDef)
-        val key = CacheKey(typePtr, typeDef.name ?: "", typeDef.unitName)
+        val key = CacheKey(typeDef.name ?: "", typeDef.unitName)
 
         val cached = cache[key]
         if (cached != null) {
@@ -105,8 +105,11 @@ object InheritanceChainCache {
         }
 
         // Compute and cache
+        val spm = SmartPointerManager.getInstance(project)
         val (info, ancestorPtrs) = computeInheritanceChain(typeDef, spm)
-        cache[key] = CacheValue(info, ancestorPtrs)
+        if (!com.intellij.openapi.project.DumbService.isDumb(project)) {
+            cache[key] = CacheValue(info, ancestorPtrs)
+        }
         return ancestorPtrs.mapNotNull { it?.element?.takeIf { el -> el.isValid } }
     }
 
@@ -151,7 +154,7 @@ object InheritanceChainCache {
             }
 
             if (currentSuperName == null) {
-                LOG.info("[GenericChain] computeInheritanceChain: ${current.name} has no superClassName, stopping")
+                LOG.debug("[GenericChain] computeInheritanceChain: ${current.name} has no superClassName, stopping")
                 break  // No more superclasses
             }
 
@@ -170,7 +173,7 @@ object InheritanceChainCache {
                 current = superClass
             } else {
                 // Superclass couldn't be resolved - record the name but no pointer
-                LOG.info("[GenericChain] computeInheritanceChain: could not resolve superclass '$currentSuperName' for ${current.name} (unit=${current.unitName})")
+                LOG.debug("[GenericChain] computeInheritanceChain: could not resolve superclass '$currentSuperName' for ${current.name} (unit=${current.unitName})")
                 ancestorNames.add(currentSuperName)
                 ancestorPtrs.add(null)
                 break  // Can't continue chain without resolved type

@@ -35,6 +35,19 @@ type
 
   IUnknown = IInterface;
 
+{ Compiler intrinsics }
+function Default<T>: T;
+function Low<T>(X: T): T; overload;
+function High<T>(X: T): T; overload;
+function Length(S: string): Integer; overload;
+function Ord(X: Integer): Integer;
+function Pred(X: Integer): Integer;
+function Succ(X: Integer): Integer;
+function Abs(X: Integer): Integer;
+function Assigned(P: Pointer): Boolean;
+function SizeOf(X: Integer): Integer;
+function TypeInfo(X): Pointer;
+
 implementation
 
 end.

@@ -8,7 +8,6 @@ import nl.akiar.pascal.psi.PascalProperty;
 import nl.akiar.pascal.psi.PascalRoutine;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
 import nl.akiar.pascal.psi.PascalVariableDefinition;
-import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -117,6 +116,19 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
                     break;
                 }
             }
+            // System is implicitly available in Delphi — try it as a unit qualifier even if not in uses
+            if (qualifierName.equalsIgnoreCase("System")) {
+                nl.akiar.pascal.project.PascalProjectService svc = nl.akiar.pascal.project.PascalProjectService.getInstance(myElement.getProject());
+                com.intellij.openapi.vfs.VirtualFile vf = svc.resolveUnit("System", true);
+                if (vf != null) {
+                    PsiFile unitPsiFile = com.intellij.psi.PsiManager.getInstance(myElement.getProject()).findFile(vf);
+                    if (unitPsiFile != null) {
+                        String unitName = nl.akiar.pascal.psi.PsiUtil.getUnitName(unitPsiFile);
+                        PsiElement unitMember = nl.akiar.pascal.resolution.MemberChainResolver.findGlobalMemberInUnit(memberName, unitName, myElement.getProject());
+                        if (unitMember != null) return unitMember;
+                    }
+                }
+            }
             LOG.debug("[MemberTraversal] qualifier unresolved for '" + myElement.getText() + "'");
             return null;
         }
@@ -179,17 +191,35 @@ public class PascalMemberReference extends PsiReferenceBase<PsiElement> {
     private PsiElement findMemberInType(PascalTypeDefinition typeDef, String name, boolean includeAncestors) {
         List<PsiElement> members = typeDef.getMembers(includeAncestors);
         for (PsiElement member : members) {
+            String memberName = null;
             if (member instanceof PsiNameIdentifierOwner) {
-                String memberName = ((PsiNameIdentifierOwner) member).getName();
-                if (name.equalsIgnoreCase(memberName)) {
-                    // Check visibility
-                    if (isAccessible(member)) {
-                        return member;
-                    }
+                memberName = ((PsiNameIdentifierOwner) member).getName();
+            } else if (member.getNode() != null &&
+                       member.getNode().getElementType() == nl.akiar.pascal.psi.PascalElementTypes.ENUM_ELEMENT) {
+                memberName = getEnumElementName(member);
+            }
+            if (memberName != null && name.equalsIgnoreCase(memberName)) {
+                if (isAccessible(member)) {
+                    return member;
                 }
             }
         }
         return null;
+    }
+
+    @Nullable
+    private String getEnumElementName(PsiElement enumElement) {
+        // ENUM_ELEMENT nodes may be leaf nodes with no children; use getText() directly
+        for (PsiElement child : enumElement.getChildren()) {
+            if (child.getNode() != null &&
+                child.getNode().getElementType() == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                return child.getText();
+            }
+        }
+        // Strip ordinal assignment: "askForMileageMode_Always = 2" → "askForMileageMode_Always"
+        String text = enumElement.getText();
+        int eqIdx = text.indexOf('=');
+        return eqIdx > 0 ? text.substring(0, eqIdx).trim() : text.trim();
     }
 
     private boolean isAccessible(PsiElement member) {

@@ -25,6 +25,9 @@ public enum VariableKind {
     /** Loop variable (for-loop counter) */
     LOOP_VAR,
 
+    /** Exception handler variable (on E: Exception do) */
+    EXCEPTION_VAR,
+
     /** Unknown/unclassified */
     UNKNOWN
 }

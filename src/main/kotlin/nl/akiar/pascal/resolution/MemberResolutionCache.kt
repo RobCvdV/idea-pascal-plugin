@@ -18,7 +18,6 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object MemberResolutionCache {
     private data class TypeOfKey(
-        val elementPtr: SmartPsiElementPointer<PsiElement>,
         val originPath: String?,
         val typeName: String,
         val offset: Int,
@@ -30,7 +29,6 @@ object MemberResolutionCache {
 
     // Cache for member lists (fields, properties, methods) of a type
     private data class MemberListKey(
-        val typePtr: SmartPsiElementPointer<PascalTypeDefinition>,
         val typeName: String,
         val unitName: String?,
         val includeAncestors: Boolean
@@ -66,12 +64,11 @@ object MemberResolutionCache {
 
     fun getOrComputeTypeOf(element: PsiElement?, originFile: PsiFile, contextFile: PsiFile, compute: () -> PascalTypeDefinition?): PascalTypeDefinition? {
         if (element == null) return null
-        val tn = typeNameOf(element) ?: return null
+        // If element has no explicit type name (e.g. inferred-type variable), bypass cache and compute directly.
+        // The compute lambda handles inference via inferTypeFromInitializer().
+        val tn = typeNameOf(element) ?: return compute()
         ensureFresh(originFile.project)
-        val spm = SmartPointerManager.getInstance(originFile.project)
-        val ePtr = spm.createSmartPsiElementPointer(element)
         val key = TypeOfKey(
-            elementPtr = ePtr,
             originPath = originFile.virtualFile?.path, // use origin (call-site) path for cache scoping
             typeName = tn,
             offset = element.textOffset
@@ -82,8 +79,12 @@ object MemberResolutionCache {
             if (cachedEl != null && cachedEl.isValid) return cachedEl
         }
         val computed = compute()
-        val valPtr = computed?.let { spm.createSmartPsiElementPointer(it) }
-        typeOfCache[key] = TypeOfVal(valPtr)
+        // Don't cache null results during dumb mode — stub indices return empty
+        // during indexing, and caching that null would persist after smart mode resumes.
+        if (computed != null || !com.intellij.openapi.project.DumbService.isDumb(originFile.project)) {
+            val valPtr = computed?.let { SmartPointerManager.getInstance(originFile.project).createSmartPsiElementPointer(it) }
+            typeOfCache[key] = TypeOfVal(valPtr)
+        }
         return computed
     }
 
@@ -102,10 +103,7 @@ object MemberResolutionCache {
     ): List<PsiElement> {
         val project = typeDef.project
         ensureFresh(project)
-        val spm = SmartPointerManager.getInstance(project)
-        val typePtr = spm.createSmartPsiElementPointer(typeDef)
         val key = MemberListKey(
-            typePtr = typePtr,
             typeName = typeDef.name ?: "",
             unitName = typeDef.unitName,
             includeAncestors = includeAncestors
@@ -124,8 +122,13 @@ object MemberResolutionCache {
         }
 
         val computed = compute()
-        val ptrs = computed.map { spm.createSmartPsiElementPointer(it) }
-        memberListCache[key] = MemberListValue(ptrs)
+        // Don't cache empty member lists during dumb mode — ancestor resolution may
+        // fail because stub indices return empty during indexing.
+        if (computed.isNotEmpty() || !com.intellij.openapi.project.DumbService.isDumb(project)) {
+            val spm = SmartPointerManager.getInstance(project)
+            val ptrs = computed.map { spm.createSmartPsiElementPointer(it) }
+            memberListCache[key] = MemberListValue(ptrs)
+        }
         return computed
     }
 

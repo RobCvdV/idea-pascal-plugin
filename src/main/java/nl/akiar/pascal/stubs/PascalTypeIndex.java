@@ -13,6 +13,7 @@ import nl.akiar.pascal.dpr.DprProjectService;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
 import nl.akiar.pascal.resolution.TransitiveDependencyResolver;
 import nl.akiar.pascal.settings.PascalSourcePathsSettings;
+import nl.akiar.pascal.uses.PascalUsesClauseInfo;
 import nl.akiar.pascal.uses.PascalUsesClauseUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -118,6 +119,20 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
             }
         }
 
+        // Sort in-scope types by Delphi "last wins" priority:
+        // same-file types first, then by uses clause position descending (last in uses = highest priority)
+        if (inScope.size() > 1) {
+            PascalUsesClauseInfo parsedInfo = PascalUsesClauseInfo.Companion.parse(fromFile);
+            inScope.sort((a, b) -> {
+                boolean aLocal = fromFile.equals(a.getContainingFile());
+                boolean bLocal = fromFile.equals(b.getContainingFile());
+                if (aLocal != bLocal) return aLocal ? -1 : 1;
+                int priorityA = parsedInfo.getUnitPriority(a.getUnitName(), offset, scopes);
+                int priorityB = parsedInfo.getUnitPriority(b.getUnitName(), offset, scopes);
+                return Integer.compare(priorityB, priorityA);
+            });
+        }
+
         return new TypeLookupResult(inScope, outOfScope, viaScopeNames, usesInfo, offset, scopes);
     }
 
@@ -196,6 +211,20 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
             }
         }
 
+        // Sort in-scope types by Delphi "last wins" priority:
+        // same-file first, then direct uses (by position descending), then transitive/implicit
+        if (inScope.size() > 1) {
+            PascalUsesClauseInfo parsedInfo = PascalUsesClauseInfo.Companion.parse(originFile);
+            inScope.sort((a, b) -> {
+                boolean aLocal = originFile.equals(a.getContainingFile());
+                boolean bLocal = originFile.equals(b.getContainingFile());
+                if (aLocal != bLocal) return aLocal ? -1 : 1;
+                int priorityA = parsedInfo.getUnitPriority(a.getUnitName(), offset, scopes);
+                int priorityB = parsedInfo.getUnitPriority(b.getUnitName(), offset, scopes);
+                return Integer.compare(priorityB, priorityA);
+            });
+        }
+
         return new TypeLookupResult(inScope, outOfScope, viaScopeNames, usesInfo, offset, scopes);
     }
 
@@ -267,13 +296,8 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
                 inScopeUnits.add(type.getUnitName());
             }
 
-            if (inScopeUnits.size() <= 1 && inScopeTypes.size() >= 1) {
-                return null; // Unique or unique across units
-            }
-
-            if (inScopeUnits.size() > 1) {
-                // Ambiguous reference
-                return "Ambiguous reference. Found in multiple units: " + String.join(", ", inScopeUnits);
+            if (!inScopeTypes.isEmpty()) {
+                return null; // In scope — "last wins" semantics handles disambiguation
             }
 
             if (outOfScopeTypes.isEmpty()) {

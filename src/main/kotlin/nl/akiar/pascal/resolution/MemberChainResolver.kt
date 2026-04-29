@@ -241,6 +241,49 @@ object MemberChainResolver {
         if (name.startsWith("&") && name.length > 1) name.substring(1) else name
 
     /**
+     * PSI tree-walking fallback for finding variables/parameters.
+     * Walks up from the element to find the enclosing routine(s), then searches
+     * their formal parameters and local variable declarations by name.
+     * This doesn't depend on stub indices, so it works even when stubs are stale.
+     */
+    private fun findVariableByPsiWalk(element: PsiElement, name: String): PascalVariableDefinition? {
+        var parent = element.parent
+        while (parent != null && parent !is com.intellij.psi.PsiFile) {
+            if (parent is PascalRoutine) {
+                // Search formal parameters
+                val params = nl.akiar.pascal.psi.PsiUtil.findAllRecursive(
+                    parent.node, nl.akiar.pascal.psi.PascalElementTypes.FORMAL_PARAMETER
+                )
+                for (paramNode in params) {
+                    val varDefs = nl.akiar.pascal.psi.PsiUtil.findAllRecursive(
+                        paramNode, nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_DEFINITION
+                    )
+                    for (varNode in varDefs) {
+                        val varDef = varNode.psi as? PascalVariableDefinition ?: continue
+                        if (varDef.name.equals(name, ignoreCase = true)) return varDef
+                    }
+                }
+                // Search local variables in routine body
+                val body = nl.akiar.pascal.psi.PsiUtil.findFirstRecursive(
+                    parent.node, nl.akiar.pascal.psi.PascalElementTypes.ROUTINE_BODY
+                )
+                if (body != null) {
+                    val localVars = nl.akiar.pascal.psi.PsiUtil.findAllRecursive(
+                        body, nl.akiar.pascal.psi.PascalElementTypes.VARIABLE_DEFINITION
+                    )
+                    for (varNode in localVars) {
+                        val varDef = varNode.psi as? PascalVariableDefinition ?: continue
+                        if (varDef.name.equals(name, ignoreCase = true)) return varDef
+                    }
+                }
+            }
+            parent = parent.parent
+        }
+        return null
+    }
+
+
+    /**
      * Collect all identifiers in a member access chain.
      * For "a.b.c", returns [a, b, c]
      */
@@ -558,15 +601,24 @@ object MemberChainResolver {
                     maybeLog("[MemberTraversal] first resolved as variable '${firstName}' (scope-aware)", originFile)
                     resolvedVar
                 } else {
-                    val typeResult = nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(firstName, originFile, first.textOffset)
-                    typeResult.inScopeTypes.firstOrNull()?.also { maybeLog("[MemberTraversal] first resolved as type '${firstName}' -> ${it.name}", originFile) }
-                        ?: run {
-                            // Try routine index (function as first element in chain, e.g. CoStatus.HandleStatus)
-                            val routineResult = PascalRoutineIndex.findRoutinesWithUsesValidation(firstName, originFile, first.textOffset)
-                            routineResult.inScopeRoutines.firstOrNull()?.also {
-                                maybeLog("[MemberTraversal] first resolved as routine '${first.text}' -> returnType=${it.returnTypeName}", originFile)
+                    // PSI tree fallback: walk up to find matching formal parameter or local var
+                    // in the enclosing routine. This handles cases where the stub index misses
+                    // parameters (e.g., during incremental re-indexing or for implementation methods).
+                    val psiWalkVar = findVariableByPsiWalk(first, firstName)
+                    if (psiWalkVar != null) {
+                        maybeLog("[MemberTraversal] first resolved as variable '${firstName}' (PSI walk fallback)", originFile)
+                        psiWalkVar
+                    } else {
+                        val typeResult = nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(firstName, originFile, first.textOffset)
+                        typeResult.inScopeTypes.firstOrNull()?.also { maybeLog("[MemberTraversal] first resolved as type '${firstName}' -> ${it.name}", originFile) }
+                            ?: run {
+                                // Try routine index (function as first element in chain, e.g. CoStatus.HandleStatus)
+                                val routineResult = PascalRoutineIndex.findRoutinesWithUsesValidation(firstName, originFile, first.textOffset)
+                                routineResult.inScopeRoutines.firstOrNull()?.also {
+                                    maybeLog("[MemberTraversal] first resolved as routine '${first.text}' -> returnType=${it.returnTypeName}", originFile)
+                                }
                             }
-                        }
+                    }
                 }
                 results[0] = resolvedFirst
 

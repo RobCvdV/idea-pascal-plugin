@@ -67,12 +67,12 @@ object TransitiveDependencyResolver {
      * Get all transitively available units for a file.
      *
      * @param file The PsiFile to analyze
-     * @param maxDepth Maximum recursion depth (default 10, to prevent excessive crawling)
+     * @param maxDepth Maximum recursion depth (default 20, to prevent excessive crawling)
      * @return TransitiveDependencyResult containing all available units
      */
     @JvmStatic
     @JvmOverloads
-    fun getTransitiveDependencies(file: PsiFile, maxDepth: Int = 10): TransitiveDependencyResult {
+    fun getTransitiveDependencies(file: PsiFile, maxDepth: Int = 20): TransitiveDependencyResult {
         return CachedValuesManager.getManager(file.project).getCachedValue(file, CACHE_KEY, {
             val result = computeTransitiveDependencies(file, maxDepth)
             // Invalidate when PSI tree changes or project structure changes

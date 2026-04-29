@@ -128,16 +128,17 @@
         <annotator language="ObjectPascal"
                    implementationClass="nl.akiar.pascal.annotator.PascalSemanticAnnotator"/>
 
-        <!-- Pascal Scope Annotator for uses clause error highlighting (Kotlin)
-             Temporarily disabled - produces too many false errors due to:
-             - Missing member access context awareness (object.member)
-             - Missing class member scope (own fields/methods)
-             - Missing local variable scope in routines
-             - Missing inheritance chain resolution
-             Re-enable once resolution system is more robust.
+        <!-- Pascal Scope Annotator for uses clause error highlighting -->
         <annotator language="ObjectPascal"
                    implementationClass="nl.akiar.pascal.annotator.PascalScopeAnnotator"/>
-        -->
+
+        <!-- Pascal Unresolved Member Annotator for member chain errors -->
+        <annotator language="ObjectPascal"
+                   implementationClass="nl.akiar.pascal.annotator.PascalUnresolvedMemberAnnotator"/>
+
+        <!-- Pascal Syntax Error Annotator for structural problems -->
+        <annotator language="ObjectPascal"
+                   implementationClass="nl.akiar.pascal.annotator.PascalSyntaxErrorAnnotator"/>
 
         <!-- Pascal Documentation Provider for hover documentation -->
         <lang.documentationProvider language="ObjectPascal"

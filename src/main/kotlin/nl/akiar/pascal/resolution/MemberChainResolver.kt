@@ -282,6 +282,7 @@ object MemberChainResolver {
         return null
     }
 
+
     /**
      * Collect all identifiers in a member access chain.
      * For "a.b.c", returns [a, b, c]

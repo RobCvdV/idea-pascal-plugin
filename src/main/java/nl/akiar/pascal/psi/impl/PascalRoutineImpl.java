@@ -203,7 +203,12 @@ public class PascalRoutineImpl extends StubBasedPsiElementBase<PascalRoutineStub
 
     @Override
     public PsiElement setName(@NotNull String name) throws IncorrectOperationException {
-        throw new IncorrectOperationException("Renaming not supported yet");
+        PsiElement nameIdentifier = getNameIdentifier();
+        if (nameIdentifier == null) {
+            throw new IncorrectOperationException("Cannot find name identifier for routine");
+        }
+        nl.akiar.pascal.psi.PascalPsiFactory.INSTANCE.replaceIdentifier(nameIdentifier, name);
+        return this;
     }
 
     @Override

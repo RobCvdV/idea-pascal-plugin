@@ -50,6 +50,11 @@ public class PascalTypeReference extends PsiReferenceBase<PsiElement> implements
         return null;
     }
 
+    @Override
+    public PsiElement handleElementRename(@NotNull String newElementName) {
+        return nl.akiar.pascal.psi.PascalPsiFactory.INSTANCE.replaceIdentifier(myElement, newElementName);
+    }
+
     @NotNull
     @Override
     public Object[] getVariants() {

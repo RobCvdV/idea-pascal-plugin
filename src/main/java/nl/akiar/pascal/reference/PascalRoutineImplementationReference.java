@@ -29,6 +29,11 @@ public class PascalRoutineImplementationReference extends PsiReferenceBase<PsiEl
         return counterpart;
     }
 
+    @Override
+    public PsiElement handleElementRename(@NotNull String newElementName) {
+        return nl.akiar.pascal.psi.PascalPsiFactory.INSTANCE.replaceIdentifier(myElement, newElementName);
+    }
+
     @NotNull
     @Override
     public Object[] getVariants() {

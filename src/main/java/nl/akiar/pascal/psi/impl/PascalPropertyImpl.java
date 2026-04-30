@@ -87,7 +87,12 @@ public class PascalPropertyImpl extends StubBasedPsiElementBase<PascalPropertySt
 
     @Override
     public PsiElement setName(@NotNull String name) throws IncorrectOperationException {
-        throw new IncorrectOperationException("Renaming not supported yet");
+        PsiElement nameIdentifier = getNameIdentifier();
+        if (nameIdentifier == null) {
+            throw new IncorrectOperationException("Cannot find name identifier for property");
+        }
+        nl.akiar.pascal.psi.PascalPsiFactory.INSTANCE.replaceIdentifier(nameIdentifier, name);
+        return this;
     }
 
     @Override

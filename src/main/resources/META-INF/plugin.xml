@@ -90,6 +90,12 @@
         <lang.psiStructureViewFactory language="ObjectPascal"
                                       implementationClass="nl.akiar.pascal.structure.PascalStructureViewFactory"/>
 
+        <lang.findUsagesProvider language="ObjectPascal"
+                                 implementationClass="nl.akiar.pascal.reference.PascalFindUsagesProvider"/>
+
+        <renamePsiElementProcessor
+                implementation="nl.akiar.pascal.refactoring.PascalRenamePsiElementProcessor"/>
+
         <!-- Pascal Color Settings Page -->
         <colorSettingsPage implementation="nl.akiar.pascal.PascalColorSettingsPage"/>
 

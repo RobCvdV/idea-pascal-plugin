@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>nl.akiar.pascal</id>
     <name>Delphi Pascal</name>
-    <version>0.0.4</version>
+    <version>0.0.6</version>
     <vendor>Akiar</vendor>
 
     <description><![CDATA[
@@ -86,6 +86,9 @@
         <!-- Register Pascal Commenter (line and block comments) -->
         <lang.commenter language="ObjectPascal"
                         implementationClass="nl.akiar.pascal.PascalCommenter"/>
+
+        <lang.psiStructureViewFactory language="ObjectPascal"
+                                      implementationClass="nl.akiar.pascal.structure.PascalStructureViewFactory"/>
 
         <!-- Pascal Color Settings Page -->
         <colorSettingsPage implementation="nl.akiar.pascal.PascalColorSettingsPage"/>

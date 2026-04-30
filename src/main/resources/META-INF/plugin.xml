@@ -175,6 +175,16 @@
         <postStartupActivity implementation="nl.akiar.pascal.startup.PascalSmartModeRefresher"/>
     </extensions>
 
+    <actions>
+        <action id="Pascal.GoToImplementation"
+                class="nl.akiar.pascal.structure.GoToImplementationAction"
+                text="Go to Implementation"
+                description="Navigate to the implementation of this routine">
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift I"/>
+            <add-to-group group-id="StructureViewPopupMenu" anchor="first"/>
+        </action>
+    </actions>
+
     <projectListeners>
         <listener class="nl.akiar.pascal.project.PascalFileEditorListener"
                   topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>

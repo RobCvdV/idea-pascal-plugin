@@ -31,10 +31,13 @@ class PascalReferencesSearcher : QueryExecutorBase<PsiReference, ReferencesSearc
 
         val name = ReadAction.compute<String?, Throwable> { target.name } ?: return
         val project = ReadAction.compute<com.intellij.openapi.project.Project, Throwable> { target.project }
-        val scope = queryParameters.effectiveSearchScope
 
-        val searchScope = if (scope is GlobalSearchScope) scope
-            else GlobalSearchScope.allScope(project)
+        // Always search all indexed files — Pascal source paths are often outside
+        // IntelliJ content roots (monorepo with configured source paths), so the
+        // default effectiveSearchScope (based on getUseScope) is too narrow.
+        // This only affects Find Usages and Rename; resolution/completion/navigation
+        // use their own scoping via uses-clause validation.
+        val searchScope = GlobalSearchScope.allScope(project)
 
         // Pascal is case-insensitive — search for the word case-insensitively
         PsiSearchHelper.getInstance(project).processElementsWithWord(

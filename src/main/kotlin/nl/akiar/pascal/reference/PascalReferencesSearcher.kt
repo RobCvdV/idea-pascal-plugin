@@ -3,6 +3,7 @@ package nl.akiar.pascal.reference
 import com.intellij.openapi.application.QueryExecutorBase
 import com.intellij.openapi.application.ReadAction
 import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiNamedElement
 import com.intellij.psi.PsiReference
 import com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry
@@ -35,33 +36,48 @@ class PascalReferencesSearcher : QueryExecutorBase<PsiReference, ReferencesSearc
         val searchScope = if (scope is GlobalSearchScope) scope
             else GlobalSearchScope.allScope(project)
 
+        // Pascal is case-insensitive — search for the word case-insensitively
         PsiSearchHelper.getInstance(project).processElementsWithWord(
             { element, offsetInElement ->
                 ReadAction.compute<Boolean, Throwable> {
                     if (!element.isValid) return@compute true
-
-                    // Get the leaf element at this offset
-                    val leaf = element.containingFile?.findElementAt(element.textOffset + offsetInElement)
-                        ?: return@compute true
-
-                    // Check contributor references on the leaf and its parents
-                    var current: PsiElement? = leaf
-                    while (current != null && current !is com.intellij.psi.PsiFile) {
-                        val refs = ReferenceProvidersRegistry.getReferencesFromProviders(current)
-                        for (ref in refs) {
-                            if (ref.isReferenceTo(target)) {
-                                if (!consumer.process(ref)) return@compute false
-                            }
-                        }
-                        current = current.parent
-                    }
-                    true
+                    processElement(element, offsetInElement, target, consumer)
                 }
             },
             searchScope,
             name,
             UsageSearchContext.IN_CODE.toShort(),
-            true // case sensitive
+            false // case INSENSITIVE for Pascal
         )
+    }
+
+    private fun processElement(
+        element: PsiElement,
+        offsetInElement: Int,
+        target: PsiElement,
+        consumer: Processor<in PsiReference>
+    ): Boolean {
+        // Find the leaf token at the word occurrence
+        val file = element.containingFile ?: return true
+        val absoluteOffset = element.textOffset + offsetInElement
+        val leaf = file.findElementAt(absoluteOffset) ?: return true
+
+        // Only process IDENTIFIER tokens
+        val leafType = leaf.node?.elementType
+        if (leafType != PascalTokenTypes.IDENTIFIER) return true
+
+        // Check contributor references on the leaf element
+        val refs = ReferenceProvidersRegistry.getReferencesFromProviders(leaf)
+        for (ref in refs) {
+            try {
+                if (ref.isReferenceTo(target)) {
+                    if (!consumer.process(ref)) return false
+                }
+            } catch (_: Exception) {
+                // Skip references that fail to resolve
+            }
+        }
+
+        return true
     }
 }

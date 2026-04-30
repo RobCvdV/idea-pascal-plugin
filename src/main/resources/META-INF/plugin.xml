@@ -98,6 +98,8 @@
 
         <renameHandler implementation="nl.akiar.pascal.refactoring.PascalRenameHandler" order="first"/>
 
+        <referencesSearch implementation="nl.akiar.pascal.reference.PascalReferencesSearcher"/>
+
         <!-- Pascal Color Settings Page -->
         <colorSettingsPage implementation="nl.akiar.pascal.PascalColorSettingsPage"/>
 

@@ -211,7 +211,10 @@ object MemberChainResolver {
                 val chainText = chain.joinToString(".") { it.text }
                 val key = ChainKey(filePath, chain.first().textOffset, chainText)
                 clearExpiredMemo()
-                chainMemo[key]?.let { return it }
+                chainMemo[key]?.let {
+                    if (it.isValid) return it
+                    chainMemo.remove(key)
+                }
 
                 maybeLog("[MemberTraversal] resolveChain start element='${element.text}' file='${element.containingFile.name}'", element.containingFile)
                 maybeLog("[MemberTraversal] collected chain size=${chain.size} parts=${chain.map { it.text }}", element.containingFile)

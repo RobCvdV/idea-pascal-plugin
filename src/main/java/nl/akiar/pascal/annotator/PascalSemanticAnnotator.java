@@ -232,7 +232,21 @@ public class PascalSemanticAnnotator implements Annotator {
             } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
                 throw e; // NEVER swallow cancellation
             } catch (com.intellij.openapi.project.IndexNotReadyException e) {
-                return; // During indexing, skip — will re-annotate when ready
+                // Stub access can throw transiently even outside dumb mode (during
+                // write actions, VFS refresh, reparse). Returning here would leave
+                // the token uncolored until the next edit. Instead: schedule a
+                // re-annotation once indices are ready, then fall through to the
+                // heuristic fallback below so we still apply *some* color.
+                com.intellij.openapi.project.DumbService.getInstance(element.getProject())
+                    .smartInvokeLater(() -> {
+                        PsiFile file = element.getContainingFile();
+                        if (file != null && file.isValid()) {
+                            com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
+                                .getInstance(element.getProject())
+                                .restart(file);
+                        }
+                    });
+                break;
             } catch (Exception e) {
                 com.intellij.openapi.diagnostic.Logger.getInstance(PascalSemanticAnnotator.class)
                     .debug("Resolution failed for '" + element.getText() + "': " + e.getMessage());

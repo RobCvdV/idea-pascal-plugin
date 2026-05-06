@@ -1,19 +1,22 @@
 package nl.akiar.pascal.reference
 
 import com.intellij.openapi.application.QueryExecutorBase
-import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.psi.*
 import com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.search.LocalSearchScope
 import com.intellij.psi.search.PsiSearchHelper
 import com.intellij.psi.search.UsageSearchContext
 import com.intellij.psi.search.searches.ReferencesSearch
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.util.Processor
 import nl.akiar.pascal.PascalTokenTypes
-import nl.akiar.pascal.psi.PascalElementTypes
+import nl.akiar.pascal.psi.PascalProperty
 import nl.akiar.pascal.psi.PascalRoutine
 import nl.akiar.pascal.psi.PascalVariableDefinition
+import nl.akiar.pascal.psi.PsiUtil
 import nl.akiar.pascal.psi.VariableKind
 
 /**
@@ -35,23 +38,22 @@ class PascalReferencesSearcher : QueryExecutorBase<PsiReference, ReferencesSearc
         val target = queryParameters.elementToSearch
         if (target !is PsiNamedElement) return
 
-        val name = ReadAction.compute<String?, Throwable> { target.name } ?: return
-        val project = ReadAction.compute<com.intellij.openapi.project.Project, Throwable> { target.project }
-        val isClassMember = ReadAction.compute<Boolean, Throwable> {
-            target is PascalRoutine && (target as PascalRoutine).isMethod ||
-                target is PascalVariableDefinition && (target as PascalVariableDefinition).variableKind == VariableKind.FIELD
-        }
+        val name = target.name ?: return
+        val project = target.project
+        val isClassMember = target is PascalRoutine && target.isMethod ||
+            target is PascalVariableDefinition && target.variableKind == VariableKind.FIELD ||
+            target is PascalProperty
 
-        // Always search all indexed files — Pascal source paths are often outside
-        // IntelliJ content roots (monorepo with configured source paths).
-        val searchScope = GlobalSearchScope.allScope(project)
+        // Pascal source paths are often outside IntelliJ content roots (monorepo with configured
+        // source paths), so we widen to allScope by default. But if the user restricted the search
+        // (e.g., "Current File"), respect that — never widen a LocalSearchScope.
+        val userScope = queryParameters.effectiveSearchScope
+        val searchScope = if (userScope is LocalSearchScope) userScope else GlobalSearchScope.allScope(project)
 
         PsiSearchHelper.getInstance(project).processElementsWithWord(
             { element, offsetInElement ->
-                ReadAction.compute<Boolean, Throwable> {
-                    if (!element.isValid) return@compute true
-                    processElement(element, offsetInElement, target, isClassMember, consumer)
-                }
+                if (!element.isValid) return@processElementsWithWord true
+                processElement(element, offsetInElement, target, isClassMember, consumer)
             },
             searchScope,
             name,
@@ -68,16 +70,20 @@ class PascalReferencesSearcher : QueryExecutorBase<PsiReference, ReferencesSearc
         consumer: Processor<in PsiReference>
     ): Boolean {
         val file = element.containingFile ?: return true
-        val absoluteOffset = element.textOffset + offsetInElement
+        // processElementsWithWord passes offsetInElement relative to the element's start,
+        // which is element.textRange.startOffset (not textOffset, which is the navigation offset).
+        val absoluteOffset = element.textRange.startOffset + offsetInElement
         val leaf = file.findElementAt(absoluteOffset) ?: return true
 
-        // Only process IDENTIFIER tokens
-        if (leaf.node?.elementType != PascalTokenTypes.IDENTIFIER) return true
+        // Only process identifier-like tokens (includes soft keywords like Name, Read, Write, Index
+        // that Pascal allows as routine/field/property names — see PsiUtil.IDENTIFIER_LIKE_TYPES).
+        val leafType = leaf.node?.elementType ?: return true
+        if (PsiUtil.IDENTIFIER_LIKE_TYPES.none { it == leafType }) return true
 
         // Pre-filter for class members: skip bare identifiers that can't be
-        // references to the target method/field. Only check:
+        // references to the target method/field/property. Only check:
         // 1. Member access (preceded by DOT): obj.Create, Self.Create
-        // 2. Implicit self within the same class (no DOT, but inside the class body)
+        // 2. Implicit self within the same class (no DOT, but inside any method body)
         // 3. Inherited calls: inherited Create
         if (isClassMember && !isMemberAccessContext(leaf)) {
             return true
@@ -90,8 +96,10 @@ class PascalReferencesSearcher : QueryExecutorBase<PsiReference, ReferencesSearc
                 if (ref.isReferenceTo(target)) {
                     if (!consumer.process(ref)) return false
                 }
-            } catch (_: Exception) {
-                // Skip references that fail to resolve
+            } catch (e: ProcessCanceledException) {
+                throw e
+            } catch (e: Exception) {
+                LOG.debug("isReferenceTo failed for '${leaf.text}'", e)
             }
         }
 
@@ -121,5 +129,9 @@ class PascalReferencesSearcher : QueryExecutorBase<PsiReference, ReferencesSearc
         if (routine != null && routine.isMethod) return true
 
         return false
+    }
+
+    companion object {
+        private val LOG = Logger.getInstance(PascalReferencesSearcher::class.java)
     }
 }

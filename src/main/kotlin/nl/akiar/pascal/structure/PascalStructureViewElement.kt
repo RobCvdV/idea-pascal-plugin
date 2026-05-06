@@ -98,6 +98,18 @@ class PascalStructureViewElement(private val element: PsiElement) :
     }
 }
 
+private fun enumElementName(element: PsiElement): String {
+    // ENUM_ELEMENT may be a leaf token (no IDENTIFIER child); strip "= N" ordinal suffix in that case.
+    for (child in element.children) {
+        if (child.node?.elementType == PascalTokenTypes.IDENTIFIER) {
+            return child.text
+        }
+    }
+    val raw = element.text ?: return ""
+    val eq = raw.indexOf('=')
+    return if (eq > 0) raw.substring(0, eq).trim() else raw.trim()
+}
+
 private class PascalItemPresentation(private val element: PsiElement) : ItemPresentation {
 
     override fun getPresentableText(): String? {
@@ -119,18 +131,11 @@ private class PascalItemPresentation(private val element: PsiElement) : ItemPres
             is PascalProperty -> element.name
             is PascalVariableDefinition -> element.name
             else -> {
-                // Enum elements — find the IDENTIFIER child
-                val node = element.node
-                if (node?.elementType == PascalElementTypes.ENUM_ELEMENT) {
-                    var child = node.firstChildNode
-                    while (child != null) {
-                        if (child.elementType == PascalTokenTypes.IDENTIFIER) {
-                            return child.text
-                        }
-                        child = child.treeNext
-                    }
+                if (element.node?.elementType == PascalElementTypes.ENUM_ELEMENT) {
+                    enumElementName(element)
+                } else {
+                    element.text?.take(50)
                 }
-                element.text?.take(50)
             }
         }
     }
@@ -139,14 +144,7 @@ private class PascalItemPresentation(private val element: PsiElement) : ItemPres
         return when (element) {
             is PascalRoutine -> buildRoutineSignature(element)
             is PascalProperty -> element.typeName?.let { ": $it" }
-            is PascalVariableDefinition -> {
-                if (element.variableKind == VariableKind.CONSTANT) {
-                    // For constants, try to show the value
-                    element.typeName?.let { ": $it" }
-                } else {
-                    element.typeName?.let { ": $it" }
-                }
-            }
+            is PascalVariableDefinition -> element.typeName?.let { ": $it" }
             is PascalTypeDefinition -> {
                 val superClass = element.superClassName
                 when {
@@ -220,10 +218,7 @@ private class PascalItemPresentation(private val element: PsiElement) : ItemPres
             if (params.isNotEmpty()) {
                 val paramStr = params.joinToString(", ") { p ->
                     val modifier = p.parameterModifier
-                    val prefix = when (modifier) {
-                        ParameterModifier.VALUE, null -> ""
-                        else -> modifier.name.lowercase() + " "
-                    }
+                    val prefix = if (modifier == ParameterModifier.VALUE) "" else modifier.name.lowercase() + " "
                     "$prefix${p.name ?: "?"}: ${p.typeName ?: "?"}"
                 }
                 parts.add("($paramStr)")

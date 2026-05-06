@@ -178,13 +178,13 @@ class PascalRenameTest : BasePlatformTestCase() {
         val processor = PascalRenamePsiElementProcessor()
         assertTrue("Processor should handle routines", processor.canProcessElement(declaration))
 
+        assertNotNull("Declaration should resolve to its implementation", implementation)
+
         val allRenames = mutableMapOf<com.intellij.psi.PsiElement, String>()
         processor.prepareRenaming(declaration, "Execute", allRenames)
 
-        if (implementation != null) {
-            assertTrue("Implementation should be in allRenames", allRenames.containsKey(implementation))
-            assertEquals("Execute", allRenames[implementation])
-        }
+        assertTrue("Implementation should be in allRenames", allRenames.containsKey(implementation!!))
+        assertEquals("Execute", allRenames[implementation])
     }
 
     @Test

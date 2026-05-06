@@ -18,28 +18,15 @@ public class PascalReferenceUtil {
         if (resolved == null || target == null) return false;
         if (resolved.equals(target)) return true;
 
-        // Handle routine declaration ↔ implementation equivalence
+        // Routine declaration ↔ implementation pairing: walk from target to its counterpart
+        // and compare to resolved. One direction is sufficient — getDeclaration() and
+        // getImplementation() both look up the pair via stub indices.
         if (resolved instanceof PascalRoutine && target instanceof PascalRoutine) {
-            PascalRoutine resolvedRoutine = (PascalRoutine) resolved;
             PascalRoutine targetRoutine = (PascalRoutine) target;
-
-            // If target is declaration, check if resolved is its implementation (or vice versa)
-            if (!targetRoutine.isImplementation()) {
-                PascalRoutine targetImpl = targetRoutine.getImplementation();
-                if (targetImpl != null && targetImpl.equals(resolved)) return true;
-            }
-            if (targetRoutine.isImplementation()) {
-                PascalRoutine targetDecl = targetRoutine.getDeclaration();
-                if (targetDecl != null && targetDecl.equals(resolved)) return true;
-            }
-            if (!resolvedRoutine.isImplementation()) {
-                PascalRoutine resolvedImpl = resolvedRoutine.getImplementation();
-                if (resolvedImpl != null && resolvedImpl.equals(target)) return true;
-            }
-            if (resolvedRoutine.isImplementation()) {
-                PascalRoutine resolvedDecl = resolvedRoutine.getDeclaration();
-                if (resolvedDecl != null && resolvedDecl.equals(target)) return true;
-            }
+            PascalRoutine counterpart = targetRoutine.isImplementation()
+                ? targetRoutine.getDeclaration()
+                : targetRoutine.getImplementation();
+            return counterpart != null && counterpart.equals(resolved);
         }
 
         return false;

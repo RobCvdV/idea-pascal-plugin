@@ -21,9 +21,9 @@ public class PascalRoutineImplementationReference extends PsiReferenceBase<PsiEl
     @Override
     public PsiElement resolve() {
         PascalRoutine counterpart = routine.isImplementation() ? routine.getDeclaration() : routine.getImplementation();
-        // If the counterpart is the same as the routine itself (already in interface or no counterpart), 
+        // If the counterpart is the same as the routine itself (already in interface or no counterpart),
         // return null to avoid self-reference which usually disables navigation.
-        if (counterpart == routine) {
+        if (counterpart == null || counterpart.equals(routine)) {
             return null;
         }
         return counterpart;

@@ -222,8 +222,12 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
 
     @Override
     public PsiElement setName(@NotNull String name) throws IncorrectOperationException {
-        // For now, we don't support renaming
-        throw new IncorrectOperationException("Renaming not supported yet");
+        PsiElement nameIdentifier = getNameIdentifier();
+        if (nameIdentifier == null) {
+            throw new IncorrectOperationException("Cannot find name identifier for type");
+        }
+        nl.akiar.pascal.psi.PascalPsiFactory.INSTANCE.replaceIdentifier(nameIdentifier, name);
+        return this;
     }
 
 

@@ -90,6 +90,16 @@ public class PascalRoutineCallReference extends PsiReferenceBase<PsiElement> {
         return PsiTreeUtil.getParentOfType(element, PascalTypeDefinition.class);
     }
 
+    @Override
+    public boolean isReferenceTo(@NotNull PsiElement element) {
+        return PascalReferenceUtil.isEquivalentTarget(resolve(), element);
+    }
+
+    @Override
+    public PsiElement handleElementRename(@NotNull String newElementName) {
+        return nl.akiar.pascal.psi.PascalPsiFactory.INSTANCE.replaceIdentifier(myElement, newElementName);
+    }
+
     @NotNull
     @Override
     public Object[] getVariants() {

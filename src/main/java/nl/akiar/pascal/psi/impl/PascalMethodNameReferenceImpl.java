@@ -72,7 +72,17 @@ public class PascalMethodNameReferenceImpl extends ASTWrapperPsiElement implemen
 
     @Override
     public PsiElement setName(@NotNull String name) throws IncorrectOperationException {
-        throw new IncorrectOperationException("Renaming not yet implemented");
+        // Find the IDENTIFIER child within this METHOD_NAME_REFERENCE node
+        ASTNode node = getNode();
+        for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
+            if (child.getElementType() == PascalTokenTypes.IDENTIFIER) {
+                nl.akiar.pascal.psi.PascalPsiFactory.INSTANCE.replaceIdentifier(child.getPsi(), name);
+                return this;
+            }
+        }
+        // Fallback: replace the entire node text
+        nl.akiar.pascal.psi.PascalPsiFactory.INSTANCE.replaceIdentifier(this, name);
+        return this;
     }
 
     @Override

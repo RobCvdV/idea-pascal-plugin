@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>nl.akiar.pascal</id>
     <name>Delphi Pascal</name>
-    <version>0.0.4</version>
+    <version>0.0.6</version>
     <vendor>Akiar</vendor>
 
     <description><![CDATA[
@@ -87,6 +87,19 @@
         <lang.commenter language="ObjectPascal"
                         implementationClass="nl.akiar.pascal.PascalCommenter"/>
 
+        <lang.psiStructureViewFactory language="ObjectPascal"
+                                      implementationClass="nl.akiar.pascal.structure.PascalStructureViewFactory"/>
+
+        <lang.findUsagesProvider language="ObjectPascal"
+                                 implementationClass="nl.akiar.pascal.reference.PascalFindUsagesProvider"/>
+
+        <renamePsiElementProcessor
+                implementation="nl.akiar.pascal.refactoring.PascalRenamePsiElementProcessor"/>
+
+        <renameHandler implementation="nl.akiar.pascal.refactoring.PascalRenameHandler" order="first"/>
+
+        <referencesSearch implementation="nl.akiar.pascal.reference.PascalReferencesSearcher"/>
+
         <!-- Pascal Color Settings Page -->
         <colorSettingsPage implementation="nl.akiar.pascal.PascalColorSettingsPage"/>
 
@@ -128,16 +141,17 @@
         <annotator language="ObjectPascal"
                    implementationClass="nl.akiar.pascal.annotator.PascalSemanticAnnotator"/>
 
-        <!-- Pascal Scope Annotator for uses clause error highlighting (Kotlin)
-             Temporarily disabled - produces too many false errors due to:
-             - Missing member access context awareness (object.member)
-             - Missing class member scope (own fields/methods)
-             - Missing local variable scope in routines
-             - Missing inheritance chain resolution
-             Re-enable once resolution system is more robust.
+        <!-- Pascal Scope Annotator for uses clause error highlighting -->
         <annotator language="ObjectPascal"
                    implementationClass="nl.akiar.pascal.annotator.PascalScopeAnnotator"/>
-        -->
+
+        <!-- Pascal Unresolved Member Annotator for member chain errors -->
+        <annotator language="ObjectPascal"
+                   implementationClass="nl.akiar.pascal.annotator.PascalUnresolvedMemberAnnotator"/>
+
+        <!-- Pascal Syntax Error Annotator for structural problems -->
+        <annotator language="ObjectPascal"
+                   implementationClass="nl.akiar.pascal.annotator.PascalSyntaxErrorAnnotator"/>
 
         <!-- Pascal Documentation Provider for hover documentation -->
         <lang.documentationProvider language="ObjectPascal"
@@ -171,6 +185,16 @@
         <!-- Clear caches after indices are ready and on roots change -->
         <postStartupActivity implementation="nl.akiar.pascal.startup.PascalSmartModeRefresher"/>
     </extensions>
+
+    <actions>
+        <action id="Pascal.GoToImplementation"
+                class="nl.akiar.pascal.structure.GoToImplementationAction"
+                text="Go to Implementation"
+                description="Navigate to the implementation of this routine">
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift I"/>
+            <add-to-group group-id="StructureViewPopupMenu" anchor="first"/>
+        </action>
+    </actions>
 
     <projectListeners>
         <listener class="nl.akiar.pascal.project.PascalFileEditorListener"

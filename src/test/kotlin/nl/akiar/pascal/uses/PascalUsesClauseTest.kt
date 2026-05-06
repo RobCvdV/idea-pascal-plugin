@@ -179,9 +179,8 @@ class PascalUsesClauseTest : BasePlatformTestCase() {
 
     // ==================== Out of Scope Tests ====================
 
-    // TODO: Re-enable when PascalScopeAnnotator is re-enabled
-    // @Test
-    fun disabledTestTypeNotInUsesClause_ShouldError() {
+    @Test
+    fun testTypeNotInUsesClause_ShouldError() {
         myFixture.configureByText("UnitA.pas", """
             unit UnitA;
             interface
@@ -203,9 +202,8 @@ class PascalUsesClauseTest : BasePlatformTestCase() {
         myFixture.checkHighlighting()
     }
 
-    // TODO: Re-enable when PascalScopeAnnotator is re-enabled
-    // @Test
-    fun disabledTestTypeInImplementationUses_ReferencedInInterface_ShouldError() {
+    @Test
+    fun testTypeInImplementationUses_ReferencedInInterface_ShouldError() {
         myFixture.configureByText("UnitA.pas", """
             unit UnitA;
             interface
@@ -255,9 +253,8 @@ class PascalUsesClauseTest : BasePlatformTestCase() {
 
     // ==================== Out of Scope with Multiple Units ====================
 
-    // TODO: Re-enable when PascalScopeAnnotator is re-enabled
-    // @Test
-    fun disabledTestTypeNotInScope_ExistsInMultipleUnits_ShouldListAll() {
+    @Test
+    fun testTypeNotInScope_ExistsInMultipleUnits_ShouldListAll() {
         myFixture.configureByText("UnitA.pas", """
             unit UnitA;
             interface
@@ -356,7 +353,8 @@ class PascalUsesClauseTest : BasePlatformTestCase() {
         myFixture.checkHighlighting()
     }
 
-    // TODO: Re-enable when PascalScopeAnnotator is re-enabled
+    // Variable scope checking is disabled in the hybrid approach (only type references are checked)
+    // Re-enable when routine body checking is added
     // @Test
     fun disabledTestVariableNotInUsesClause_ShouldError() {
         myFixture.configureByText("UnitA.pas", """

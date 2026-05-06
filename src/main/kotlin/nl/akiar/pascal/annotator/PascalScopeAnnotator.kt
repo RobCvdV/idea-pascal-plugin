@@ -3,6 +3,10 @@ package nl.akiar.pascal.annotator
 import com.intellij.lang.annotation.AnnotationHolder
 import com.intellij.lang.annotation.Annotator
 import com.intellij.lang.annotation.HighlightSeverity
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.progress.ProcessCanceledException
+import com.intellij.openapi.project.DumbService
+import com.intellij.openapi.project.IndexNotReadyException
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import nl.akiar.pascal.PascalLanguage
@@ -11,26 +15,33 @@ import nl.akiar.pascal.psi.*
 import nl.akiar.pascal.reference.PascalUnitReference
 import nl.akiar.pascal.resolution.DelphiBuiltIns
 import nl.akiar.pascal.resolution.PascalSymbolResolver
-import nl.akiar.pascal.uses.PascalUsesClauseInfo
 
 /**
  * Annotator that checks symbol references against uses clauses.
  *
- * This implements proper Delphi scoping semantics:
- * - Same-file declarations always have highest priority
- * - Among external units, the LAST one in the uses clause wins ("last wins" rule)
- * - Only symbols that are not in any used unit are errors
- * - Symbols in implementation uses are not available in interface section
+ * Uses a conservative "hybrid" strategy to avoid false positives:
+ * - Unit references in uses clauses: always checked
+ * - Interface section: all type-like identifiers checked (declarations are well-structured)
+ * - Implementation section: only type references in declarations (var/param types) checked
+ * - Routine bodies: skipped entirely (too many local-scope variables: fields, params,
+ *   lambda params, exception vars, with-block members, etc.)
  *
- * Note: This replaces PascalUsesClauseAnnotator with correct semantics.
+ * Implements Delphi "last wins" scoping semantics via PascalSymbolResolver.
  */
 class PascalScopeAnnotator : Annotator {
 
+    companion object {
+        private val LOG = Logger.getInstance(PascalScopeAnnotator::class.java)
+
+        private val RESERVED_IDENTIFIERS = setOf(
+            "Self", "Result", "inherited", "True", "False", "nil",
+            "self", "result", "true", "false"
+        )
+    }
+
     override fun annotate(element: PsiElement, holder: AnnotationHolder) {
-        // Only process Pascal files
-        if (element.language != PascalLanguage.INSTANCE) {
-            return
-        }
+        if (element.language != PascalLanguage.INSTANCE) return
+        if (DumbService.isDumb(element.project)) return
 
         val elementType = element.node?.elementType ?: return
 
@@ -41,72 +52,75 @@ class PascalScopeAnnotator : Annotator {
             return
         }
 
-        // Handle unit references in uses clause
+        // Handle unit references in uses clause — always checked
         if (elementType == PascalElementTypes.UNIT_REFERENCE) {
-            annotateUnitReference(element, holder)
+            safeAnnotateUnitReference(element, holder)
             return
         }
 
         // Only process identifier tokens
-        if (elementType != PascalTokenTypes.IDENTIFIER) {
-            return
-        }
+        if (elementType != PascalTokenTypes.IDENTIFIER) return
 
-        // Skip if this is a definition name (not a reference)
-        if (isDefinitionName(element)) {
-            return
-        }
-
+        // --- Cheap guards that apply everywhere ---
         val text = element.text
-        if (text.isNullOrEmpty()) {
-            return
+        if (text.isNullOrEmpty()) return
+        if (text in RESERVED_IDENTIFIERS) return
+        if (DelphiBuiltIns.isBuiltIn(text)) return
+        if (isDefinitionName(element)) return
+        if (isMemberAccess(element)) return
+
+        // --- Section-based strategy ---
+        // Skip everything inside routine bodies (method implementations, begin..end blocks)
+        if (isInsideRoutineBody(element)) return
+
+        // In interface section: check type-like identifiers in declarations
+        // In implementation section (outside routine bodies): check type references only
+        if (!looksLikeTypeReference(text, element)) return
+
+        // Additional guards for declaration contexts
+        if (isPropertySpecifierIdentifier(element)) return
+        if (isEnumElement(element)) return
+        if (isGenericParameter(element)) return
+
+        safeAnnotateType(element, text, holder)
+    }
+
+    // --- Safe wrappers ---
+
+    private fun safeAnnotateUnitReference(element: PsiElement, holder: AnnotationHolder) {
+        try {
+            annotateUnitReference(element, holder)
+        } catch (e: ProcessCanceledException) {
+            throw e
+        } catch (e: IndexNotReadyException) {
+            // Indices not ready yet
+        } catch (e: Exception) {
+            LOG.debug("Error annotating unit reference: ${element.text}", e)
         }
+    }
 
-        // Skip built-in identifiers from System unit (always available)
-        if (DelphiBuiltIns.isBuiltIn(text)) {
-            return
-        }
-
-        val file = element.containingFile ?: return
-        val offset = element.textOffset
-
-        // Check type-like identifiers (T*, I*, E* convention)
-        if (looksLikeType(text, element)) {
+    private fun safeAnnotateType(element: PsiElement, text: String, holder: AnnotationHolder) {
+        try {
+            val file = element.containingFile ?: return
+            val offset = element.textOffset
             val typeResult = PascalSymbolResolver.resolveType(text, file, offset)
-            val error = typeResult.getErrorMessage()
-            if (error != null) {
-                holder.newAnnotation(HighlightSeverity.ERROR, error)
-                    .range(element)
-                    .create()
-                return
-            }
 
-            // If it resolved to a type, we're done
-            if (typeResult.hasValidResolution) {
-                return
-            }
-        }
+            // If type resolved successfully, nothing to report
+            if (typeResult.hasValidResolution) return
 
-        // Check for routines
-        val routineResult = PascalSymbolResolver.resolveRoutine(text, file, offset)
-        val routineError = routineResult.getErrorMessage()
-        if (routineError != null) {
-            holder.newAnnotation(HighlightSeverity.ERROR, routineError)
+            // Skip if the type only exists in the implicit System unit (always available in Delphi)
+            if (typeResult.outOfScopeTypes.all { it.unitName.equals("system", ignoreCase = true) }) return
+
+            val error = typeResult.getErrorMessage() ?: return
+            holder.newAnnotation(HighlightSeverity.ERROR, error)
                 .range(element)
                 .create()
-            return
-        }
-        if (routineResult.hasValidResolution) {
-            return
-        }
-
-        // Check for variables (only global/constant/threadvar need uses clause)
-        val varResult = PascalSymbolResolver.resolveVariable(text, file, offset)
-        val varError = varResult.getErrorMessage()
-        if (varError != null) {
-            holder.newAnnotation(HighlightSeverity.ERROR, varError)
-                .range(element)
-                .create()
+        } catch (e: ProcessCanceledException) {
+            throw e
+        } catch (e: IndexNotReadyException) {
+            // Indices not ready yet
+        } catch (e: Exception) {
+            LOG.debug("Error annotating type: $text", e)
         }
     }
 
@@ -139,6 +153,8 @@ class PascalScopeAnnotator : Annotator {
         }
     }
 
+    // --- Guard helpers ---
+
     private fun isDefinitionName(element: PsiElement): Boolean {
         val parent = element.parent
         return when (parent) {
@@ -150,14 +166,50 @@ class PascalScopeAnnotator : Annotator {
         }
     }
 
-    private fun looksLikeType(text: String, element: PsiElement): Boolean {
+    private fun isMemberAccess(element: PsiElement): Boolean {
+        val prev = PsiUtil.getPrevNoneIgnorableSibling(element) ?: return false
+        return prev.node?.elementType == PascalTokenTypes.DOT
+    }
+
+    private fun isInsideRoutineBody(element: PsiElement): Boolean {
+        var parent = element.parent
+        while (parent != null && parent !is PsiFile) {
+            val parentType = parent.node?.elementType
+            if (parentType == PascalElementTypes.ROUTINE_BODY) return true
+            parent = parent.parent
+        }
+        return false
+    }
+
+    private fun looksLikeTypeReference(text: String, element: PsiElement): Boolean {
+        // Must follow Delphi type naming convention: T*, I*, E* + uppercase second char
         if (text.length < 2) return false
         val firstChar = text[0]
         if (firstChar != 'T' && firstChar != 'I' && firstChar != 'E') return false
         if (!text[1].isUpperCase()) return false
 
-        // Heuristic: If followed by a colon, it's likely a field/variable name
+        // Skip if followed by colon (likely a field/variable name like TValue: Integer)
         val next = PsiUtil.getNextNoneIgnorableSibling(element)
-        return next == null || next.node?.elementType != PascalTokenTypes.COLON
+        if (next != null && next.node?.elementType == PascalTokenTypes.COLON) return false
+
+        return true
+    }
+
+    private fun isPropertySpecifierIdentifier(element: PsiElement): Boolean {
+        if (!PsiUtil.hasParent(element, PascalElementTypes.PROPERTY_DEFINITION)) return false
+        val prev = PsiUtil.getPrevNoneIgnorableSibling(element) ?: return false
+        val prevType = prev.node?.elementType
+        return prevType == PascalTokenTypes.KW_READ ||
+               prevType == PascalTokenTypes.KW_WRITE ||
+               prevType == PascalTokenTypes.KW_STORED ||
+               prevType == PascalTokenTypes.KW_DEFAULT
+    }
+
+    private fun isEnumElement(element: PsiElement): Boolean {
+        return PsiUtil.hasParent(element, PascalElementTypes.ENUM_ELEMENT)
+    }
+
+    private fun isGenericParameter(element: PsiElement): Boolean {
+        return PsiUtil.hasParent(element, PascalElementTypes.GENERIC_PARAMETER)
     }
 }

@@ -43,6 +43,17 @@ public class PascalPropertySpecifierReference extends PsiReferenceBase<PsiElemen
         return null;
     }
 
+    @Override
+    public boolean isReferenceTo(@NotNull PsiElement element) {
+        PsiElement resolved = resolve();
+        return PascalReferenceUtil.isEquivalentTarget(resolved, element);
+    }
+
+    @Override
+    public PsiElement handleElementRename(@NotNull String newElementName) {
+        return nl.akiar.pascal.psi.PascalPsiFactory.INSTANCE.replaceIdentifier(myElement, newElementName);
+    }
+
     @NotNull
     @Override
     public Object[] getVariants() {

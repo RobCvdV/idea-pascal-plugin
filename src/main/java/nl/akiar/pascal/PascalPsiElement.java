@@ -15,5 +15,4 @@ public class PascalPsiElement extends ASTWrapperPsiElement {
     public PascalPsiElement(@NotNull ASTNode node) {
         super(node);
     }
-
 }

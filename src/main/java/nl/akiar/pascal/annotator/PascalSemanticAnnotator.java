@@ -167,7 +167,26 @@ public class PascalSemanticAnnotator implements Annotator {
         return false;
     }
 
+    private static final boolean ANNOTATOR_DEBUG = Boolean.getBoolean("pascal.annotator.debug");
+    private static final com.intellij.openapi.diagnostic.Logger ANNOTATOR_LOG =
+            com.intellij.openapi.diagnostic.Logger.getInstance(PascalSemanticAnnotator.class);
+
     private void annotateUsage(PsiElement element, AnnotationHolder holder) {
+        long t0 = ANNOTATOR_DEBUG ? System.nanoTime() : 0L;
+        try {
+            annotateUsageImpl(element, holder);
+        } finally {
+            if (ANNOTATOR_DEBUG) {
+                long ms = (System.nanoTime() - t0) / 1_000_000L;
+                if (ms >= 5) {
+                    ANNOTATOR_LOG.info("[PascalAnnotator] annotateUsage offset=" + element.getTextOffset()
+                            + " text='" + element.getText() + "' took=" + ms + "ms");
+                }
+            }
+        }
+    }
+
+    private void annotateUsageImpl(PsiElement element, AnnotationHolder holder) {
         // Skip if it's inside a unit reference, unit declaration or uses section
         if (PsiUtil.hasParent(element, PascalElementTypes.UNIT_REFERENCE) ||
             PsiUtil.hasParent(element, PascalElementTypes.UNIT_DECL_SECTION) ||
@@ -232,6 +251,10 @@ public class PascalSemanticAnnotator implements Annotator {
             } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
                 throw e; // NEVER swallow cancellation
             } catch (com.intellij.openapi.project.IndexNotReadyException e) {
+                if (ANNOTATOR_DEBUG) {
+                    ANNOTATOR_LOG.info("[PascalAnnotator] IndexNotReadyException for '" +
+                            element.getText() + "' — falling through to heuristic, scheduling restart");
+                }
                 // Stub access can throw transiently even outside dumb mode (during
                 // write actions, VFS refresh, reparse). Returning here would leave
                 // the token uncolored until the next edit. Instead: schedule a

@@ -242,8 +242,78 @@ class PascalSonarParserTest : BasePlatformTestCase() {
             val varDefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(psiFile, nl.akiar.pascal.psi.PascalVariableDefinition::class.java)
             val kinds = varDefs.associate { it.name to it.variableKind }
 
+            // Unit-level const: CONSTANT (visible everywhere it's imported).
             assertEquals(nl.akiar.pascal.psi.VariableKind.CONSTANT, kinds["GConst"])
-            assertEquals(nl.akiar.pascal.psi.VariableKind.CONSTANT, kinds["LConst"])
+            // Method-local const: LOCAL — scoped to its routine, not leaked to
+            // other methods in the same file as a global-like resolution.
+            assertEquals(nl.akiar.pascal.psi.VariableKind.LOCAL, kinds["LConst"])
+        }
+    }
+
+    @Test
+    fun testInlineVarKindResolution() {
+        // Delphi inline `var` declared inside a begin..end block. Must be LOCAL,
+        // not PARAMETER (regression check — there were reports of locals being
+        // mislabeled as parameters in hover docs).
+        val text = """
+            unit TestUnit;
+            interface
+            implementation
+            procedure Foo(AParam: Integer);
+            begin
+              var LInline := 5;
+              var LTyped: Integer := AParam + LInline;
+              if True then
+                WriteLn(LInline, LTyped);
+            end;
+            end.
+        """.trimIndent()
+
+        val psiFile = myFixture.configureByText("Test.pas", text)
+        com.intellij.openapi.application.runReadAction {
+            val varDefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(
+                psiFile, nl.akiar.pascal.psi.PascalVariableDefinition::class.java)
+            val kinds = varDefs.associate { it.name to it.variableKind }
+            assertEquals("AParam should be PARAMETER",
+                nl.akiar.pascal.psi.VariableKind.PARAMETER, kinds["AParam"])
+            assertEquals("LInline (inline var) should be LOCAL",
+                nl.akiar.pascal.psi.VariableKind.LOCAL, kinds["LInline"])
+            assertEquals("LTyped (typed inline var) should be LOCAL",
+                nl.akiar.pascal.psi.VariableKind.LOCAL, kinds["LTyped"])
+        }
+    }
+
+    @Test
+    fun testInlineConstKindResolution() {
+        // Delphi inline const declared inside a begin..end block (not in a
+        // top-of-routine const-section). Must still resolve as a method-local
+        // constant (kind = LOCAL) so it's scoped to its owning routine.
+        val text = """
+            unit TestUnit;
+            interface
+            implementation
+            procedure Foo;
+            begin
+              const RIDESLEGACY_UPDATE = 'UPDATE %s';
+              if True then
+                WriteLn(RIDESLEGACY_UPDATE);
+            end;
+            end.
+        """.trimIndent()
+
+        val psiFile = myFixture.configureByText("Test.pas", text)
+        com.intellij.openapi.application.runReadAction {
+            val varDefs = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(
+                psiFile, nl.akiar.pascal.psi.PascalVariableDefinition::class.java)
+            val kinds = varDefs.associate { it.name to it.variableKind }
+            assertNotNull(
+                "Parser must recognize inline const as a VARIABLE_DEFINITION",
+                kinds["RIDESLEGACY_UPDATE"]
+            )
+            assertEquals(
+                "Inline const inside a begin..end block must classify as LOCAL",
+                nl.akiar.pascal.psi.VariableKind.LOCAL, kinds["RIDESLEGACY_UPDATE"]
+            )
         }
     }
 

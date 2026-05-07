@@ -106,6 +106,9 @@
         <!-- Pascal Stub Index for type definitions -->
         <stubIndex implementation="nl.akiar.pascal.stubs.PascalTypeIndex"/>
 
+        <!-- Pascal Stub Index for enum values (unqualified lookup) -->
+        <stubIndex implementation="nl.akiar.pascal.stubs.PascalEnumValueStubIndex"/>
+
         <!-- Pascal Stub Index for variable definitions -->
         <stubIndex implementation="nl.akiar.pascal.stubs.PascalVariableIndex"/>
 

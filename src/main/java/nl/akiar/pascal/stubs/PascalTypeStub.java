@@ -49,4 +49,16 @@ public interface PascalTypeStub extends StubElement<PascalTypeDefinition> {
      */
     @NotNull
     List<String> getAllAncestorNames();
+
+    /**
+     * Names of all ENUM_ELEMENT identifiers declared anywhere within this type
+     * definition's PSI tree, including nested enum types defined inside class
+     * bodies (e.g., `TFoo = class type TCursor = (crNormal, crBlue); end`).
+     *
+     * Stored on the stub so unqualified enum-value resolution can succeed
+     * without loading the AST of every file in the project. Empty for non-enum
+     * and non-enum-containing types.
+     */
+    @NotNull
+    List<String> getEnumValueNames();
 }

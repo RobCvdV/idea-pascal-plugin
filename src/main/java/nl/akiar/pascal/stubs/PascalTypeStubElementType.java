@@ -36,7 +36,68 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
     @NotNull
     public PascalTypeStub createStub(@NotNull PascalTypeDefinition psi, StubElement<?> parentStub) {
         List<String> allAncestors = extractAllAncestorNames(psi);
-        return new PascalTypeStubImpl(parentStub, psi.getName(), psi.getTypeKind(), psi.getTypeParameters(), allAncestors);
+        List<String> enumValueNames = extractEnumValueNames(psi);
+        return new PascalTypeStubImpl(parentStub, psi.getName(), psi.getTypeKind(),
+                psi.getTypeParameters(), allAncestors, enumValueNames);
+    }
+
+    /**
+     * Walk the type definition's AST for ENUM_ELEMENT nodes and return their
+     * identifier names — but stop at *nested* TYPE_DEFINITION boundaries.
+     * Each nested type def gets its own stub with its own enum-value list, so
+     * we'd double-index otherwise.
+     *
+     * Net effect:
+     *   TAlign = (taLeft, taCenter, taRight)        → stub.enumValues = [taLeft, taCenter, taRight]
+     *   TFoo = class type TCursor = (crNormal); end → TFoo.enumValues = []
+     *                                                  TCursor.enumValues = [crNormal]
+     *
+     * Called once at stub-build time when AST is already loaded.
+     */
+    @NotNull
+    private List<String> extractEnumValueNames(@NotNull PascalTypeDefinition psi) {
+        ASTNode rootNode = psi.getNode();
+        if (rootNode == null) return Collections.emptyList();
+        List<String> names = new ArrayList<>();
+        collectEnumElementNamesShallow(rootNode, names, /* isRoot = */ true);
+        return names.isEmpty() ? Collections.emptyList() : names;
+    }
+
+    private void collectEnumElementNamesShallow(@NotNull ASTNode node, @NotNull List<String> out, boolean isRoot) {
+        IElementType type = node.getElementType();
+        if (type == nl.akiar.pascal.psi.PascalElementTypes.ENUM_ELEMENT) {
+            String name = extractEnumElementIdentifier(node);
+            if (name != null && !name.isEmpty()) {
+                out.add(name);
+            }
+            return;
+        }
+        // Stop at nested type definitions; their own stub will index their values.
+        if (type == nl.akiar.pascal.psi.PascalElementTypes.TYPE_DEFINITION && !isRoot) {
+            return;
+        }
+        ASTNode child = node.getFirstChildNode();
+        while (child != null) {
+            collectEnumElementNamesShallow(child, out, /* isRoot = */ false);
+            child = child.getTreeNext();
+        }
+    }
+
+    private String extractEnumElementIdentifier(@NotNull ASTNode enumElNode) {
+        // Prefer an IDENTIFIER child (the canonical case)
+        ASTNode child = enumElNode.getFirstChildNode();
+        while (child != null) {
+            if (child.getElementType() == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                return child.getText();
+            }
+            child = child.getTreeNext();
+        }
+        // Fallback: strip "= ordinal" trailing from the raw text
+        String raw = enumElNode.getText();
+        if (raw == null) return null;
+        int eq = raw.indexOf('=');
+        String trimmed = (eq > 0 ? raw.substring(0, eq) : raw).trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     /**
@@ -238,6 +299,11 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
         for (String ancestor : ancestors) {
             dataStream.writeName(ancestor);
         }
+        List<String> enumValueNames = stub.getEnumValueNames();
+        dataStream.writeInt(enumValueNames.size());
+        for (String v : enumValueNames) {
+            dataStream.writeName(v);
+        }
     }
 
     @Override
@@ -256,7 +322,12 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
         for (int i = 0; i < ancestorCount; i++) {
             allAncestorNames.add(dataStream.readNameString());
         }
-        return new PascalTypeStubImpl(parentStub, name, kind, typeParameters, allAncestorNames);
+        int enumCount = dataStream.readInt();
+        List<String> enumValueNames = new ArrayList<>(enumCount);
+        for (int i = 0; i < enumCount; i++) {
+            enumValueNames.add(dataStream.readNameString());
+        }
+        return new PascalTypeStubImpl(parentStub, name, kind, typeParameters, allAncestorNames, enumValueNames);
     }
 
     @Override
@@ -277,6 +348,14 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
             if (dotIdx >= 0) simpleName = simpleName.substring(dotIdx + 1);
             if (!simpleName.isEmpty()) {
                 sink.occurrence(PascalImplementorsIndex.KEY, simpleName.toLowerCase());
+            }
+        }
+
+        // Index each enum-value name so unqualified resolution can find the
+        // containing type def from a stub-only lookup (no AST load).
+        for (String valueName : stub.getEnumValueNames()) {
+            if (!valueName.isEmpty()) {
+                sink.occurrence(PascalEnumValueStubIndex.KEY, valueName.toLowerCase());
             }
         }
     }

@@ -481,6 +481,7 @@ class PascalSonarParser : PsiParser {
                     inUnitOrUses -> null
                     // All variable-like declarations (vars, consts, fields, params) use stub-based VARIABLE_DEFINITION
                     parentName.contains("ConstDeclaration", ignoreCase = true) ||
+                        parentName.contains("ConstStatement", ignoreCase = true) ||
                         parentName.contains("FieldDeclaration", ignoreCase = true) ||
                         parentName.contains("FormalParameter", ignoreCase = true) ||
                         parentName.contains("NameDeclarationList", ignoreCase = true) ||

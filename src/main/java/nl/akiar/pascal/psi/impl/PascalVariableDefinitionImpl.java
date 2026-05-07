@@ -249,6 +249,13 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
 
         // 3. Check for constant
         if (isInsideConstDeclaration()) {
+            // A const declared inside a routine body is method-local — only visible
+            // within its own routine. Reuse the LOCAL kind so the routine-scope
+            // filter in findVariableAtPosition applies. Without this, method-local
+            // consts leak into other methods in the same file (resolved as globals).
+            if (isInsideRoutine()) {
+                return VariableKind.LOCAL;
+            }
             return VariableKind.CONSTANT;
         }
 
@@ -322,6 +329,15 @@ public class PascalVariableDefinitionImpl extends StubBasedPsiElementBase<Pascal
     }
 
     private boolean isInsideConstDeclaration() {
+        // Delphi inline const: `const NAME = value` declared directly inside a
+        // begin..end block (no enclosing CONST_SECTION). Detect by checking the
+        // preceding non-whitespace sibling for a KW_CONST token.
+        PsiElement prev = nl.akiar.pascal.psi.PsiUtil.getPrevNoneIgnorableSibling(this);
+        if (prev != null && prev.getNode() != null
+                && prev.getNode().getElementType() == nl.akiar.pascal.PascalTokenTypes.KW_CONST) {
+            return true;
+        }
+
         PsiElement parent = getParent();
         while (parent != null) {
             ASTNode node = parent.getNode();

@@ -488,6 +488,9 @@ object MemberChainResolver {
      */
     private fun resolveChainElements(chain: List<PsiElement>, originFile: PsiFile): ChainResolutionInternal {
         val start = System.nanoTime()
+        var tAfterCache = start
+        var tAfterFirst = start
+        var tBeforeMembers = start
         try {
             val results = MutableList<PsiElement?>(chain.size) { null }
             if (chain.isEmpty()) return ChainResolutionInternal(results, emptyMap())
@@ -504,6 +507,7 @@ object MemberChainResolver {
                 LOG.debug("[GenericChain] CACHE HIT for key='$cacheKey' resolved=[${cached.resolvedElements.joinToString(", ") { it?.javaClass?.simpleName ?: "<null>" }}]")
                 return cached
             }
+            tAfterCache = System.nanoTime()
 
             val first = chain.first()
             maybeLog("[MemberTraversal] resolving first '${first.text}' at offset=${first.textOffset}", originFile)
@@ -688,6 +692,7 @@ object MemberChainResolver {
                     }
                 }
             }
+            tAfterFirst = System.nanoTime()
 
             // If the first element's type couldn't be resolved (e.g., Result with return type "T"),
             // check if the owner name is a generic type parameter and substitute with the constraint type.
@@ -700,6 +705,8 @@ object MemberChainResolver {
                     maybeLog("[MemberTraversal] owner type parameter substitution: '${currentOwnerName}' -> '${constraintType.name}'", originFile)
                 }
             }
+
+            tBeforeMembers = System.nanoTime()
 
             // Resolve subsequent chain parts using member lookup on currentType
             for (i in startIndex until chain.size) {
@@ -837,7 +844,18 @@ object MemberChainResolver {
             }
             return internalResult
         } finally {
-            PerformanceMetrics.record("MemberChainResolver.resolveChainElements", System.nanoTime() - start)
+            val end = System.nanoTime()
+            val totalMs = (end - start) / 1_000_000L
+            if (totalMs >= 200L) {
+                val cacheUsesMs = (tAfterCache - start) / 1_000_000L
+                val firstMs = (tAfterFirst - tAfterCache) / 1_000_000L
+                val membersMs = (end - tBeforeMembers) / 1_000_000L
+                val chainText = try { chain.joinToString(".") { it.text } } catch (_: Exception) { "<err>" }
+                LOG.warn("[PascalResolver] SLOW resolveChainElements total=${totalMs}ms " +
+                        "cache+uses=${cacheUsesMs}ms firstElement=${firstMs}ms members=${membersMs}ms " +
+                        "size=${chain.size} chain='$chainText' file='${originFile.name}'")
+            }
+            PerformanceMetrics.record("MemberChainResolver.resolveChainElements", end - start)
         }
     }
 
@@ -1450,8 +1468,15 @@ object MemberChainResolver {
         // 3. Fallback: try validated property/routine index with containingClass filter
         // This catches properties that are missed by PSI tree walking (e.g., due to parser quirks)
         if (!DumbService.isDumb(project)) {
-            val propResult = PascalPropertyIndex.findPropertiesWithUsesValidation(name, callSiteFile, callSiteFile.textLength.coerceAtMost(1))
-            val validatedProps = propResult.inScopeProperties
+            // Hoisted out of loop: these calls don't depend on ownerType.
+            // Previously findRoutinesWithUsesValidation ran once per ancestor,
+            // causing N× stub-index scans of every routine with this name in the project.
+            val validatedProps = PascalPropertyIndex.findPropertiesWithUsesValidation(
+                name, callSiteFile, callSiteFile.textLength.coerceAtMost(1)
+            ).inScopeProperties
+            val validatedRoutines = PascalRoutineIndex.findRoutinesWithUsesValidation(
+                name, callSiteFile, callSiteFile.textLength.coerceAtMost(1)
+            ).inScopeRoutines
             LOG.debug("[GenericChain] findMemberInType step 3: validated property index for '$name' returned ${validatedProps.size} results: [${validatedProps.joinToString(", ") { "'${it.name}' in ${it.containingClassName}(${it.unitName})" }}]")
             for (ownerType in owners) {
                 val ownerName = ownerType.name ?: continue
@@ -1462,8 +1487,6 @@ object MemberChainResolver {
                     LOG.debug("[GenericChain] findMemberInType: found '$name' via validated property index in owner='$ownerName'")
                     return prop
                 }
-                val routineResult = PascalRoutineIndex.findRoutinesWithUsesValidation(name, callSiteFile, callSiteFile.textLength.coerceAtMost(1))
-                val validatedRoutines = routineResult.inScopeRoutines
                 val routine = validatedRoutines.firstOrNull { r ->
                     (r.containingClassName?.equals(ownerName, ignoreCase = true) == true ||
                      r.containingClass?.name?.equals(ownerName, ignoreCase = true) == true) &&

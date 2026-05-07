@@ -33,7 +33,12 @@ public class PascalStubFileElementType extends IStubFileElementType<PsiFileStub<
 
     @Override
     public int getStubVersion() {
-        // Bump to force reindex after adding EXCEPTION_VAR kind
-        return super.getStubVersion() + 15;
+        // 16: re-classify method-local consts as LOCAL (was CONSTANT) so
+        //     they're scoped to their owning routine instead of leaking to
+        //     other methods in the same file as global-like resolutions.
+        // 17: store enum value names on PascalTypeStub so unqualified
+        //     enum-value resolution is a stub-index lookup (no AST load
+        //     required for highlighting cross-file enum values).
+        return super.getStubVersion() + 17;
     }
 }

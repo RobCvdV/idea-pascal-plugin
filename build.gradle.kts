@@ -75,6 +75,22 @@ tasks {
         }
     }
 
+    // Forward Pascal-related -D system properties from the Gradle JVM to the sandbox IDE JVM,
+    // so flags like -Dpascal.annotator.debug=true reach Boolean.getBoolean(...) inside the IDE.
+    named<JavaExec>("runIde") {
+        listOf(
+            "pascal.annotator.debug",
+            "pascal.resolver.debug",
+            "pascal.resolver.metrics",
+            "pascal.memberTraversal.logging",
+            "nl.akiar.pascal.log.unitFilter",
+        ).forEach { key ->
+            System.getProperty(key)?.let { systemProperty(key, it) }
+        }
+        // Bump heap so resolver caches + indexing don't OOM the sandbox.
+        maxHeapSize = "4g"
+    }
+
     jacocoTestReport {
         reports {
             xml.required.set(true)

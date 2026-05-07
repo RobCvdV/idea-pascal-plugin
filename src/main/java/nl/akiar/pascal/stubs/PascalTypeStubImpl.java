@@ -19,14 +19,23 @@ public class PascalTypeStubImpl extends StubBase<PascalTypeDefinition> implement
     private final TypeKind typeKind;
     private final List<String> typeParameters;
     private final List<String> allAncestorNames;
+    private final List<String> enumValueNames;
 
     public PascalTypeStubImpl(StubElement<?> parent, @Nullable String name, @NotNull TypeKind typeKind,
-                              @NotNull List<String> typeParameters, @NotNull List<String> allAncestorNames) {
+                              @NotNull List<String> typeParameters, @NotNull List<String> allAncestorNames,
+                              @NotNull List<String> enumValueNames) {
         super(parent, PascalElementTypes.TYPE_DEFINITION);
         this.name = name;
         this.typeKind = typeKind;
         this.typeParameters = typeParameters;
         this.allAncestorNames = allAncestorNames;
+        this.enumValueNames = enumValueNames;
+    }
+
+    /** Backwards-compatible constructor without enum value names — used only by older deserialization paths. */
+    public PascalTypeStubImpl(StubElement<?> parent, @Nullable String name, @NotNull TypeKind typeKind,
+                              @NotNull List<String> typeParameters, @NotNull List<String> allAncestorNames) {
+        this(parent, name, typeKind, typeParameters, allAncestorNames, Collections.emptyList());
     }
 
     @Override
@@ -57,5 +66,11 @@ public class PascalTypeStubImpl extends StubBase<PascalTypeDefinition> implement
     @NotNull
     public List<String> getAllAncestorNames() {
         return allAncestorNames;
+    }
+
+    @Override
+    @NotNull
+    public List<String> getEnumValueNames() {
+        return enumValueNames;
     }
 }

@@ -188,6 +188,155 @@ class PascalRenameTest : BasePlatformTestCase() {
     }
 
     @Test
+    fun testRenameElementAtCaret_Parameter_FromDeclaration() {
+        myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            implementation
+            procedure DoWork(My<caret>Param: Integer);
+            begin
+              MyParam := MyParam + 1;
+            end;
+            end.
+        """.trimIndent())
+
+        myFixture.renameElementAtCaret("Renamed")
+
+        val text = myFixture.file.text
+        assertTrue("Parameter declaration should be renamed", text.contains("Renamed: Integer"))
+        assertTrue("First usage should be renamed", text.contains("Renamed := Renamed + 1"))
+        assertFalse("Old parameter name should not remain", text.contains("MyParam"))
+    }
+
+    @Test
+    fun testRenameElementAtCaret_Parameter_FromUsage() {
+        myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            implementation
+            procedure DoWork(MyParam: Integer);
+            begin
+              My<caret>Param := MyParam + 1;
+            end;
+            end.
+        """.trimIndent())
+
+        myFixture.renameElementAtCaret("Renamed")
+
+        val text = myFixture.file.text
+        assertTrue("Parameter declaration should be renamed", text.contains("Renamed: Integer"))
+        assertTrue("Usages should be renamed", text.contains("Renamed := Renamed + 1"))
+        assertFalse("Old parameter name should not remain", text.contains("MyParam"))
+    }
+
+    @Test
+    fun testRenameElementAtCaret_LocalVariable_FromDeclaration() {
+        myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            implementation
+            procedure DoWork;
+            var
+              Coun<caret>ter: Integer;
+            begin
+              Counter := 0;
+              Counter := Counter + 1;
+            end;
+            end.
+        """.trimIndent())
+
+        myFixture.renameElementAtCaret("Total")
+
+        val text = myFixture.file.text
+        assertTrue("Local var declaration should be renamed", text.contains("Total: Integer"))
+        assertTrue("First usage should be renamed", text.contains("Total := 0"))
+        assertTrue("Second usage should be renamed", text.contains("Total := Total + 1"))
+        assertFalse("Old name should not remain", text.contains("Counter"))
+    }
+
+    @Test
+    fun testRenameElementAtCaret_LocalVariable_FromUsage() {
+        myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            implementation
+            procedure DoWork;
+            var
+              Counter: Integer;
+            begin
+              Cou<caret>nter := 0;
+              Counter := Counter + 1;
+            end;
+            end.
+        """.trimIndent())
+
+        myFixture.renameElementAtCaret("Total")
+
+        val text = myFixture.file.text
+        assertTrue("Declaration should be renamed", text.contains("Total: Integer"))
+        assertTrue("All usages should be renamed", text.contains("Total := Total + 1"))
+        assertFalse("Old name should not remain", text.contains("Counter"))
+    }
+
+    @Test
+    fun testRenameElementAtCaret_Field_FromDeclaration() {
+        myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            type
+              TMyClass = class
+              private
+                FFo<caret>o: Integer;
+              public
+                procedure DoWork;
+              end;
+            implementation
+            procedure TMyClass.DoWork;
+            begin
+              Self.FFoo := 1;
+              FFoo := FFoo + 1;
+            end;
+            end.
+        """.trimIndent())
+
+        myFixture.renameElementAtCaret("FBar")
+
+        val text = myFixture.file.text
+        assertTrue("Field declaration should be renamed", text.contains("FBar: Integer"))
+        assertTrue("Self-qualified usage should be renamed", text.contains("Self.FBar := 1"))
+        assertTrue("Bare-Self usage should be renamed", text.contains("FBar := FBar + 1"))
+        assertFalse("Old field name should not remain", text.contains("FFoo"))
+    }
+
+    @Test
+    fun testRenameElementAtCaret_Field_FromBareSelfUsage() {
+        myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            type
+              TMyClass = class
+              private
+                FFoo: Integer;
+              public
+                procedure DoWork;
+              end;
+            implementation
+            procedure TMyClass.DoWork;
+            begin
+              FF<caret>oo := FFoo + 1;
+            end;
+            end.
+        """.trimIndent())
+
+        myFixture.renameElementAtCaret("FBar")
+
+        val text = myFixture.file.text
+        assertTrue("Field declaration should be renamed", text.contains("FBar: Integer"))
+        assertTrue("All bare-Self usages should be renamed", text.contains("FBar := FBar + 1"))
+        assertFalse("Old field name should not remain", text.contains("FFoo"))
+    }
+
+    @Test
     fun testFindUsagesProvider_CanFindUsages() {
         val file = myFixture.configureByText("Main.pas", """
             unit Main;

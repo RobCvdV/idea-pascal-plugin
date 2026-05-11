@@ -9,6 +9,7 @@ import com.intellij.psi.util.PsiTreeUtil;
 import nl.akiar.pascal.psi.PascalProperty;
 import nl.akiar.pascal.psi.PascalRoutine;
 import nl.akiar.pascal.psi.PascalTypeDefinition;
+import nl.akiar.pascal.psi.PascalVariableDefinition;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -59,7 +60,10 @@ public class PascalTargetElementEvaluator extends TargetElementEvaluatorEx2 {
             PsiElement resolved = ref.resolve();
             LOG.debug("[TargetEval]   " + source + " ref " + ref.getClass().getSimpleName() + " → " +
                     (resolved != null ? describeElement(resolved) : "null"));
-            if (resolved instanceof PascalRoutine || resolved instanceof PascalTypeDefinition || resolved instanceof PascalProperty) {
+            if (resolved instanceof PascalRoutine
+                    || resolved instanceof PascalTypeDefinition
+                    || resolved instanceof PascalProperty
+                    || resolved instanceof PascalVariableDefinition) {
                 return resolved;
             }
         }
@@ -67,6 +71,26 @@ public class PascalTargetElementEvaluator extends TargetElementEvaluatorEx2 {
     }
 
     private PsiElement findDeclarationForNameId(PsiElement element) {
+        // Innermost match wins: walk parents and accept the first PsiNameIdentifierOwner
+        // whose nameIdentifier covers our caret. Variable definitions are deeper than
+        // their enclosing routine/type, so check them first to avoid resolving a
+        // parameter caret to its enclosing routine.
+        PascalVariableDefinition varDef = PsiTreeUtil.getParentOfType(element, PascalVariableDefinition.class, false);
+        if (varDef != null) {
+            PsiElement nameId = varDef.getNameIdentifier();
+            if (nameId != null && nameId.getTextRange().contains(element.getTextRange())) {
+                return varDef;
+            }
+        }
+
+        PascalProperty property = PsiTreeUtil.getParentOfType(element, PascalProperty.class, false);
+        if (property != null) {
+            PsiElement nameId = property.getNameIdentifier();
+            if (nameId != null && nameId.getTextRange().contains(element.getTextRange())) {
+                return property;
+            }
+        }
+
         PascalRoutine routine = PsiTreeUtil.getParentOfType(element, PascalRoutine.class, false);
         if (routine != null) {
             PsiElement nameId = routine.getNameIdentifier();
@@ -80,14 +104,6 @@ public class PascalTargetElementEvaluator extends TargetElementEvaluatorEx2 {
             PsiElement nameId = typeDef.getNameIdentifier();
             if (nameId != null && nameId.getTextRange().contains(element.getTextRange())) {
                 return typeDef;
-            }
-        }
-
-        PascalProperty property = PsiTreeUtil.getParentOfType(element, PascalProperty.class, false);
-        if (property != null) {
-            PsiElement nameId = property.getNameIdentifier();
-            if (nameId != null && nameId.getTextRange().contains(element.getTextRange())) {
-                return property;
             }
         }
 
@@ -106,6 +122,9 @@ public class PascalTargetElementEvaluator extends TargetElementEvaluatorEx2 {
         if (el instanceof PascalProperty p) {
             return "PascalProperty '" + p.getName() + "'";
         }
+        if (el instanceof PascalVariableDefinition v) {
+            return "PascalVariableDefinition '" + v.getName() + "' kind=" + v.getVariableKind();
+        }
         String text = el.getText();
         return el.getClass().getSimpleName() + " '" + text.substring(0, Math.min(text.length(), 30)) + "'";
     }
@@ -114,6 +133,7 @@ public class PascalTargetElementEvaluator extends TargetElementEvaluatorEx2 {
     public boolean isAcceptableNamedParent(@Nullable PsiElement parent) {
         return parent instanceof PascalTypeDefinition
                 || parent instanceof PascalRoutine
-                || parent instanceof PascalProperty;
+                || parent instanceof PascalProperty
+                || parent instanceof PascalVariableDefinition;
     }
 }

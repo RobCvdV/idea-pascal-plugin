@@ -21,6 +21,22 @@ public class PascalUnitIndex extends ScalarIndexExtension<String> {
 
     private static final Pattern UNIT_NAME_PATTERN = Pattern.compile("^\\s*unit\\s+([^;]+);", Pattern.CASE_INSENSITIVE);
 
+    private static final boolean DEBUG = Boolean.getBoolean("pascal.units.debug");
+    private static final com.intellij.openapi.diagnostic.Logger LOG =
+            com.intellij.openapi.diagnostic.Logger.getInstance(PascalUnitIndex.class);
+
+    private static void debugLog(String unitName, FileContent inputData) {
+        if (!DEBUG) return;
+        String path = inputData.getFile() != null ? inputData.getFile().getPath() : inputData.getFileName();
+        boolean noteworthy = path.contains("delphi-source")
+                || unitName.startsWith("system.")
+                || unitName.startsWith("spring.")
+                || unitName.equals("system");
+        if (noteworthy) {
+            LOG.info("[PascalUnits] PascalUnitIndex: indexed key='" + unitName + "' path=" + path);
+        }
+    }
+
     @NotNull
     @Override
     public ID<String, Void> getName() {
@@ -45,6 +61,7 @@ public class PascalUnitIndex extends ScalarIndexExtension<String> {
                 Matcher matcher = UNIT_NAME_PATTERN.matcher(line);
                 if (matcher.find()) {
                     String unitName = nl.akiar.pascal.psi.PsiUtil.normalizeUnitName(matcher.group(1));
+                    debugLog(unitName, inputData);
                     return Collections.singletonMap(unitName, null);
                 }
                 // Stop if we hit implementation, interface, or program keyword
@@ -60,6 +77,7 @@ public class PascalUnitIndex extends ScalarIndexExtension<String> {
             if (dotIndex > 0) {
                 String name = fileName.substring(0, dotIndex).toLowerCase();
                 if (!name.isEmpty()) {
+                    debugLog(name, inputData);
                     return Collections.singletonMap(name, null);
                 }
             }

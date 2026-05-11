@@ -83,6 +83,7 @@ tasks {
             "pascal.resolver.debug",
             "pascal.resolver.metrics",
             "pascal.memberTraversal.logging",
+            "pascal.units.debug",
             "nl.akiar.pascal.log.unitFilter",
         ).forEach { key ->
             System.getProperty(key)?.let { systemProperty(key, it) }

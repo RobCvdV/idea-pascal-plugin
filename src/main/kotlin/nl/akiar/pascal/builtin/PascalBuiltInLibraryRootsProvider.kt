@@ -15,6 +15,15 @@ import javax.swing.Icon
  * Provides a bundled System.pas containing compiler-intrinsic declarations
  * (TObject, IInterface, etc.) as an additional library root so that stub
  * indexing picks them up automatically.
+ *
+ * The bundled file is intentional fallback for cases where no real RTL
+ * System.pas is configured. It must never shadow user-provided units —
+ * the priority tiebreak lives in
+ * {@link nl.akiar.pascal.project.PascalProjectService#pickPreferredCandidate},
+ * which prefers any non-builtin candidate when both are indexed under the
+ * same unit name. Querying FileBasedIndex from this provider is unsafe
+ * because IntelliJ may invoke us on EDT during root scanning, which
+ * deadlocks against the index update phase.
  */
 class PascalBuiltInLibraryRootsProvider : AdditionalLibraryRootsProvider() {
 
@@ -22,6 +31,10 @@ class PascalBuiltInLibraryRootsProvider : AdditionalLibraryRootsProvider() {
         private val LOG = Logger.getInstance(PascalBuiltInLibraryRootsProvider::class.java)
         private const val BUILTIN_DIR = "pascal-builtins"
         private const val RESOURCE_PATH = "/builtin/System.pas"
+        private val DEBUG = java.lang.Boolean.getBoolean("pascal.units.debug")
+
+        @JvmStatic
+        fun builtinDirPath(): String = File(PathManager.getSystemPath(), BUILTIN_DIR).absolutePath
     }
 
     override fun getAdditionalProjectLibraries(project: Project): Collection<SyntheticLibrary> {
@@ -37,7 +50,7 @@ class PascalBuiltInLibraryRootsProvider : AdditionalLibraryRootsProvider() {
                 targetDir.mkdirs()
                 val resourceStream = javaClass.getResourceAsStream(RESOURCE_PATH)
                 if (resourceStream == null) {
-                    LOG.warn("[PascalBuiltIn] Resource $RESOURCE_PATH not found in JAR")
+                    LOG.warn("[PascalUnits] Builtin: resource $RESOURCE_PATH not found in JAR")
                     return emptyList()
                 }
                 resourceStream.use { input ->
@@ -45,19 +58,20 @@ class PascalBuiltInLibraryRootsProvider : AdditionalLibraryRootsProvider() {
                         input.copyTo(output)
                     }
                 }
-                LOG.info("[PascalBuiltIn] Extracted System.pas to ${targetFile.absolutePath}")
+                LOG.info("[PascalUnits] Builtin: extracted System.pas to ${targetFile.absolutePath}")
             } catch (e: Exception) {
-                LOG.warn("[PascalBuiltIn] Failed to extract System.pas: ${e.message}")
+                LOG.warn("[PascalUnits] Builtin: failed to extract System.pas: ${e.message}")
                 return emptyList()
             }
         }
 
         val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(targetDir)
         if (vf == null || !vf.isValid || !vf.isDirectory) {
-            LOG.warn("[PascalBuiltIn] Could not find virtual file for $targetDir")
+            LOG.warn("[PascalUnits] Builtin: could not find virtual file for $targetDir")
             return emptyList()
         }
 
+        if (DEBUG) LOG.info("[PascalUnits] Builtin: registered (non-builtin candidates always win in resolveUnit)")
         return listOf(PascalBuiltInLibrary(listOf(vf)))
     }
 

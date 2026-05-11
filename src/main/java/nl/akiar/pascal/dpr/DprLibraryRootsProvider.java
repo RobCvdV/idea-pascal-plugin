@@ -10,7 +10,6 @@ import com.intellij.openapi.roots.SyntheticLibrary;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import nl.akiar.pascal.project.PascalProjectService;
-import nl.akiar.pascal.settings.PascalSourcePathsSettings;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -18,17 +17,19 @@ import javax.swing.*;
 import java.util.*;
 
 /**
- * Provides additional library roots from DPR-referenced files and user-configured paths.
- * This makes IntelliJ index files that are referenced by .dpr files
- * or configured in Settings > Pascal Source Paths.
+ * Registers .dpr-referenced and .dproj/.optset-discovered directories as
+ * library roots so IntelliJ indexes them.
+ *
+ * User-configured paths from Settings → Pascal Source Paths are handled by
+ * {@link nl.akiar.pascal.settings.PascalSourcePathsLibraryRootsProvider}.
  */
 public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
     private static final Logger LOG = Logger.getInstance(DprLibraryRootsProvider.class);
+    private static final boolean DEBUG = Boolean.getBoolean("pascal.units.debug");
 
     @Override
     @NotNull
     public Collection<SyntheticLibrary> getAdditionalProjectLibraries(@NotNull Project project) {
-        // Early exit if platform is not fully loaded yet
         if (!LoadingState.COMPONENTS_LOADED.isOccurred()) {
             return Collections.emptyList();
         }
@@ -37,27 +38,16 @@ public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
             return Collections.emptyList();
         }
 
-        // Additional check: ensure we're not in dumb mode during initial indexing
-        if (com.intellij.openapi.project.DumbService.isDumb(project)) {
-            return Collections.emptyList();
-        }
-
         Set<String> allDirectories = new HashSet<>();
 
         try {
-            // 1. Add DPR-referenced directories
             DprProjectService dprService = DprProjectService.getInstance(project);
             allDirectories.addAll(dprService.getReferencedDirectories());
 
-            // 2. Add directories discovered from .dproj and .optset
             PascalProjectService pascalProjectService = PascalProjectService.getInstance(project);
             allDirectories.addAll(pascalProjectService.getDiscoveredDirectories());
-
-            // 3. Add user-configured source paths
-            PascalSourcePathsSettings settings = PascalSourcePathsSettings.getInstance(project);
-            allDirectories.addAll(settings.getSourcePaths());
         } catch (Exception e) {
-            LOG.warn("[PascalLibraryRoots] Error collecting directories: " + e.getMessage());
+            LOG.warn("[PascalUnits] DprLibraryRoots: error collecting directories: " + e.getMessage());
             return Collections.emptyList();
         }
 
@@ -80,13 +70,17 @@ public class DprLibraryRootsProvider extends AdditionalLibraryRootsProvider {
         }
 
         if (roots.isEmpty()) {
-            LOG.info("[PascalLibraryRoots] All directories are already in project");
+            if (DEBUG) LOG.info("[PascalUnits] DprLibraryRoots: no roots after filtering (in-project or invalid)");
             return Collections.emptyList();
         }
 
-//         LOG.info("[PascalLibraryRoots] Adding " + roots.size() + " directories as library roots");
+        if (DEBUG) {
+            LOG.info("[PascalUnits] DprLibraryRoots: registering " + roots.size() + " roots");
+            for (VirtualFile r : roots) {
+                LOG.info("[PascalUnits]   root: " + r.getPath());
+            }
+        }
 
-        // Create a single synthetic library containing all source directories
         SyntheticLibrary library = new PascalSyntheticLibrary(roots);
         return Collections.singletonList(library);
     }

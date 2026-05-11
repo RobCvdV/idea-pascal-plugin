@@ -171,10 +171,13 @@
         <definitionsScopedSearch implementation="nl.akiar.pascal.navigation.PascalImplementationSearcher"/>
         <targetElementEvaluator language="ObjectPascal" implementationClass="nl.akiar.pascal.navigation.PascalTargetElementEvaluator"/>
 
-        <!-- DPR Library Roots Provider - indexes files referenced by .dpr files -->
+        <!-- DPR Library Roots Provider - indexes files referenced by .dpr/.dproj files -->
         <additionalLibraryRootsProvider implementation="nl.akiar.pascal.dpr.DprLibraryRootsProvider"/>
 
-        <!-- Built-in Library Roots Provider - bundled System.pas with compiler intrinsics -->
+        <!-- Source Paths Library Roots Provider - indexes Settings → Pascal Source Paths -->
+        <additionalLibraryRootsProvider implementation="nl.akiar.pascal.settings.PascalSourcePathsLibraryRootsProvider"/>
+
+        <!-- Built-in Library Roots Provider - bundled System.pas with compiler intrinsics (fallback only) -->
         <additionalLibraryRootsProvider implementation="nl.akiar.pascal.builtin.PascalBuiltInLibraryRootsProvider"/>
 
         <!-- Pascal Source Paths Settings Page -->

@@ -25,6 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service(Service.Level.PROJECT)
 public final class PascalProjectService implements Disposable {
     private static final Logger LOG = Logger.getInstance(PascalProjectService.class);
+    private static final boolean DEBUG = Boolean.getBoolean("pascal.units.debug");
     private final Project project;
 
     // Discovered source directories
@@ -80,8 +81,37 @@ public final class PascalProjectService implements Disposable {
                     unitName,
                     GlobalSearchScope.allScope(project)
             );
-            return files.isEmpty() ? null : files.iterator().next();
+            if (files.isEmpty()) return null;
+            VirtualFile picked = pickPreferredCandidate(files);
+            if (DEBUG && files.size() > 1) {
+                StringBuilder sb = new StringBuilder("[PascalUnits] resolveUnit('")
+                        .append(unitName).append("') candidates=").append(files.size()).append(" picked=")
+                        .append(picked != null ? picked.getPath() : "null");
+                for (VirtualFile vf : files) sb.append("\n  - ").append(vf.getPath());
+                LOG.info(sb.toString());
+            }
+            return picked;
         });
+    }
+
+    /**
+     * Prefer user-provided files over the bundled builtin System.pas so the
+     * fallback never shadows real RTL units.
+     */
+    @Nullable
+    private VirtualFile pickPreferredCandidate(@NotNull Collection<VirtualFile> files) {
+        if (files.isEmpty()) return null;
+        String builtinPrefix = nl.akiar.pascal.builtin.PascalBuiltInLibraryRootsProvider.builtinDirPath();
+        VirtualFile fallback = null;
+        for (VirtualFile vf : files) {
+            if (vf == null || !vf.isValid()) continue;
+            if (vf.getPath().startsWith(builtinPrefix)) {
+                if (fallback == null) fallback = vf;
+                continue;
+            }
+            return vf;
+        }
+        return fallback != null ? fallback : files.iterator().next();
     }
 
     /**

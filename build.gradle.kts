@@ -141,6 +141,10 @@ val downloadSonarDelphi = tasks.register("downloadSonarDelphi", Exec::class.java
     group = "thirdparty"
     description = "Download sonar-delphi jar to libs/ if URL provided"
     onlyIf { sonarDelphiUrl.isNotBlank() && !libsJarFile.exists() }
+    doFirst {
+        // libs/ is not tracked in git, so a fresh checkout (e.g. CI) won't have it yet.
+        libsJarFile.parentFile.mkdirs()
+    }
     commandLine("bash", "-lc", "curl -fSL '${sonarDelphiUrl}' -o '${libsJarFile.absolutePath}'")
 }
 

@@ -29,15 +29,28 @@ public class PascalTypeReference extends PsiReferenceBase<PsiElement> implements
         PascalTypeIndex.TypeLookupResult result = PascalTypeIndex.findTypesWithUsesValidation(
             name, myElement.getContainingFile(), myElement.getTextOffset());
         List<ResolveResult> results = new ArrayList<>();
-        for (PascalTypeDefinition type : result.getInScopeTypes()) {
-            results.add(new PsiElementResolveResult(type));
-        }
+        addPreferringFullDefinitions(results, result.getInScopeTypes());
         if (results.isEmpty()) {
-            for (PascalTypeDefinition type : result.getOutOfScopeTypes()) {
-                results.add(new PsiElementResolveResult(type));
-            }
+            addPreferringFullDefinitions(results, result.getOutOfScopeTypes());
         }
         return results.toArray(new ResolveResult[0]);
+    }
+
+    /**
+     * Add types to results, preferring full definitions over forward declarations.
+     * If any full definitions exist, only full definitions are added; otherwise all
+     * (forward) definitions are added so resolve still finds something.
+     */
+    private static void addPreferringFullDefinitions(List<ResolveResult> results,
+                                                     List<PascalTypeDefinition> candidates) {
+        List<PascalTypeDefinition> fullDefs = new ArrayList<>();
+        for (PascalTypeDefinition type : candidates) {
+            if (!type.isForwardDeclaration()) fullDefs.add(type);
+        }
+        List<PascalTypeDefinition> picked = fullDefs.isEmpty() ? candidates : fullDefs;
+        for (PascalTypeDefinition type : picked) {
+            results.add(new PsiElementResolveResult(type));
+        }
     }
 
     @Nullable

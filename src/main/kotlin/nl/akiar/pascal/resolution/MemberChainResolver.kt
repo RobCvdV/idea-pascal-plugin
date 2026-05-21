@@ -750,10 +750,32 @@ object MemberChainResolver {
                 }
                 LOG.debug("[GenericChain] step[$i] '$name' rawTypeName='$memberRawTypeName' currentTypeArgMap=$currentTypeArgMap")
 
+                // If the member was inherited from a generic ancestor, augment the type-arg
+                // map with the binding supplied by the inheritance edge (e.g.,
+                // TEoOrderMxList = class(TListGeneric<TEoOrderMx>) binds TListGeneric's
+                // formal param TGenericClassOfItem to TEoOrderMx, so an inherited property
+                // declared as ItemsById: TGenericClassOfItem substitutes to TEoOrderMx).
+                var effectiveTypeArgMap = currentTypeArgMap
+                if (member != null && currentType != null) {
+                    val memberOwnerName = when (member) {
+                        is PascalProperty -> member.containingClassName
+                        is PascalRoutine -> member.containingClassName
+                        is PascalVariableDefinition -> member.containingClass?.name
+                        else -> null
+                    }
+                    if (memberOwnerName != null && !memberOwnerName.equals(currentType.name, ignoreCase = true)) {
+                        val inheritedBinding = findInheritedGenericBindings(currentType, memberOwnerName)
+                        if (inheritedBinding.isNotEmpty()) {
+                            effectiveTypeArgMap = effectiveTypeArgMap + inheritedBinding
+                            perElementMaps[i] = effectiveTypeArgMap
+                            LOG.debug("[GenericChain] step[$i] '$name' inherited from $memberOwnerName: merged $inheritedBinding -> $effectiveTypeArgMap")
+                        }
+                    }
+                }
+
                 // Check for call-site generic type arguments on this chain element
                 // e.g., Resolve<IMutationsRepository> → extract ["IMutationsRepository"]
                 // and build a method-level typeArgMap if the member is a generic routine
-                var effectiveTypeArgMap = currentTypeArgMap
                 if (member is PascalRoutine) {
                     val callSiteArgs = extractCallSiteTypeArgs(chain[i])
                     if (callSiteArgs.isNotEmpty()) {
@@ -761,8 +783,9 @@ object MemberChainResolver {
                         LOG.debug("[GenericChain] step[$i] '$name' generic method: callSiteArgs=$callSiteArgs routineTypeParams=$routineTypeParams")
                         if (routineTypeParams.isNotEmpty()) {
                             // Build method-level type arg map and merge with class-level map
+                            // (including any inherited-ancestor binding already folded in above)
                             val methodArgMap = mutableMapOf<String, String>()
-                            methodArgMap.putAll(currentTypeArgMap)
+                            methodArgMap.putAll(effectiveTypeArgMap)
                             for (j in callSiteArgs.indices) {
                                 if (j < routineTypeParams.size) {
                                     methodArgMap[routineTypeParams[j]] = callSiteArgs[j]
@@ -1856,6 +1879,75 @@ object MemberChainResolver {
             }
         }
         return map
+    }
+
+    /**
+     * Walk typeDef's inheritance chain to find the edge that binds [ancestorBaseName]
+     * with concrete type arguments, and return the substitution map for that
+     * ancestor's formal type parameters.
+     *
+     * For `TEoOrderMxList = class(TListGeneric<TEoOrderMx>)` and ancestorBaseName="TListGeneric"
+     * (whose formal param is "TGenericClassOfItem"), returns {TGenericClassOfItem: TEoOrderMx}.
+     *
+     * Returns an empty map if no matching edge has type arguments or the ancestor
+     * cannot be located.
+     */
+    private fun findInheritedGenericBindings(
+        typeDef: PascalTypeDefinition,
+        ancestorBaseName: String
+    ): Map<String, String> {
+        val visited = mutableSetOf<String>()
+        var current: PascalTypeDefinition? = typeDef
+        while (current != null) {
+            val key = "${current.unitName}.${current.name}".lowercase()
+            if (!visited.add(key)) break
+
+            val ancestorRefs = extractInheritanceClauseFullNames(current)
+            for (rawName in ancestorRefs) {
+                val (baseName, typeArgs) = parseTypeArguments(rawName)
+                if (typeArgs.isEmpty()) continue
+                if (!baseName.equals(ancestorBaseName, ignoreCase = true)) continue
+
+                val ancestorType = InheritanceChainCache.getAllAncestorTypes(typeDef)
+                    .firstOrNull { it.name.equals(ancestorBaseName, ignoreCase = true) }
+                    ?: return emptyMap()
+                return buildTypeArgMap(ancestorType, typeArgs)
+            }
+            current = current.superClass
+        }
+        return emptyMap()
+    }
+
+    /**
+     * Extract the inheritance clause ancestor entries as full names (including generic
+     * arguments). For `TFoo = class(TBar<TX>, IFoo)`, returns ["TBar<TX>", "IFoo"].
+     * Reads from AST so the generic arguments stripped at stub time are recovered.
+     */
+    private fun extractInheritanceClauseFullNames(typeDef: PascalTypeDefinition): List<String> {
+        val node = typeDef.node ?: return emptyList()
+        val typeNode = node.findChildByType(nl.akiar.pascal.psi.PascalElementTypes.CLASS_TYPE)
+            ?: node.findChildByType(nl.akiar.pascal.psi.PascalElementTypes.RECORD_TYPE)
+            ?: node.findChildByType(nl.akiar.pascal.psi.PascalElementTypes.INTERFACE_TYPE)
+            ?: node
+        var cur = typeNode.firstChildNode
+        var inClause = false
+        val results = mutableListOf<String>()
+        while (cur != null) {
+            val t = cur.elementType
+            if (!inClause) {
+                if (t == PascalTokenTypes.LPAREN) inClause = true
+                cur = cur.treeNext
+                continue
+            }
+            if (t == PascalTokenTypes.RPAREN) break
+            if (t == nl.akiar.pascal.psi.PascalElementTypes.TYPE_REFERENCE) {
+                val typeRef = cur.psi as? nl.akiar.pascal.psi.impl.PascalTypeReferenceElement
+                val full = typeRef?.fullTypeName
+                if (!full.isNullOrBlank()) results.add(full)
+            }
+            cur = cur.treeNext
+        }
+        return results
     }
 
     /**

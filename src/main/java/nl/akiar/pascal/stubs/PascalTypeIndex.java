@@ -120,7 +120,9 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
         }
 
         // Sort in-scope types by Delphi "last wins" priority:
-        // same-file types first, then by uses clause position descending (last in uses = highest priority)
+        // same-file types first, then by uses clause position descending (last in uses = highest priority),
+        // and finally prefer full definitions over forward declarations so callers that pick
+        // the first result (e.g. firstOrNull) land on the type with actual members.
         if (inScope.size() > 1) {
             PascalUsesClauseInfo parsedInfo = PascalUsesClauseInfo.Companion.parse(fromFile);
             inScope.sort((a, b) -> {
@@ -129,7 +131,11 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
                 if (aLocal != bLocal) return aLocal ? -1 : 1;
                 int priorityA = parsedInfo.getUnitPriority(a.getUnitName(), offset, scopes);
                 int priorityB = parsedInfo.getUnitPriority(b.getUnitName(), offset, scopes);
-                return Integer.compare(priorityB, priorityA);
+                if (priorityA != priorityB) return Integer.compare(priorityB, priorityA);
+                boolean aForward = a.isForwardDeclaration();
+                boolean bForward = b.isForwardDeclaration();
+                if (aForward != bForward) return aForward ? 1 : -1;
+                return 0;
             });
         }
 
@@ -212,7 +218,9 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
         }
 
         // Sort in-scope types by Delphi "last wins" priority:
-        // same-file first, then direct uses (by position descending), then transitive/implicit
+        // same-file first, then direct uses (by position descending), then transitive/implicit.
+        // Tie-break by preferring full definitions over forward declarations so callers that pick
+        // the first result land on the type with actual members.
         if (inScope.size() > 1) {
             PascalUsesClauseInfo parsedInfo = PascalUsesClauseInfo.Companion.parse(originFile);
             inScope.sort((a, b) -> {
@@ -221,7 +229,11 @@ public class PascalTypeIndex extends StringStubIndexExtension<PascalTypeDefiniti
                 if (aLocal != bLocal) return aLocal ? -1 : 1;
                 int priorityA = parsedInfo.getUnitPriority(a.getUnitName(), offset, scopes);
                 int priorityB = parsedInfo.getUnitPriority(b.getUnitName(), offset, scopes);
-                return Integer.compare(priorityB, priorityA);
+                if (priorityA != priorityB) return Integer.compare(priorityB, priorityA);
+                boolean aForward = a.isForwardDeclaration();
+                boolean bForward = b.isForwardDeclaration();
+                if (aForward != bForward) return aForward ? 1 : -1;
+                return 0;
             });
         }
 

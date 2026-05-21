@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>nl.akiar.pascal</id>
     <name>Delphi Pascal</name>
-    <version>0.0.6</version>
+    <version>0.1.0</version>
     <vendor>Akiar</vendor>
 
     <description><![CDATA[

@@ -194,6 +194,10 @@
         <!-- Surround With -->
         <lang.surroundDescriptor language="ObjectPascal"
                                  implementationClass="nl.akiar.pascal.surround.PascalSurroundDescriptor"/>
+
+        <!-- Parameter info popup -->
+        <codeInsight.parameterInfo language="ObjectPascal"
+                                   implementationClass="nl.akiar.pascal.codeinsight.PascalParameterInfoHandler"/>
     </extensions>
 
     <actions>

@@ -61,4 +61,12 @@ public interface PascalTypeStub extends StubElement<PascalTypeDefinition> {
      */
     @NotNull
     List<String> getEnumValueNames();
+
+    /**
+     * For a class/record helper (`TFoo = class helper for TBar`), the base name
+     * of the helped type ("TBar"). Generic args and unit qualifiers are stripped.
+     * Returns null for any non-helper type.
+     */
+    @Nullable
+    String getHelpedTypeName();
 }

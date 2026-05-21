@@ -37,8 +37,99 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
     public PascalTypeStub createStub(@NotNull PascalTypeDefinition psi, StubElement<?> parentStub) {
         List<String> allAncestors = extractAllAncestorNames(psi);
         List<String> enumValueNames = extractEnumValueNames(psi);
+        String helpedTypeName = extractHelperTargetName(psi);
         return new PascalTypeStubImpl(parentStub, psi.getName(), psi.getTypeKind(),
-                psi.getTypeParameters(), allAncestors, enumValueNames);
+                psi.getTypeParameters(), allAncestors, enumValueNames, helpedTypeName);
+    }
+
+    /**
+     * Extract the helped type name from a class/record helper declaration.
+     * For `TFoo = class helper for TBar`, returns "TBar".
+     * For `TFoo = class helper(TParent) for TBar<TX>`, returns "TBar".
+     * Returns null for any non-helper type.
+     *
+     * Walks the type's AST leaves in document order and runs a small state
+     * machine: look for KW_HELPER, then KW_FOR (skipping any parenthesised
+     * helper-extends clause), then capture the next TYPE_REFERENCE or
+     * IDENTIFIER. Generic args and unit prefixes are stripped to match the
+     * stripped form stored elsewhere in the stubs.
+     */
+    @org.jetbrains.annotations.Nullable
+    private String extractHelperTargetName(@NotNull PascalTypeDefinition psi) {
+        TypeKind kind = psi.getTypeKind();
+        // Interface helpers don't exist in Delphi; enums/aliases/procedurals never have a helper clause.
+        if (kind != TypeKind.CLASS && kind != TypeKind.RECORD) return null;
+        ASTNode root = psi.getNode();
+        if (root == null) return null;
+
+        HelperTargetState st = new HelperTargetState();
+        walkForHelperTarget(root, st);
+        return st.result;
+    }
+
+    private static final class HelperTargetState {
+        static final int BEFORE_HELPER = 0;
+        static final int AFTER_HELPER = 1;
+        static final int AFTER_FOR = 2;
+        int state = BEFORE_HELPER;
+        int parenDepth = 0;
+        String result = null;
+        boolean done = false;
+    }
+
+    private void walkForHelperTarget(@NotNull ASTNode node, @NotNull HelperTargetState st) {
+        if (st.done) return;
+        IElementType t = node.getElementType();
+
+        // Capture TYPE_REFERENCE as a composite once we're past KW_FOR — do this before
+        // descending so we don't accidentally consume its children as further state changes.
+        if (st.state == HelperTargetState.AFTER_FOR
+                && t == nl.akiar.pascal.psi.PascalElementTypes.TYPE_REFERENCE) {
+            st.result = extractNameFromTypeReference(node);
+            st.done = true;
+            return;
+        }
+
+        if (node.getFirstChildNode() == null) {
+            // Leaf token — update state machine
+            if (st.state == HelperTargetState.BEFORE_HELPER) {
+                if (t == nl.akiar.pascal.PascalTokenTypes.KW_HELPER) {
+                    st.state = HelperTargetState.AFTER_HELPER;
+                }
+            } else if (st.state == HelperTargetState.AFTER_HELPER) {
+                if (t == nl.akiar.pascal.PascalTokenTypes.LPAREN) {
+                    st.parenDepth++;
+                } else if (t == nl.akiar.pascal.PascalTokenTypes.RPAREN) {
+                    st.parenDepth--;
+                } else if (st.parenDepth == 0 && t == nl.akiar.pascal.PascalTokenTypes.KW_FOR) {
+                    st.state = HelperTargetState.AFTER_FOR;
+                }
+            } else if (st.state == HelperTargetState.AFTER_FOR) {
+                if (t == nl.akiar.pascal.PascalTokenTypes.IDENTIFIER) {
+                    st.result = collectDottedName(node);
+                    // Strip generics if collectDottedName included them (it shouldn't, but defensively):
+                    int lt = st.result != null ? st.result.indexOf('<') : -1;
+                    if (lt > 0) st.result = st.result.substring(0, lt);
+                    int dot = st.result != null ? st.result.lastIndexOf('.') : -1;
+                    if (dot >= 0) st.result = st.result.substring(dot + 1);
+                    st.done = true;
+                } else if (t == nl.akiar.pascal.PascalTokenTypes.KW_STRING) {
+                    // `record helper for String` — `String` lexes as a keyword, not IDENTIFIER.
+                    st.result = node.getText();
+                    st.done = true;
+                }
+                // Whitespace etc. just pass; any other unexpected leaf does not abort
+                // because sonar-delphi may emit attribute or annotation leaves between.
+            }
+            return;
+        }
+
+        // Composite — recurse children in document order
+        ASTNode child = node.getFirstChildNode();
+        while (child != null && !st.done) {
+            walkForHelperTarget(child, st);
+            child = child.getTreeNext();
+        }
     }
 
     /**
@@ -304,6 +395,7 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
         for (String v : enumValueNames) {
             dataStream.writeName(v);
         }
+        dataStream.writeName(stub.getHelpedTypeName());
     }
 
     @Override
@@ -327,7 +419,8 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
         for (int i = 0; i < enumCount; i++) {
             enumValueNames.add(dataStream.readNameString());
         }
-        return new PascalTypeStubImpl(parentStub, name, kind, typeParameters, allAncestorNames, enumValueNames);
+        String helpedTypeName = dataStream.readNameString();
+        return new PascalTypeStubImpl(parentStub, name, kind, typeParameters, allAncestorNames, enumValueNames, helpedTypeName);
     }
 
     @Override
@@ -357,6 +450,13 @@ public class PascalTypeStubElementType extends IStubElementType<PascalTypeStub, 
             if (!valueName.isEmpty()) {
                 sink.occurrence(PascalEnumValueStubIndex.KEY, valueName.toLowerCase());
             }
+        }
+
+        // Index helpers by their helped type name so member-chain resolution
+        // and completion can surface helper methods on the helped type.
+        String helped = stub.getHelpedTypeName();
+        if (helped != null && !helped.isEmpty()) {
+            sink.occurrence(PascalHelperIndex.KEY, helped.toLowerCase());
         }
     }
 

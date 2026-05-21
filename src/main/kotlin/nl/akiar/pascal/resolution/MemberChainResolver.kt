@@ -533,10 +533,24 @@ object MemberChainResolver {
             // Check for Self keyword as first element
             if (first.node.elementType == PascalTokenTypes.KW_SELF) {
                 val containingClass = findContainingClass(first)
-                results[0] = containingClass
-                currentType = containingClass
-                currentOwnerName = containingClass?.name
-                maybeLog("[MemberTraversal] first resolved as Self -> class '${containingClass?.name}'", originFile)
+                // Inside a class/record helper, Self is semantically an instance of the
+                // helped type. Route the chain's first step to the helped type so
+                // `Self.X` looks up X on TBar (the helped type), not on the helper itself.
+                var selfType: PascalTypeDefinition? = containingClass
+                if (containingClass != null && containingClass.isHelper) {
+                    val helpedName = containingClass.helpedTypeName
+                    if (!helpedName.isNullOrBlank()) {
+                        val helped = getTypeOf(containingClass, originFile, helpedName)
+                        if (helped != null) {
+                            selfType = helped
+                            maybeLog("[MemberTraversal] Self in helper '${containingClass.name}' -> helped type '${helped.name}'", originFile)
+                        }
+                    }
+                }
+                results[0] = selfType
+                currentType = selfType
+                currentOwnerName = selfType?.name
+                maybeLog("[MemberTraversal] first resolved as Self -> class '${selfType?.name}'", originFile)
             }
             // Check for Result keyword as first element
             else if (first.node.elementType == PascalTokenTypes.KW_RESULT) {
@@ -1518,6 +1532,27 @@ object MemberChainResolver {
                 if (routine != null) {
                     LOG.debug("[GenericChain] findMemberInType: found '$name' via validated routine index in owner='$ownerName'")
                     return routine
+                }
+            }
+        }
+
+        // 4. Fallback: consult class/record helpers for this type and its ancestors.
+        // A helper for TBar (and a helper for any of TBar's ancestors) surfaces its
+        // members on TBar. Helpers themselves don't have helpers, so skip the tier
+        // if typeDef is already a helper to avoid re-entering this path.
+        if (!DumbService.isDumb(project) && !typeDef.isHelper) {
+            for (ownerType in owners) {
+                val ownerName = ownerType.name ?: continue
+                val helpers = nl.akiar.pascal.stubs.PascalHelperIndex.findHelpersFor(
+                    ownerName, callSiteFile, callSiteFile.textLength.coerceAtMost(1)
+                )
+                for (helper in helpers) {
+                    // Look at the helper's own declarations only (no further inheritance/helpers)
+                    val m = findMemberInType(helper, name, callSiteFile, includeAncestors = false)
+                    if (m != null) {
+                        LOG.debug("[GenericChain] findMemberInType: found '$name' via helper '${helper.name}' for owner='$ownerName'")
+                        return m
+                    }
                 }
             }
         }

@@ -86,6 +86,9 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
             }
         }
 
+        // Track seen member names so helper members don't duplicate built-in ones.
+        java.util.Set<String> seenMembers = new java.util.HashSet<>();
+
         // Get all members (including inherited)
         List<PsiElement> members = typeDef.getMembers(true);
         for (PsiElement member : members) {
@@ -105,11 +108,63 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
 
             LookupElementBuilder lookup = createMemberLookup(member, name, typeArgMap);
             if (lookup != null) {
+                seenMembers.add(name.toLowerCase());
                 result.addElement(PrioritizedLookupElement.withPriority(lookup, getPriority(member)));
             }
         }
 
+        // Append class/record helper members targeting this type or any of its ancestors.
+        // Helpers don't apply to themselves, so skip when typeDef is a helper.
+        if (!typeDef.isHelper()) {
+            addHelperMembers(typeDef, file, seenMembers, typeArgMap, result);
+        }
+
         result.stopHere();
+    }
+
+    /**
+     * Add completion items from class/record helpers targeting `typeDef` and its ancestors.
+     * Skips any name already in `seenMembers` so helper members don't shadow intrinsic ones.
+     */
+    private void addHelperMembers(PascalTypeDefinition typeDef,
+                                  PsiFile file,
+                                  java.util.Set<String> seenMembers,
+                                  Map<String, String> typeArgMap,
+                                  CompletionResultSet result) {
+        List<String> targetNames = new ArrayList<>();
+        if (typeDef.getName() != null) targetNames.add(typeDef.getName());
+        for (PascalTypeDefinition ancestor :
+                nl.akiar.pascal.resolution.InheritanceChainCache.getAllAncestorTypes(typeDef)) {
+            if (ancestor.getName() != null) targetNames.add(ancestor.getName());
+        }
+
+        java.util.Set<String> seenHelpers = new java.util.HashSet<>();
+        int offset = file.getTextLength() > 0 ? 1 : 0;
+
+        for (String targetName : targetNames) {
+            for (PascalTypeDefinition helper :
+                    nl.akiar.pascal.stubs.PascalHelperIndex.findHelpersFor(targetName, file, offset)) {
+                String helperKey = helper.getUnitName() + "." + helper.getName();
+                if (!seenHelpers.add(helperKey.toLowerCase())) continue;
+
+                for (PsiElement member : helper.getMembers(false)) {
+                    String name;
+                    if (member instanceof PsiNameIdentifierOwner named) {
+                        name = named.getName();
+                    } else {
+                        continue;
+                    }
+                    if (name == null || name.isEmpty()) continue;
+                    if (!seenMembers.add(name.toLowerCase())) continue;
+                    if (!isAccessible(member, file)) continue;
+
+                    LookupElementBuilder lookup = createMemberLookup(member, name, typeArgMap);
+                    if (lookup != null) {
+                        result.addElement(PrioritizedLookupElement.withPriority(lookup, getPriority(member)));
+                    }
+                }
+            }
+        }
     }
 
     /**

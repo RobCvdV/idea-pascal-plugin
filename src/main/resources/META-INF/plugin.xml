@@ -124,6 +124,9 @@
         <!-- Pascal Implementors Index (reverse lookup: ancestor name → implementing types) -->
         <stubIndex implementation="nl.akiar.pascal.stubs.PascalImplementorsIndex"/>
 
+        <!-- Pascal Helper Index (reverse lookup: helped type name → class/record helpers) -->
+        <stubIndex implementation="nl.akiar.pascal.stubs.PascalHelperIndex"/>
+
         <!-- Pascal Scoped Indexes (Milestone A) -->
         <stubIndex implementation="nl.akiar.pascal.stubs.PascalScopedRoutineIndex"/>
         <stubIndex implementation="nl.akiar.pascal.stubs.PascalScopedPropertyIndex"/>

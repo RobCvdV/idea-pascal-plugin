@@ -20,22 +20,31 @@ public class PascalTypeStubImpl extends StubBase<PascalTypeDefinition> implement
     private final List<String> typeParameters;
     private final List<String> allAncestorNames;
     private final List<String> enumValueNames;
+    private final String helpedTypeName;
 
     public PascalTypeStubImpl(StubElement<?> parent, @Nullable String name, @NotNull TypeKind typeKind,
                               @NotNull List<String> typeParameters, @NotNull List<String> allAncestorNames,
-                              @NotNull List<String> enumValueNames) {
+                              @NotNull List<String> enumValueNames, @Nullable String helpedTypeName) {
         super(parent, PascalElementTypes.TYPE_DEFINITION);
         this.name = name;
         this.typeKind = typeKind;
         this.typeParameters = typeParameters;
         this.allAncestorNames = allAncestorNames;
         this.enumValueNames = enumValueNames;
+        this.helpedTypeName = helpedTypeName;
+    }
+
+    /** Backwards-compatible constructor for non-helper types. */
+    public PascalTypeStubImpl(StubElement<?> parent, @Nullable String name, @NotNull TypeKind typeKind,
+                              @NotNull List<String> typeParameters, @NotNull List<String> allAncestorNames,
+                              @NotNull List<String> enumValueNames) {
+        this(parent, name, typeKind, typeParameters, allAncestorNames, enumValueNames, null);
     }
 
     /** Backwards-compatible constructor without enum value names — used only by older deserialization paths. */
     public PascalTypeStubImpl(StubElement<?> parent, @Nullable String name, @NotNull TypeKind typeKind,
                               @NotNull List<String> typeParameters, @NotNull List<String> allAncestorNames) {
-        this(parent, name, typeKind, typeParameters, allAncestorNames, Collections.emptyList());
+        this(parent, name, typeKind, typeParameters, allAncestorNames, Collections.emptyList(), null);
     }
 
     @Override
@@ -72,5 +81,11 @@ public class PascalTypeStubImpl extends StubBase<PascalTypeDefinition> implement
     @NotNull
     public List<String> getEnumValueNames() {
         return enumValueNames;
+    }
+
+    @Override
+    @Nullable
+    public String getHelpedTypeName() {
+        return helpedTypeName;
     }
 }

@@ -39,6 +39,9 @@ public class PascalStubFileElementType extends IStubFileElementType<PsiFileStub<
         // 17: store enum value names on PascalTypeStub so unqualified
         //     enum-value resolution is a stub-index lookup (no AST load
         //     required for highlighting cross-file enum values).
-        return super.getStubVersion() + 17;
+        // 18: store helpedTypeName on PascalTypeStub so class/record helpers
+        //     can be indexed by their target type and Self / member-chain
+        //     resolution can route to the helped type.
+        return super.getStubVersion() + 18;
     }
 }

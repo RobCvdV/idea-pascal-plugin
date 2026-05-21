@@ -840,10 +840,91 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
                 return;
             }
         }
-        
+
         for (ASTNode child = node.getFirstChildNode(); child != null; child = child.getTreeNext()) {
             containsBodyToken(child, state);
             if (state[1]) break;
+        }
+    }
+
+    @Override
+    public boolean isHelper() {
+        return getHelpedTypeName() != null;
+    }
+
+    @Override
+    @Nullable
+    public String getHelpedTypeName() {
+        PascalTypeStub stub = getGreenStub();
+        if (stub != null) {
+            return stub.getHelpedTypeName();
+        }
+        return extractHelperTargetFromAst();
+    }
+
+    /**
+     * AST fallback for getHelpedTypeName. Walks the type's AST leaves in
+     * document order and runs a small state machine to find KW_HELPER, then
+     * KW_FOR (past any parenthesised helper-extends clause), then the next
+     * IDENTIFIER or TYPE_REFERENCE — the helped type.
+     */
+    @Nullable
+    private String extractHelperTargetFromAst() {
+        TypeKind kind = getTypeKind();
+        if (kind != TypeKind.CLASS && kind != TypeKind.RECORD) return null;
+        ASTNode root = getNode();
+        if (root == null) return null;
+        int[] state = {0, 0}; // state[0]: phase 0=BEFORE_HELPER 1=AFTER_HELPER 2=AFTER_FOR ; state[1]: parenDepth
+        String[] result = {null};
+        walkHelperTarget(root, state, result);
+        return result[0];
+    }
+
+    private void walkHelperTarget(ASTNode node, int[] state, String[] result) {
+        if (result[0] != null) return;
+        IElementType t = node.getElementType();
+
+        // Capture TYPE_REFERENCE as a composite before descending into children
+        if (state[0] == 2 && t == nl.akiar.pascal.psi.PascalElementTypes.TYPE_REFERENCE) {
+            PsiElement psi = node.getPsi();
+            if (psi instanceof nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) {
+                String name = ((nl.akiar.pascal.psi.impl.PascalTypeReferenceElement) psi).getReferencedTypeName();
+                if (name != null) {
+                    int lt = name.indexOf('<');
+                    if (lt > 0) name = name.substring(0, lt);
+                    int dot = name.lastIndexOf('.');
+                    if (dot >= 0) name = name.substring(dot + 1);
+                    result[0] = name;
+                }
+            }
+            return;
+        }
+
+        if (node.getFirstChildNode() == null) {
+            // Leaf
+            if (state[0] == 0) {
+                if (t == PascalTokenTypes.KW_HELPER) state[0] = 1;
+            } else if (state[0] == 1) {
+                if (t == PascalTokenTypes.LPAREN) state[1]++;
+                else if (t == PascalTokenTypes.RPAREN) state[1]--;
+                else if (state[1] == 0 && t == PascalTokenTypes.KW_FOR) state[0] = 2;
+            } else if (state[0] == 2) {
+                if (t == PascalTokenTypes.IDENTIFIER) {
+                    String name = node.getText();
+                    int lt = name.indexOf('<');
+                    if (lt > 0) name = name.substring(0, lt);
+                    int dot = name.lastIndexOf('.');
+                    if (dot >= 0) name = name.substring(dot + 1);
+                    result[0] = name;
+                } else if (t == PascalTokenTypes.KW_STRING) {
+                    // `record helper for String` — `String` lexes as KW_STRING, not IDENTIFIER.
+                    result[0] = node.getText();
+                }
+            }
+            return;
+        }
+        for (ASTNode child = node.getFirstChildNode(); child != null && result[0] == null; child = child.getTreeNext()) {
+            walkHelperTarget(child, state, result);
         }
     }
 }

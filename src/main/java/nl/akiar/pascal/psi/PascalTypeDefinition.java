@@ -104,4 +104,19 @@ public interface PascalTypeDefinition extends PsiNameIdentifierOwner, StubBasedP
      * @return true if this is a forward declaration, false otherwise
      */
     boolean isForwardDeclaration();
+
+    /**
+     * True iff this is a class or record helper: {@code TFoo = class helper for TBar}
+     * or {@code TFoo = record helper for TBar}. Equivalent to
+     * {@code getHelpedTypeName() != null}.
+     */
+    boolean isHelper();
+
+    /**
+     * For a class/record helper, the base name of the helped type
+     * ({@code "TBar"} for {@code TFoo = class helper for TBar}). Returns null
+     * for any non-helper type. Generic args and unit prefixes are stripped.
+     */
+    @Nullable
+    String getHelpedTypeName();
 }

@@ -1540,17 +1540,24 @@ object MemberChainResolver {
         // A helper for TBar (and a helper for any of TBar's ancestors) surfaces its
         // members on TBar. Helpers themselves don't have helpers, so skip the tier
         // if typeDef is already a helper to avoid re-entering this path.
+        //
+        // The uses-clause check runs at `callSiteFile.textLength` (past everything)
+        // so helpers imported in the implementation `uses` clause are visible too —
+        // the common pattern for internal helper units in Delphi codebases.
         if (!DumbService.isDumb(project) && !typeDef.isHelper) {
+            val helperLookupOffset = callSiteFile.textLength
             for (ownerType in owners) {
                 val ownerName = ownerType.name ?: continue
                 val helpers = nl.akiar.pascal.stubs.PascalHelperIndex.findHelpersFor(
-                    ownerName, callSiteFile, callSiteFile.textLength.coerceAtMost(1)
+                    ownerName, callSiteFile, helperLookupOffset
                 )
+                if (helpers.isEmpty()) continue
+                LOG.info("[Helper] findMemberInType: found ${helpers.size} helper(s) for '$ownerName' from '${callSiteFile.name}': ${helpers.joinToString { "${it.name}(${it.unitName})" }}")
                 for (helper in helpers) {
                     // Look at the helper's own declarations only (no further inheritance/helpers)
                     val m = findMemberInType(helper, name, callSiteFile, includeAncestors = false)
                     if (m != null) {
-                        LOG.debug("[GenericChain] findMemberInType: found '$name' via helper '${helper.name}' for owner='$ownerName'")
+                        LOG.info("[Helper] findMemberInType: resolved '$name' via helper '${helper.name}' for owner='$ownerName'")
                         return m
                     }
                 }

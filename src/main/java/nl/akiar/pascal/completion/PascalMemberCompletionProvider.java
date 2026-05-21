@@ -139,7 +139,9 @@ public class PascalMemberCompletionProvider extends CompletionProvider<Completio
         }
 
         java.util.Set<String> seenHelpers = new java.util.HashSet<>();
-        int offset = file.getTextLength() > 0 ? 1 : 0;
+        // Use the end of file so helpers imported in the implementation `uses`
+        // clause are visible too — same convention as MemberChainResolver tier 4.
+        int offset = file.getTextLength();
 
         for (String targetName : targetNames) {
             for (PascalTypeDefinition helper :

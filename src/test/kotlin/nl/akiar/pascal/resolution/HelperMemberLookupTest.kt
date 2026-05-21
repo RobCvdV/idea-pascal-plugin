@@ -63,6 +63,58 @@ class HelperMemberLookupTest : BasePlatformTestCase() {
         assertEquals("TRideHelper", resolved.containingClassName)
     }
 
+    fun testHelperMethodResolvesWhenImportedInImplementationUses() {
+        // The common real-world pattern: helper imported in the implementation `uses`
+        // (not the interface), called from a procedure body. The Layer 3b lookup runs
+        // at callSiteFile.textLength so impl-section uses are visible.
+        myFixture.configureByText("Rides.pas", """
+            unit Rides;
+            interface
+            type
+              TRide = class
+              public
+                Mileage: Integer;
+              end;
+            implementation
+            end.
+        """.trimIndent())
+
+        myFixture.configureByText("RideHelpers.pas", """
+            unit RideHelpers;
+            interface
+            uses Rides;
+            type
+              TRideHelper = class helper for TRide
+              public
+                procedure FillEoRide(AStuff: Integer);
+              end;
+            implementation
+            procedure TRideHelper.FillEoRide(AStuff: Integer); begin end;
+            end.
+        """.trimIndent())
+
+        val main = myFixture.configureByText("Main.pas", """
+            unit Main;
+            interface
+            uses Rides;
+            implementation
+            uses RideHelpers;
+            procedure DoTest;
+            var
+              LRide: TRide;
+            begin
+              LRide.FillEo<caret>Ride(42);
+            end;
+            end.
+        """.trimIndent())
+
+        val element = findIdentifierAtCaret(main)!!
+        val resolved = resolveViaReferences(element)
+        assertNotNull("FillEoRide should resolve when RideHelpers is imported in the impl uses clause", resolved)
+        assertTrue(resolved is PascalRoutine)
+        assertEquals("FillEoRide", (resolved as PascalRoutine).name)
+    }
+
     fun testHelperMethodOnAncestorAppliesToDescendant() {
         // helper for TBase should also resolve on TDerived
         myFixture.configureByText("Base.pas", """

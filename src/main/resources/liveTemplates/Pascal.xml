@@ -1,0 +1,130 @@
+<templateSet group="Pascal">
+
+  <template name="for"
+            value="for $I$ := $LO$ to $HI$ do$END$"
+            description="for I := LO to HI do"
+            toReformat="false"
+            toShortenFQNames="false">
+    <variable name="I" expression="" defaultValue="&quot;I&quot;" alwaysStopAt="true"/>
+    <variable name="LO" expression="" defaultValue="&quot;0&quot;" alwaysStopAt="true"/>
+    <variable name="HI" expression="" defaultValue="" alwaysStopAt="true"/>
+    <context>
+      <option name="PASCAL_STATEMENT" value="true"/>
+    </context>
+  </template>
+
+  <template name="forin"
+            value="for $E$ in $C$ do$END$"
+            description="for E in C do"
+            toReformat="false"
+            toShortenFQNames="false">
+    <variable name="E" expression="" defaultValue="&quot;item&quot;" alwaysStopAt="true"/>
+    <variable name="C" expression="" defaultValue="" alwaysStopAt="true"/>
+    <context>
+      <option name="PASCAL_STATEMENT" value="true"/>
+    </context>
+  </template>
+
+  <template name="try"
+            value="try&#10;  $END$&#10;except&#10;end;"
+            description="try..except"
+            toReformat="false"
+            toShortenFQNames="false">
+    <context>
+      <option name="PASCAL_STATEMENT" value="true"/>
+    </context>
+  </template>
+
+  <template name="tryf"
+            value="try&#10;  $END$&#10;finally&#10;  $OBJ$.Free;&#10;end;"
+            description="try..finally..Free"
+            toReformat="false"
+            toShortenFQNames="false">
+    <variable name="OBJ" expression="" defaultValue="" alwaysStopAt="true"/>
+    <context>
+      <option name="PASCAL_STATEMENT" value="true"/>
+    </context>
+  </template>
+
+  <template name="tryx"
+            value="try&#10;  $END$&#10;except&#10;  on E: Exception do&#10;    ;&#10;end;"
+            description="try..except on E"
+            toReformat="false"
+            toShortenFQNames="false">
+    <context>
+      <option name="PASCAL_STATEMENT" value="true"/>
+    </context>
+  </template>
+
+  <template name="case"
+            value="case $E$ of&#10;  $V$: $END$;&#10;end;"
+            description="case..of"
+            toReformat="false"
+            toShortenFQNames="false">
+    <variable name="E" expression="" defaultValue="" alwaysStopAt="true"/>
+    <variable name="V" expression="" defaultValue="" alwaysStopAt="true"/>
+    <context>
+      <option name="PASCAL_STATEMENT" value="true"/>
+    </context>
+  </template>
+
+  <template name="ifb"
+            value="if $COND$ then&#10;begin&#10;  $END$&#10;end;"
+            description="if..then begin..end"
+            toReformat="false"
+            toShortenFQNames="false">
+    <variable name="COND" expression="" defaultValue="" alwaysStopAt="true"/>
+    <context>
+      <option name="PASCAL_STATEMENT" value="true"/>
+    </context>
+  </template>
+
+  <template name="class"
+            value="T$NAME$ = class$ANCESTOR$&#10;private&#10;  $END$&#10;public&#10;end;"
+            description="class declaration"
+            toReformat="false"
+            toShortenFQNames="false">
+    <variable name="NAME" expression="" defaultValue="&quot;MyClass&quot;" alwaysStopAt="true"/>
+    <variable name="ANCESTOR" expression="" defaultValue="&quot;(TObject)&quot;" alwaysStopAt="true"/>
+    <context>
+      <option name="PASCAL_DECLARATION" value="true"/>
+    </context>
+  </template>
+
+  <template name="proc"
+            value="procedure $NAME$($PARAMS$);&#10;begin&#10;  $END$&#10;end;"
+            description="procedure declaration"
+            toReformat="false"
+            toShortenFQNames="false">
+    <variable name="NAME" expression="" defaultValue="&quot;DoSomething&quot;" alwaysStopAt="true"/>
+    <variable name="PARAMS" expression="" defaultValue="" alwaysStopAt="true"/>
+    <context>
+      <option name="PASCAL_DECLARATION" value="true"/>
+    </context>
+  </template>
+
+  <template name="func"
+            value="function $NAME$($PARAMS$): $RETURN$;&#10;begin&#10;  $END$&#10;end;"
+            description="function declaration"
+            toReformat="false"
+            toShortenFQNames="false">
+    <variable name="NAME" expression="" defaultValue="&quot;DoSomething&quot;" alwaysStopAt="true"/>
+    <variable name="PARAMS" expression="" defaultValue="" alwaysStopAt="true"/>
+    <variable name="RETURN" expression="" defaultValue="&quot;Boolean&quot;" alwaysStopAt="true"/>
+    <context>
+      <option name="PASCAL_DECLARATION" value="true"/>
+    </context>
+  </template>
+
+  <template name="unit"
+            value="unit $NAME$;&#10;&#10;interface&#10;&#10;$END$&#10;&#10;implementation&#10;&#10;end."
+            description="unit skeleton"
+            toReformat="false"
+            toShortenFQNames="false">
+    <variable name="NAME" expression="fileNameWithoutExtension()" defaultValue="" alwaysStopAt="false"/>
+    <context>
+      <option name="PASCAL_TOP_LEVEL" value="true"/>
+    </context>
+  </template>
+
+</templateSet>

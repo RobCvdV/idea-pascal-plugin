@@ -198,6 +198,17 @@
         <!-- Parameter info popup -->
         <codeInsight.parameterInfo language="ObjectPascal"
                                    implementationClass="nl.akiar.pascal.codeinsight.PascalParameterInfoHandler"/>
+
+        <!-- Live templates -->
+        <defaultLiveTemplates file="liveTemplates/Pascal"/>
+        <liveTemplateContext contextId="PASCAL"
+                             implementation="nl.akiar.pascal.livetemplate.PascalLiveTemplateContext$Generic"/>
+        <liveTemplateContext contextId="PASCAL_STATEMENT" baseContextId="PASCAL"
+                             implementation="nl.akiar.pascal.livetemplate.PascalLiveTemplateContext$Statement"/>
+        <liveTemplateContext contextId="PASCAL_DECLARATION" baseContextId="PASCAL"
+                             implementation="nl.akiar.pascal.livetemplate.PascalLiveTemplateContext$Declaration"/>
+        <liveTemplateContext contextId="PASCAL_TOP_LEVEL" baseContextId="PASCAL"
+                             implementation="nl.akiar.pascal.livetemplate.PascalLiveTemplateContext$TopLevel"/>
     </extensions>
 
     <actions>

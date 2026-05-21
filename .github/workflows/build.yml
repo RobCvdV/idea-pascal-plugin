@@ -26,6 +26,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build Plugin
+        env:
+          # Source the sonar-delphi JAR from its upstream release; the file is
+          # intentionally not committed to this repo (size + license).
+          SONAR_DELPHI_URL: https://github.com/integrated-application-development/sonar-delphi/releases/download/v1.18.3/sonar-delphi-plugin-1.18.3.jar
         run: ./gradlew buildPlugin
 
       - name: Upload Artifact

@@ -112,9 +112,22 @@ class PascalScopeAnnotator : Annotator {
             if (typeResult.outOfScopeTypes.all { it.unitName.equals("system", ignoreCase = true) }) return
 
             val error = typeResult.getErrorMessage() ?: return
-            holder.newAnnotation(HighlightSeverity.ERROR, error)
-                .range(element)
-                .create()
+            var builder = holder.newAnnotation(HighlightSeverity.ERROR, error).range(element)
+            // Offer "Add unit 'X' to uses clause" for each distinct unit that defines this type.
+            // Prefer the unit's actual file name (preserves casing) over the lowercased index key.
+            val seenUnits = LinkedHashSet<String>()
+            for (outOfScope in typeResult.outOfScopeTypes) {
+                val rawUnit = outOfScope.unitName ?: continue
+                if (rawUnit.isBlank()) continue
+                if (rawUnit.equals("system", ignoreCase = true)) continue // implicit
+                if (!seenUnits.add(rawUnit.lowercase())) continue
+                if (seenUnits.size > 8) break // sanity cap
+                val displayUnit = outOfScope.containingFile?.name
+                    ?.removeSuffix(".pas")?.removeSuffix(".PAS")
+                    ?.takeIf { it.isNotBlank() } ?: rawUnit
+                builder = builder.withFix(nl.akiar.pascal.quickfix.AddUnitToUsesClauseFix(displayUnit, offset))
+            }
+            builder.create()
         } catch (e: ProcessCanceledException) {
             throw e
         } catch (e: IndexNotReadyException) {

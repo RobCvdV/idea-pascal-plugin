@@ -542,47 +542,66 @@ public class PascalTypeDefinitionImpl extends StubBasedPsiElementBase<PascalType
         }
 
         // Step 2a: First, try to find in the same file (fast path, no index needed)
-        // This is important for test fixtures and when the superclass is in the same unit
+        // This is important for test fixtures and when the superclass is in the same unit.
+        // When both a forward decl and a full def exist in the same unit, prefer the full def
+        // so member lookup on ancestors finds the actual members.
         PsiFile containingFile = getContainingFile();
         if (containingFile != null) {
             Collection<PascalTypeDefinition> sameFileTypes =
                     PsiTreeUtil.findChildrenOfType(containingFile, PascalTypeDefinition.class);
+            List<PascalTypeDefinition> matches = new ArrayList<>();
             for (PascalTypeDefinition typeDef : sameFileTypes) {
                 if (typeDef != this && lookupName.equalsIgnoreCase(typeDef.getName())) {
-                    return typeDef;
+                    matches.add(typeDef);
                 }
             }
+            PascalTypeDefinition picked = pickPreferringFullDefinition(matches);
+            if (picked != null) return picked;
         }
 
         // Step 2b: Fall back to transitive dependency resolution for cross-unit lookups
         nl.akiar.pascal.stubs.PascalTypeIndex.TypeLookupResult result =
                 nl.akiar.pascal.stubs.PascalTypeIndex.findTypeWithTransitiveDeps(
                         lookupName, containingFile, getTextOffset());
-        if (!result.getInScopeTypes().isEmpty()) {
-            return result.getInScopeTypes().get(0);
-        }
+        PascalTypeDefinition transitive = pickPreferringFullDefinition(result.getInScopeTypes());
+        if (transitive != null) return transitive;
 
         // Step 2c: Try direct index lookup without uses validation (for types accessible
         // through implicit dependencies or re-exports)
         nl.akiar.pascal.stubs.PascalTypeIndex.TypeLookupResult directResult =
                 nl.akiar.pascal.stubs.PascalTypeIndex.findTypesWithUsesValidation(
                         lookupName, containingFile, getTextOffset());
-        if (!directResult.getInScopeTypes().isEmpty()) {
+        PascalTypeDefinition direct = pickPreferringFullDefinition(directResult.getInScopeTypes());
+        if (direct != null) {
             LOG.info("[GenericChain] getSuperClass: found '" + lookupName + "' via direct uses validation for " + getName());
-            return directResult.getInScopeTypes().get(0);
+            return direct;
         }
 
         // Step 2d: Global fallback - search all indexed types
         Collection<PascalTypeDefinition> globalTypes =
                 nl.akiar.pascal.stubs.PascalTypeIndex.findTypes(lookupName, getProject());
-        if (!globalTypes.isEmpty()) {
-            PascalTypeDefinition globalHit = globalTypes.iterator().next();
+        PascalTypeDefinition globalHit = pickPreferringFullDefinition(globalTypes);
+        if (globalHit != null) {
             LOG.info("[GenericChain] getSuperClass: found '" + lookupName + "' via global index for " + getName() + " -> " + globalHit.getUnitName());
             return globalHit;
         }
 
         LOG.info("[GenericChain] getSuperClass: FAILED to resolve '" + lookupName + "' (raw='" + superClassName + "') for type " + getName() + " in unit " + getUnitName());
         return null;
+    }
+
+    /**
+     * Pick the best candidate, preferring a full definition over a forward declaration.
+     * Returns null when the collection is empty.
+     */
+    @Nullable
+    private static PascalTypeDefinition pickPreferringFullDefinition(@NotNull Collection<PascalTypeDefinition> candidates) {
+        PascalTypeDefinition forward = null;
+        for (PascalTypeDefinition t : candidates) {
+            if (!t.isForwardDeclaration()) return t;
+            if (forward == null) forward = t;
+        }
+        return forward;
     }
 
     /**

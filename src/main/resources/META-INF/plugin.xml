@@ -190,6 +190,10 @@
         <postStartupActivity implementation="nl.akiar.pascal.project.PascalProjectInitializationActivity"/>
         <!-- Clear caches after indices are ready and on roots change -->
         <postStartupActivity implementation="nl.akiar.pascal.startup.PascalSmartModeRefresher"/>
+
+        <!-- Surround With -->
+        <lang.surroundDescriptor language="ObjectPascal"
+                                 implementationClass="nl.akiar.pascal.surround.PascalSurroundDescriptor"/>
     </extensions>
 
     <actions>

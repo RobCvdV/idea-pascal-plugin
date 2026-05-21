@@ -1213,9 +1213,11 @@ object MemberChainResolver {
                     val chain = collectChain(identifierPsi)
                     if (chain.isNotEmpty()) {
                         val resolved = resolveChainElements(chain, originFile)
-                        // Extract type name from the LAST resolved element
-                        val lastResolvedIndex = resolved.resolvedElements.indexOfLast { it != null }
-                        val lastResolved = if (lastResolvedIndex >= 0) resolved.resolvedElements[lastResolvedIndex] else null
+                        // Type inference must reflect the final member of the chain. If it
+                        // failed to resolve, the variable's type is unknown — do NOT fall
+                        // back to an earlier chain step's type (would leak the wrong type).
+                        val lastResolvedIndex = resolved.resolvedElements.size - 1
+                        val lastResolved = resolved.resolvedElements.getOrNull(lastResolvedIndex)
                         if (lastResolved != null) {
                             var typeName = when (lastResolved) {
                                 is PascalRoutine -> lastResolved.returnTypeName
